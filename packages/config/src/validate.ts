@@ -141,3 +141,7 @@ export function validateConfig(input: unknown): ConfigValidation {
   if (issues.length === 0 && parsed.success) return { ok: true, config: parsed.data };
   return { ok: false, errors: issues.map((i) => `${formatPath(i.path)}: ${i.message}`) };
 }
+
+/** Fill `{{name}}` variables in config text (consent notice, emergency reply). Unknown ones are left as-is. */
+export const fillVariables = (text: string, values: Record<string, string>) =>
+  text.replace(VARIABLE, (match, name: string) => values[name] ?? match);

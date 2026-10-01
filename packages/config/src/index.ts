@@ -3,6 +3,7 @@ import { realEstatePreset } from './presets/real-estate.ts';
 import type { TenantConfig } from './schema.ts';
 
 export * from './schema.ts';
+export * from './templates.ts';
 export * from './validate.ts';
 export { CLINIC_VARIANTS, clinicPreset, type ClinicVariant } from './presets/clinic.ts';
 export { realEstatePreset } from './presets/real-estate.ts';

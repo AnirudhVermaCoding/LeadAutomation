@@ -1,4 +1,4 @@
-import type { TenantConfig } from '../schema.ts';
+import { DEFAULT_OPT_OUT_KEYWORDS, type TenantConfig } from '../schema.ts';
 
 export const CLINIC_VARIANTS = ['dental', 'skin', 'hair'] as const;
 export type ClinicVariant = (typeof CLINIC_VARIANTS)[number];
@@ -85,6 +85,7 @@ export function clinicPreset(variant: ClinicVariant, businessName = 'Demo Clinic
       sources: ['form', 'meta_lead_ads', 'click_to_whatsapp', 'api', 'csv'],
       consent_notice_text:
         'By submitting, you agree that {{business_name}} may contact you on WhatsApp, SMS or email about your enquiry and appointments. Reply STOP anytime to opt out.',
+      opt_out_keywords: [...DEFAULT_OPT_OUT_KEYWORDS],
     },
     qualification: {
       max_turns: 8,

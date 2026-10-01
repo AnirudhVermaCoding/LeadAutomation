@@ -41,6 +41,7 @@ export const TenantConfigSchema = z.strictObject({
   intake: z.strictObject({
     sources: z.array(z.enum(INTAKE_SOURCES)).min(1),
     consent_notice_text: z.string().trim().min(20, 'write the full consent notice shown to the lead'),
+    opt_out_keywords: z.array(nonEmpty).min(1, 'add at least one opt-out keyword, e.g. "stop"'),
   }),
   qualification: z.strictObject({
     max_turns: z.int().min(1).max(20),
@@ -93,3 +94,19 @@ export const TenantConfigSchema = z.strictObject({
 
 export type TenantConfig = z.infer<typeof TenantConfigSchema>;
 export type Language = z.infer<typeof Language>;
+
+/** Default opt-out keywords (English, Hinglish, Hindi). One-word ones must be the whole message. */
+export const DEFAULT_OPT_OUT_KEYWORDS = [
+  'stop',
+  'unsubscribe',
+  'stop messages',
+  'stop messaging',
+  'opt out',
+  'band karo',
+  'message band karo',
+  'mat bhejo',
+  'बंद',
+  'बंद करो',
+  'मैसेज बंद करो',
+  'मत भेजो',
+];

@@ -1,4 +1,4 @@
-import type { TenantConfig } from '../schema.ts';
+import { DEFAULT_OPT_OUT_KEYWORDS, type TenantConfig } from '../schema.ts';
 
 const SAMPLE = 'SAMPLE — replace during onboarding.';
 
@@ -23,6 +23,7 @@ export function realEstatePreset(businessName = 'Demo Realty'): TenantConfig {
       sources: ['form', 'meta_lead_ads', 'click_to_whatsapp', 'api', 'csv'],
       consent_notice_text:
         'By submitting, you agree that {{business_name}} may contact you on WhatsApp, SMS or email about properties and site visits. Reply STOP anytime to opt out.',
+      opt_out_keywords: [...DEFAULT_OPT_OUT_KEYWORDS],
     },
     qualification: {
       max_turns: 8,

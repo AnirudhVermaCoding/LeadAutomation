@@ -1,10 +1,10 @@
-import { PRESETS, type PresetKey } from '@instantlead/config';
+import { PRESETS, TEMPLATE_KEYS, TEMPLATE_LANGUAGES, TEMPLATES, type PresetKey } from '@instantlead/config';
 import type { Clock } from '@instantlead/core';
 import { and, eq, isNull } from 'drizzle-orm';
 import { generateApiKey, hashApiKey } from '../api-keys.ts';
 import { audit, type Actor } from '../audit.ts';
 import type { Db } from '../db/client.ts';
-import { apiKeys, tenantConfigs, tenants, users, type UserRole } from '../db/schema.ts';
+import { apiKeys, templates, tenantConfigs, tenants, users, type UserRole } from '../db/schema.ts';
 import type { Auth } from './auth.ts';
 
 export interface NewUser {
@@ -75,6 +75,28 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         .orderBy(tenants.name);
     },
 
+    /** Webhook / hosted-form routing: which tenant owns this WhatsApp number, Facebook page or form? */
+    async findTenantIdBy(field: 'waPhoneNumberId' | 'metaPageId' | 'formKey', value: string) {
+      const [row] = await systemDb.select({ id: tenants.id }).from(tenants).where(eq(tenants[field], value));
+      return row?.id ?? null;
+    },
+
+    async getTenantRouting(tenantId: string) {
+      const [row] = await systemDb
+        .select({
+          waPhoneNumberId: tenants.waPhoneNumberId,
+          metaPageId: tenants.metaPageId,
+          formKey: tenants.formKey,
+        })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId));
+      return row ?? null;
+    },
+
+    async setTenantRouting(tenantId: string, routing: { waPhoneNumberId?: string; metaPageId?: string }) {
+      await systemDb.update(tenants).set(routing).where(eq(tenants.id, tenantId));
+    },
+
     async findTenantBySlug(slug: string) {
       const [row] = await systemDb.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, slug));
       return row ?? null;
@@ -94,6 +116,18 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
           config: PRESETS[input.preset](input.name),
           createdBy: actor.type === 'user' ? actor.id : null,
         });
+        // Every registry template, both languages, starts as a draft the client must get approved.
+        await tx.insert(templates).values(
+          TEMPLATE_KEYS.flatMap((key) =>
+            TEMPLATE_LANGUAGES.map((language) => ({
+              tenantId: t.id,
+              key,
+              language,
+              providerName: TEMPLATES[key].providerName,
+              category: TEMPLATES[key].category,
+            })),
+          ),
+        );
         await audit(tx, clock, actor, {
           tenantId: t.id,
           action: 'tenant.created',

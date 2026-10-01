@@ -1,15 +1,15 @@
 import { buildApp } from './app.ts';
 import { loadEnv } from './env.ts';
-import { decorateRequests, registerAuthRoutes } from './http/auth.ts';
-import { registerRoutes } from './http/routes.ts';
+import { registerHttp } from './http/index.ts';
 import { createAppContext } from './system/context.ts';
+import { startWorkers } from './workers.ts';
 
 const env = loadEnv();
 const ctx = createAppContext(env);
 const app = buildApp({ logLevel: env.LOG_LEVEL, checkDb: ctx.checkDb });
-decorateRequests(app);
-registerAuthRoutes(app, ctx);
-registerRoutes(app, ctx);
+await registerHttp(app, ctx);
+await ctx.start();
+if (env.ROLE !== 'api') await startWorkers(ctx, app.log);
 
 async function shutdown(signal: string) {
   app.log.info({ signal }, 'shutting down');

@@ -5,13 +5,16 @@ import pg from 'pg';
 import { inject } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import { loadEnv } from '../src/env.ts';
-import { decorateRequests, registerAuthRoutes } from '../src/http/auth.ts';
-import { registerRoutes } from '../src/http/routes.ts';
+import { registerHttp } from '../src/http/index.ts';
+import { QUEUES, type JobData } from '../src/jobs.ts';
 import { createAppContext } from '../src/system/context.ts';
+import { importMetaLead, sendFirstReply } from '../src/workers.ts';
 import { APP_DB_PASSWORD, TEMPLATE_DB, dbUrl } from './global-setup.ts';
 
 export const APP_URL = 'http://localhost:3000';
 export const PASSWORD = 'correct-horse-battery';
+export const META_APP_SECRET = 'test-meta-app-secret';
+export const META_VERIFY_TOKEN = 'test-verify-token';
 
 /** Clone the migrated template DB (retrying while a sibling test file is cloning it). */
 async function cloneTemplate(name: string) {
@@ -34,7 +37,9 @@ async function cloneTemplate(name: string) {
 }
 
 /** A fresh database + fully wired app for one test file. */
-export async function createTestContext() {
+export async function createTestContext(
+  opts: { fetch?: typeof globalThis.fetch; allowFakeChannel?: boolean } = {},
+) {
   const info = inject('pg');
   const name = `t_${randomUUID().replaceAll('-', '')}`;
   await cloneTemplate(name);
@@ -47,14 +52,16 @@ export async function createTestContext() {
     DATABASE_OWNER_URL: dbUrl(info, name),
     BETTER_AUTH_SECRET: 'test-only-secret-'.padEnd(48, 'x'),
     SECRETS_KEY: Buffer.alloc(32, 7).toString('base64'),
+    META_APP_SECRET,
+    META_VERIFY_TOKEN,
+    ALLOW_FAKE_CHANNEL: String(opts.allowFakeChannel ?? true),
   });
   const clock = new FakeClock('2026-10-05T04:30:00Z');
-  const ctx = createAppContext(env, clock);
+  const ctx = createAppContext(env, clock, { fetch: opts.fetch });
   const app = buildApp({ logLevel: 'silent', checkDb: ctx.checkDb });
-  decorateRequests(app);
-  registerAuthRoutes(app, ctx);
-  registerRoutes(app, ctx);
+  await registerHttp(app, ctx);
   await app.ready();
+  await ctx.start();
 
   const owner = new pg.Pool({ connectionString: env.DATABASE_OWNER_URL, max: 2 });
 
@@ -64,6 +71,33 @@ export async function createTestContext() {
     clock,
     /** Owner connection for assertions about the database itself. */
     owner,
+    /**
+     * Run every queued job once, synchronously, instead of background workers — tests stay
+     * deterministic. Returns what each handler returned (or threw).
+     */
+    async drainJobs() {
+      const results: { queue: string; data: unknown; result?: unknown; error?: unknown }[] = [];
+      const handlers = {
+        [QUEUES.firstReply]: (d: JobData['first-reply']) => sendFirstReply(ctx, d),
+        [QUEUES.metaLeadgen]: (d: JobData['meta-leadgen']) => importMetaLead(ctx, d),
+      } as Record<string, (d: never) => Promise<unknown>>;
+      for (const [queue, handler] of Object.entries(handlers)) {
+        for (;;) {
+          const jobs = await ctx.boss.fetch<never>(queue, { batchSize: 50 });
+          if (!jobs.length) break;
+          for (const job of jobs) {
+            try {
+              results.push({ queue, data: job.data, result: await handler(job.data) });
+              await ctx.boss.complete(queue, job.id);
+            } catch (error) {
+              results.push({ queue, data: job.data, error });
+              await ctx.boss.fail(queue, job.id, { message: String(error) });
+            }
+          }
+        }
+      }
+      return results;
+    },
     /** Signs in through the real Better Auth endpoint; returns the Cookie header. */
     async signIn(email: string, password = PASSWORD) {
       const res = await app.inject({

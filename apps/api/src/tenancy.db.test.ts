@@ -105,8 +105,8 @@ describe('tenant isolation (RLS)', () => {
     await expect(t.ctx.db.select().from(sessions)).rejects.toThrow(/permission denied/);
   });
 
-  test('withTenant rejects non-uuid tenant ids', () => {
-    expect(() => withTenant(t.ctx.db, "x' or '1'='1", async () => 0)).toThrow(/uuid/);
+  test('withTenant rejects non-uuid tenant ids', async () => {
+    await expect(withTenant(t.ctx.db, "x' or '1'='1", async () => 0)).rejects.toThrow(/uuid/);
   });
 });
 

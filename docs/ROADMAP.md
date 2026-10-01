@@ -18,3 +18,7 @@ Deferred during the build:
 - Move to TypeScript 7 once typescript-eslint supports it.
 - Move to drizzle-orm 1.0 once stable.
 - Re-opt-in flow after opt-out (v0: opt-out is permanent per phone per tenant).
+- Opt-out confirmation message ("you won't hear from us again") — v0 opts out silently.
+- Treat Meta error 131050 (user stopped marketing messages) as a marketing-only suppression.
+- Sync template approval status from Meta's API instead of marking it by hand.
+- ONBOARDING (M8) must cover: Meta webhook URL `/webhooks/meta` + verify token, subscribing the page to `leadgen`, and adding the tenant's consent notice as the Lead Ads form's custom disclaimer.

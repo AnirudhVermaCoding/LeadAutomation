@@ -21,6 +21,16 @@ const EnvSchema = z
     AGENCY_ADMIN_EMAIL: z.email().optional(),
     AGENCY_ADMIN_PASSWORD: z.string().min(12, 'use at least 12 characters').optional(),
     SEED_PASSWORD: z.string().min(12, 'use at least 12 characters').optional(),
+    /** api = HTTP only, worker = jobs only, all = both (single small VPS). */
+    ROLE: z.enum(['all', 'api', 'worker']).default('all'),
+    /** Tenants without WhatsApp credentials use the fake channel. Defaults to on outside production. */
+    ALLOW_FAKE_CHANNEL: z
+      .enum(['true', 'false'])
+      .transform((v) => v === 'true')
+      .optional(),
+    /** Meta app (one app receives webhooks for every client number/page). */
+    META_APP_SECRET: z.string().min(1).optional(),
+    META_VERIFY_TOKEN: z.string().min(1).optional(),
   })
   .superRefine((env, ctx) => {
     // .env.example ships dev-only secrets; never let them reach production.

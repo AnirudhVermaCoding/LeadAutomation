@@ -1,9 +1,11 @@
-import type { TenantConfig } from '@instantlead/config';
+import { LANGUAGES, type TenantConfig } from '@instantlead/config';
+import { LEAD_STATES, TIERS } from '@instantlead/core';
 import { sql } from 'drizzle-orm';
 import {
   boolean,
   integer,
   jsonb,
+  numeric,
   pgPolicy,
   pgRole,
   pgTable,
@@ -54,6 +56,14 @@ export const tenants = pgTable(
     status: text({ enum: ['active', 'paused'] })
       .notNull()
       .default('active'),
+    /** Public id for the hosted lead form (/f/:formKey). Not a secret. */
+    formKey: text()
+      .notNull()
+      .unique()
+      .default(sql`replace(gen_random_uuid()::text, '-', '')`),
+    /** Webhook routing: Meta sends one webhook per app, we find the tenant by these ids. */
+    waPhoneNumberId: text().unique(),
+    metaPageId: text().unique(),
     ...timestamps,
   },
   () => [pgPolicy('tenant_self', { for: 'select', to: appRole, using: sql`id = ${currentTenant}` })],
@@ -178,6 +188,149 @@ export const auditLog = pgTable(
     entityType: text().notNull(),
     entityId: text(),
     details: jsonb().$type<Record<string, unknown>>(),
+    occurredAt: ts().notNull(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);
+
+// ---- M2: leads, consent, messaging ----
+
+export const LEAD_SOURCES = ['form', 'meta_lead_ads', 'click_to_whatsapp', 'whatsapp', 'api', 'csv'] as const;
+export type LeadSource = (typeof LEAD_SOURCES)[number];
+
+export const leads = pgTable(
+  'leads',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    phoneE164: text().notNull(),
+    name: text(),
+    email: text(),
+    language: text({ enum: LANGUAGES }),
+    source: text({ enum: LEAD_SOURCES }).notNull(),
+    sourceDetails: jsonb().$type<Record<string, unknown>>(),
+    state: text({ enum: LEAD_STATES }).notNull().default('new'),
+    tier: text({ enum: TIERS }),
+    aiPaused: boolean().notNull().default(false),
+    receivedAt: ts().notNull(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.tenantId, t.phoneE164), tenantScoped()],
+);
+
+/** Evidence of consent: exact notice text shown, when, where. One row per grant. */
+export const consents = pgTable(
+  'consents',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid()
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    source: text().notNull(),
+    channel: text().notNull().default('whatsapp'),
+    noticeText: text().notNull(),
+    evidence: jsonb().$type<Record<string, unknown>>(),
+    grantedAt: ts().notNull(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);
+
+/**
+ * Opt-outs keyed by an HMAC of the phone (not the phone itself) so they survive DPDP erasure
+ * of the lead: a phone that opted out stays opted out.
+ */
+export const suppressions = pgTable(
+  'suppressions',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    phoneHash: text().notNull(),
+    reason: text({ enum: ['keyword', 'button', 'manual', 'provider'] }).notNull(),
+    optedOutAt: ts().notNull(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.tenantId, t.phoneHash), tenantScoped()],
+);
+
+export const conversations = pgTable(
+  'conversations',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid()
+      .notNull()
+      .unique()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    channel: text().notNull().default('whatsapp'),
+    lastInboundAt: ts(),
+    /** 24 h after the last inbound message; free-form sends are allowed only before this. */
+    windowExpiresAt: ts(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);
+
+export const MESSAGE_STATUSES = ['queued', 'sent', 'delivered', 'read', 'failed', 'received'] as const;
+export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
+
+export const messages = pgTable(
+  'messages',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid()
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    direction: text({ enum: ['in', 'out'] }).notNull(),
+    kind: text({ enum: ['text', 'buttons', 'template', 'button_reply', 'unsupported'] }).notNull(),
+    body: text().notNull(),
+    templateKey: text(),
+    templateCategory: text({ enum: ['utility', 'marketing'] }),
+    language: text(),
+    payload: jsonb().$type<Record<string, unknown>>(),
+    provider: text({ enum: ['fake', 'meta'] }),
+    providerMessageId: text().unique(),
+    /** Makes sends idempotent across job retries, e.g. `first_reply:<leadId>`. */
+    idempotencyKey: text(),
+    status: text({ enum: MESSAGE_STATUSES }).notNull(),
+    error: jsonb().$type<{ code?: number; message: string }>(),
+    estCostInr: numeric({ precision: 10, scale: 4, mode: 'number' }),
+    /** Received (inbound) or sent (outbound) time, from the Clock. */
+    occurredAt: ts().notNull(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.tenantId, t.idempotencyKey), tenantScoped()],
+);
+
+/** Per-tenant approval status / provider names for the templates in packages/config. */
+export const templates = pgTable(
+  'templates',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    key: text().notNull(),
+    language: text().notNull(),
+    providerName: text().notNull(),
+    category: text({ enum: ['utility', 'marketing'] }).notNull(),
+    status: text({ enum: ['draft', 'submitted', 'approved', 'rejected'] })
+      .notNull()
+      .default('draft'),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.tenantId, t.key, t.language), tenantScoped()],
+);
+
+/** Domain events (lead.created, lead.opted_out, …): history now, outbound webhooks later. */
+export const events = pgTable(
+  'events',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    type: text().notNull(),
+    payload: jsonb().$type<Record<string, unknown>>().notNull(),
     occurredAt: ts().notNull(),
     ...timestamps,
   },
