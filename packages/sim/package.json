@@ -1,0 +1,8 @@
+{
+  "name": "@instantlead/sim",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "instantlead-sim": "./src/cli.ts"
+  }
+}

@@ -1,4 +1,5 @@
 import { fillVariables } from '@instantlead/config';
+import { runAssistantTurn } from './assistant/agent.ts';
 import { ChannelError, fetchMetaLead } from '@instantlead/integrations';
 import type { FastifyBaseLogger } from 'fastify';
 import { getActiveConfig } from './config-store.ts';
@@ -79,5 +80,11 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   });
   await ctx.boss.work<JobData['meta-leadgen']>(QUEUES.metaLeadgen, async (jobs) => {
     for (const job of jobs) await runJob(log, QUEUES.metaLeadgen, () => importMetaLead(ctx, job.data));
+  });
+  await ctx.boss.work<JobData['assistant-turn']>(QUEUES.assistantTurn, async (jobs) => {
+    for (const job of jobs)
+      await runJob(log, QUEUES.assistantTurn, () =>
+        runAssistantTurn(ctx, job.data.tenantId, job.data.leadId),
+      );
   });
 }

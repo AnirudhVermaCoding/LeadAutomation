@@ -34,3 +34,13 @@
 - Verified: lint, typecheck, full suite (107 tests) on real Postgres 16 incl. tenant isolation, M2 messaging flows and HTTP roles. Docker Desktop is broken on the dev machine, so DB tests now use embedded-postgres (no Docker).
 - Verified live: `pnpm db:local` + `db:migrate` + `db:seed` (idempotent) + API with workers: API lead -> approved-template first reply (fake channel) in ~2.5 s; hosted form renders with the tenant consent notice.
 - Not verified: `docker compose up` (needs Docker) and real Meta credentials.
+
+## M3 — AI assistant
+
+- `packages/core`: deterministic `scoreLead` (weights × option scores, thresholds, disqualifiers), `detectLanguage` (en / hi / hinglish, no LLM), `matchesEmergency`.
+- `packages/config`: per-option scores on questions (validated), presets updated.
+- `packages/integrations`: `LlmProvider` + Anthropic provider (`claude-sonnet-5-5`), cost calculation.
+- `apps/api`: `answers`, `llm_runs`, `leads.score`; assistant turn (`assistant/agent.ts`) with tools `record_answer`, `lookup_knowledge`, `escalate_to_human`, `mark_disqualified` (zod-validated; bad args return an error to the model); emergency pre-check, cost cap, refusal/error handover, bounded loop, reply via `sendToLead`; `assistant-turn` queue (3 s debounce, one turn per lead); rule-based fake assistant for mock mode.
+- `packages/sim`: `pnpm sim --tenant demo-clinic --persona <name|all>` — 9 scripted personas with hard checks.
+- Verified: lint, typecheck, 134 tests (8 assistant DB tests: qualification + scoring, cache-friendly request shape, debounce, run logging, emergency, human handover, invalid tool args, refusal, cost cap, Hindi holding reply). Live: `pnpm sim --persona all` passes 9/9 against the running app with workers (mock assistant).
+- Not verified: real-model behaviour — `assistant.eval.db.test.ts` (injection, invented prices, off-topic, no medical advice, Hinglish replies) needs `RUN_LLM_EVALS=1` and an Anthropic API key. Booking tools come in M4.

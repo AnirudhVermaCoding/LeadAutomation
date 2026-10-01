@@ -8,7 +8,9 @@ import { loadEnv } from '../src/env.ts';
 import { registerHttp } from '../src/http/index.ts';
 import { QUEUES, type JobData } from '../src/jobs.ts';
 import { createAppContext } from '../src/system/context.ts';
+import { runAssistantTurn } from '../src/assistant/agent.ts';
 import { importMetaLead, sendFirstReply } from '../src/workers.ts';
+import type { LlmProvider } from '@instantlead/integrations';
 import { APP_DB_PASSWORD, TEMPLATE_DB, dbUrl } from './global-setup.ts';
 
 export const APP_URL = 'http://localhost:3000';
@@ -38,7 +40,7 @@ async function cloneTemplate(name: string) {
 
 /** A fresh database + fully wired app for one test file. */
 export async function createTestContext(
-  opts: { fetch?: typeof globalThis.fetch; allowFakeChannel?: boolean } = {},
+  opts: { fetch?: typeof globalThis.fetch; allowFakeChannel?: boolean; llm?: LlmProvider } = {},
 ) {
   const info = inject('pg');
   const name = `t_${randomUUID().replaceAll('-', '')}`;
@@ -57,7 +59,7 @@ export async function createTestContext(
     ALLOW_FAKE_CHANNEL: String(opts.allowFakeChannel ?? true),
   });
   const clock = new FakeClock('2026-10-05T04:30:00Z');
-  const ctx = createAppContext(env, clock, { fetch: opts.fetch });
+  const ctx = createAppContext(env, clock, { fetch: opts.fetch, llm: opts.llm });
   const app = buildApp({ logLevel: 'silent', checkDb: ctx.checkDb });
   await registerHttp(app, ctx);
   await app.ready();
@@ -97,6 +99,21 @@ export async function createTestContext(
         }
       }
       return results;
+    },
+    /** Run queued assistant turns now (ignoring the 3 s debounce). */
+    async drainAssistant() {
+      const results: unknown[] = [];
+      for (;;) {
+        const jobs = await ctx.boss.fetch<JobData['assistant-turn']>(QUEUES.assistantTurn, {
+          batchSize: 10,
+          ignoreStartAfter: true,
+        });
+        if (!jobs.length) return results;
+        for (const job of jobs) {
+          results.push(await runAssistantTurn(ctx, job.data.tenantId, job.data.leadId));
+          await ctx.boss.complete(QUEUES.assistantTurn, job.id);
+        }
+      }
     },
     /** Signs in through the real Better Auth endpoint; returns the Cookie header. */
     async signIn(email: string, password = PASSWORD) {

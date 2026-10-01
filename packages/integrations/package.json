@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@instantlead/core": "workspace:*",
     "zod": "^4.6.5"
   }

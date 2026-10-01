@@ -22,3 +22,6 @@ Deferred during the build:
 - Treat Meta error 131050 (user stopped marketing messages) as a marketing-only suppression.
 - Sync template approval status from Meta's API instead of marking it by hand.
 - ONBOARDING (M8) must cover: Meta webhook URL `/webhooks/meta` + verify token, subscribing the page to `leadgen`, and adding the tenant's consent notice as the Lead Ads form's custom disclaimer.
+- Langfuse tracing for assistant runs (`llm_runs` covers cost/latency for now).
+- LLM-played simulator leads (v0 personas are scripted).
+- Rename `leads.phone_e_164` to `phone_e164` (drizzle snake_case artefact; cosmetic).

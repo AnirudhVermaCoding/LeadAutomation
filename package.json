@@ -17,7 +17,8 @@
     "db:migrate": "pnpm --filter @instantlead/api db:migrate",
     "db:seed": "pnpm --filter @instantlead/api db:seed",
     "templates:doc": "node packages/config/src/templates-doc.ts",
-    "db:local": "node --env-file-if-exists=.env apps/api/test/dev-db.ts"
+    "db:local": "node --env-file-if-exists=.env apps/api/test/dev-db.ts",
+    "sim": "node --env-file-if-exists=.env packages/sim/src/cli.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

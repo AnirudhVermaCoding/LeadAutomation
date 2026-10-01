@@ -75,6 +75,12 @@ function crossFieldIssues(c: TenantConfig): Issue[] {
   for (const dup of duplicates(q.questions.map((x) => x.key)))
     add(['qualification', 'questions'], `question key "${dup}" is used more than once`);
   q.questions.forEach((x, i) => {
+    for (const option of Object.keys(x.option_scores ?? {}))
+      if (!x.options?.includes(option))
+        add(
+          ['qualification', 'questions', i, 'option_scores'],
+          `"${option}" is not an option of question "${x.key}"`,
+        );
     if (x.type === 'choice' && (x.options?.length ?? 0) < 2)
       add(
         ['qualification', 'questions', i, 'options'],

@@ -103,6 +103,7 @@ export function clinicPreset(variant: ClinicVariant, businessName = 'Demo Clinic
           hint: 'How soon they want to be seen',
           type: 'choice',
           options: ['today', 'this_week', 'this_month', 'just_exploring'],
+          option_scores: { today: 1, this_week: 0.75, this_month: 0.4, just_exploring: 0 },
           required: true,
           weight: 4,
         },

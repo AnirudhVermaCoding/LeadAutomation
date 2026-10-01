@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type Db } from './db/client.ts';
 import { conversations, leads, messages, type MessageStatus } from './db/schema.ts';
+import { QUEUES } from './jobs.ts';
 import { emit, intakeLead, optOut, transitionLead, type LeadDeps } from './leads.ts';
 
 export interface InboundMessage {
@@ -98,7 +99,15 @@ export async function handleInboundMessage(
         await optOut(tx, deps, tenantId, lead, button ? 'button' : 'keyword');
         return { leadId, messageId: inserted.id, action: 'opted_out' } as const;
       }
-      await transitionLead(tx, leadId, { type: 'LEAD_REPLIED' });
+      const status = await transitionLead(tx, leadId, { type: 'LEAD_REPLIED' });
+      // Debounce ~3 s so a burst of messages gets one reply; skipped while a human has taken over.
+      if (!status.aiPaused)
+        await deps.enqueue(
+          tx,
+          QUEUES.assistantTurn,
+          { tenantId, leadId },
+          { singletonKey: leadId, startAfter: 3 },
+        );
       await emit(tx, deps.clock, 'lead.replied', {
         leadId,
         messageId: inserted.id,

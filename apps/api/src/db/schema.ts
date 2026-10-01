@@ -212,6 +212,8 @@ export const leads = pgTable(
     sourceDetails: jsonb().$type<Record<string, unknown>>(),
     state: text({ enum: LEAD_STATES }).notNull().default('new'),
     tier: text({ enum: TIERS }),
+    /** Deterministic score from answers (packages/core scoring), null until computed. */
+    score: numeric({ precision: 6, scale: 2, mode: 'number' }),
     aiPaused: boolean().notNull().default(false),
     receivedAt: ts().notNull(),
     ...timestamps,
@@ -331,6 +333,49 @@ export const events = pgTable(
     tenantId: tenantId(),
     type: text().notNull(),
     payload: jsonb().$type<Record<string, unknown>>().notNull(),
+    occurredAt: ts().notNull(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);
+
+// ---- M3: AI assistant ----
+
+/** Qualification answers the assistant extracted (one current value per question). */
+export const answers = pgTable(
+  'answers',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid()
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    key: text().notNull(),
+    value: text().notNull(),
+    answeredAt: ts().notNull(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.leadId, t.key), tenantScoped()],
+);
+
+/** Every model call: tokens, cost, latency — for margin tracking and debugging. */
+export const llmRuns = pgTable(
+  'llm_runs',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid().references(() => leads.id, { onDelete: 'set null' }),
+    provider: text({ enum: ['anthropic', 'fake'] }).notNull(),
+    model: text().notNull(),
+    inputTokens: integer().notNull().default(0),
+    outputTokens: integer().notNull().default(0),
+    cacheReadTokens: integer().notNull().default(0),
+    cacheWriteTokens: integer().notNull().default(0),
+    costUsd: numeric({ precision: 12, scale: 6, mode: 'number' }).notNull().default(0),
+    latencyMs: integer().notNull(),
+    stopReason: text(),
+    error: text(),
+    providerRequestId: text(),
     occurredAt: ts().notNull(),
     ...timestamps,
   },

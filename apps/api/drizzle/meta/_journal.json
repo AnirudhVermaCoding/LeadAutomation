@@ -15,6 +15,13 @@
       "when": 1790856397687,
       "tag": "0001_m2_leads_messaging",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790857484198,
+      "tag": "0002_m3_assistant",
+      "breakpoints": true
     }
   ]
 }

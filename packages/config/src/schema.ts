@@ -18,6 +18,8 @@ const Question = z.object({
   hint: nonEmpty,
   type: z.enum(['text', 'choice', 'number', 'yes_no', 'date']),
   options: z.array(nonEmpty).optional(),
+  /** 0..1 per option: how strongly each answer signals a ready-to-book lead (unlisted options count as 1). */
+  option_scores: z.record(z.string(), z.number().min(0).max(1)).optional(),
   required: z.boolean(),
   weight: z.number().min(0).max(10),
 });

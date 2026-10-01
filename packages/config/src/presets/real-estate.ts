@@ -50,6 +50,7 @@ export function realEstatePreset(businessName = 'Demo Realty'): TenantConfig {
           hint: 'When they plan to buy',
           type: 'choice',
           options: ['immediately', 'within_3_months', 'within_6_months', 'just_exploring'],
+          option_scores: { immediately: 1, within_3_months: 0.75, within_6_months: 0.4, just_exploring: 0 },
           required: true,
           weight: 4,
         },

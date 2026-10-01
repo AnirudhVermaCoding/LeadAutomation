@@ -57,3 +57,16 @@ export function isOptOutMessage(text: string, keywords: readonly string[]): bool
     return kw.includes(' ') ? ` ${msg} `.includes(` ${kw} `) : msg === kw;
   });
 }
+
+/**
+ * Emergency pre-check, run before the AI sees a message: any configured keyword anywhere
+ * in the message triggers the fixed emergency reply and a human handover. Deliberately
+ * over-eager — a false alarm costs a staff call, a miss could cost much more.
+ */
+export function matchesEmergency(text: string, keywords: readonly string[]): boolean {
+  const msg = ` ${normalise(text)} `;
+  return keywords.some((k) => {
+    const kw = normalise(k);
+    return kw !== '' && msg.includes(` ${kw} `);
+  });
+}

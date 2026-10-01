@@ -1,5 +1,6 @@
 import { systemClock, type Clock } from '@instantlead/core';
-import { createFakeChannel } from '@instantlead/integrations';
+import { createAnthropicProvider, createFakeChannel, type LlmProvider } from '@instantlead/integrations';
+import { createFakeLlm } from '../assistant/fake-llm.ts';
 import { createDb } from '../db/client.ts';
 import type { Env } from '../env.ts';
 import { createBoss, createEnqueue } from '../jobs.ts';
@@ -11,13 +12,18 @@ import { createSystem } from './index.ts';
 export function createAppContext(
   env: Env,
   clock: Clock = systemClock,
-  overrides: { fetch?: typeof globalThis.fetch } = {},
+  overrides: { fetch?: typeof globalThis.fetch; llm?: LlmProvider } = {},
 ) {
   const app = createDb(env.DATABASE_URL);
   const owner = createSystemDb(env.DATABASE_OWNER_URL);
   const auth = createAuth(owner.db, env);
   const boss = createBoss(env.DATABASE_OWNER_URL);
   const secretsKey = Buffer.from(env.SECRETS_KEY, 'base64');
+  const mockMode = env.ALLOW_FAKE_CHANNEL ?? env.NODE_ENV !== 'production';
+  if (!env.ANTHROPIC_API_KEY && !mockMode)
+    throw new Error(
+      'ANTHROPIC_API_KEY is required outside mock mode (set ALLOW_FAKE_CHANNEL=true for a demo)',
+    );
 
   return {
     env,
@@ -29,7 +35,11 @@ export function createAppContext(
     system: createSystem({ systemDb: owner.db, auth, clock }),
     secretsKey,
     fakeChannel: createFakeChannel(),
-    allowFakeChannel: env.ALLOW_FAKE_CHANNEL ?? env.NODE_ENV !== 'production',
+    allowFakeChannel: mockMode,
+    llm:
+      overrides.llm ??
+      (env.ANTHROPIC_API_KEY ? createAnthropicProvider({ apiKey: env.ANTHROPIC_API_KEY }) : createFakeLlm()),
+    llmCostCapUsd: env.LLM_COST_CAP_USD_PER_LEAD,
     fetch: overrides.fetch,
     checkDb: async () => {
       await app.pool.query('select 1');
