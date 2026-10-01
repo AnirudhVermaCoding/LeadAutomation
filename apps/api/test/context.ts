@@ -9,7 +9,10 @@ import { registerHttp } from '../src/http/index.ts';
 import { QUEUES, type JobData } from '../src/jobs.ts';
 import { createAppContext } from '../src/system/context.ts';
 import { runAssistantTurn } from '../src/assistant/agent.ts';
+import { notifyAppointmentChange } from '../src/notify.ts';
 import { importMetaLead, sendFirstReply } from '../src/workers.ts';
+import type { CalendarProvider } from '@instantlead/integrations';
+import type { Tx } from '../src/db/client.ts';
 import type { LlmProvider } from '@instantlead/integrations';
 import { APP_DB_PASSWORD, TEMPLATE_DB, dbUrl } from './global-setup.ts';
 
@@ -40,7 +43,12 @@ async function cloneTemplate(name: string) {
 
 /** A fresh database + fully wired app for one test file. */
 export async function createTestContext(
-  opts: { fetch?: typeof globalThis.fetch; allowFakeChannel?: boolean; llm?: LlmProvider } = {},
+  opts: {
+    fetch?: typeof globalThis.fetch;
+    allowFakeChannel?: boolean;
+    llm?: LlmProvider;
+    calendarFor?: (tx: Tx, tenantId: string) => Promise<CalendarProvider | null>;
+  } = {},
 ) {
   const info = inject('pg');
   const name = `t_${randomUUID().replaceAll('-', '')}`;
@@ -59,7 +67,11 @@ export async function createTestContext(
     ALLOW_FAKE_CHANNEL: String(opts.allowFakeChannel ?? true),
   });
   const clock = new FakeClock('2026-10-05T04:30:00Z');
-  const ctx = createAppContext(env, clock, { fetch: opts.fetch, llm: opts.llm });
+  const ctx = createAppContext(env, clock, {
+    fetch: opts.fetch,
+    llm: opts.llm,
+    calendarFor: opts.calendarFor,
+  });
   const app = buildApp({ logLevel: 'silent', checkDb: ctx.checkDb });
   await registerHttp(app, ctx);
   await app.ready();
@@ -82,6 +94,7 @@ export async function createTestContext(
       const handlers = {
         [QUEUES.firstReply]: (d: JobData['first-reply']) => sendFirstReply(ctx, d),
         [QUEUES.metaLeadgen]: (d: JobData['meta-leadgen']) => importMetaLead(ctx, d),
+        [QUEUES.appointmentNotify]: (d: JobData['appointment-notify']) => notifyAppointmentChange(ctx, d),
       } as Record<string, (d: never) => Promise<unknown>>;
       for (const [queue, handler] of Object.entries(handlers)) {
         for (;;) {

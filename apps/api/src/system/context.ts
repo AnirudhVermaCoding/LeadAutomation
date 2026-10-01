@@ -1,5 +1,18 @@
 import { systemClock, type Clock } from '@instantlead/core';
-import { createAnthropicProvider, createFakeChannel, type LlmProvider } from '@instantlead/integrations';
+import {
+  ChannelError,
+  createAnthropicProvider,
+  createFakeChannel,
+  createFakeEmail,
+  createGoogleCalendar,
+  createResendEmail,
+  type CalendarProvider,
+  type EmailProvider,
+  type GoogleOAuthClient,
+  type LlmProvider,
+} from '@instantlead/integrations';
+import { getTenantSecret } from '../secrets.ts';
+import type { Tx } from '../db/client.ts';
 import { createFakeLlm } from '../assistant/fake-llm.ts';
 import { createDb } from '../db/client.ts';
 import type { Env } from '../env.ts';
@@ -12,7 +25,11 @@ import { createSystem } from './index.ts';
 export function createAppContext(
   env: Env,
   clock: Clock = systemClock,
-  overrides: { fetch?: typeof globalThis.fetch; llm?: LlmProvider } = {},
+  overrides: {
+    fetch?: typeof globalThis.fetch;
+    llm?: LlmProvider;
+    calendarFor?: (tx: Tx, tenantId: string) => Promise<CalendarProvider | null>;
+  } = {},
 ) {
   const app = createDb(env.DATABASE_URL);
   const owner = createSystemDb(env.DATABASE_OWNER_URL);
@@ -24,6 +41,31 @@ export function createAppContext(
     throw new Error(
       'ANTHROPIC_API_KEY is required outside mock mode (set ALLOW_FAKE_CHANNEL=true for a demo)',
     );
+
+  // Email: Resend when configured; mock mode records in memory; otherwise sends fail loudly.
+  const email: EmailProvider =
+    env.RESEND_API_KEY && env.EMAIL_FROM
+      ? createResendEmail({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM, fetch: overrides.fetch })
+      : mockMode
+        ? createFakeEmail()
+        : {
+            provider: 'fake',
+            send: () =>
+              Promise.reject(
+                new ChannelError('Email is not configured (RESEND_API_KEY, EMAIL_FROM)', {
+                  retryable: false,
+                }),
+              ),
+          };
+  const googleOAuth: GoogleOAuthClient | null =
+    env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+      ? {
+          clientId: env.GOOGLE_CLIENT_ID,
+          clientSecret: env.GOOGLE_CLIENT_SECRET,
+          redirectUri: `${env.APP_URL}/v1/integrations/google/callback`,
+          fetch: overrides.fetch,
+        }
+      : null;
 
   return {
     env,
@@ -40,6 +82,16 @@ export function createAppContext(
       overrides.llm ??
       (env.ANTHROPIC_API_KEY ? createAnthropicProvider({ apiKey: env.ANTHROPIC_API_KEY }) : createFakeLlm()),
     llmCostCapUsd: env.LLM_COST_CAP_USD_PER_LEAD,
+    email,
+    googleOAuth,
+    /** The tenant's Google Calendar, if they connected one. */
+    calendarFor:
+      overrides.calendarFor ??
+      (async (tx: Tx, tenantId: string): Promise<CalendarProvider | null> => {
+        if (!googleOAuth) return null;
+        const refreshToken = await getTenantSecret(tx, secretsKey, tenantId, 'google_refresh_token');
+        return refreshToken ? createGoogleCalendar({ client: googleOAuth, refreshToken }) : null;
+      }),
     fetch: overrides.fetch,
     checkDb: async () => {
       await app.pool.query('select 1');

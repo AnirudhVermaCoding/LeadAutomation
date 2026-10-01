@@ -35,6 +35,12 @@ const EnvSchema = z
     ANTHROPIC_API_KEY: z.string().min(1).optional(),
     /** Per-lead LLM spend ceiling (USD); beyond it the conversation is handed to staff. */
     LLM_COST_CAP_USD_PER_LEAD: z.coerce.number().positive().default(0.5),
+    /** Resend, for staff alerts and reports by email (mock mode logs instead). */
+    RESEND_API_KEY: z.string().min(1).optional(),
+    EMAIL_FROM: z.string().min(3).optional(),
+    /** Google OAuth client for the optional one-way Google Calendar sync. */
+    GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+    GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   })
   .superRefine((env, ctx) => {
     // .env.example ships dev-only secrets; never let them reach production.

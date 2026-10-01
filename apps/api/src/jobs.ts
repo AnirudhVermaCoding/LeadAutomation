@@ -6,6 +6,7 @@ export const QUEUES = {
   firstReply: 'first-reply',
   metaLeadgen: 'meta-leadgen',
   assistantTurn: 'assistant-turn',
+  appointmentNotify: 'appointment-notify',
   deadLetter: 'dead-letter',
 } as const;
 
@@ -13,6 +14,11 @@ export interface JobData {
   [QUEUES.firstReply]: { tenantId: string; leadId: string };
   [QUEUES.metaLeadgen]: { tenantId: string; leadgenId: string; formId?: string };
   [QUEUES.assistantTurn]: { tenantId: string; leadId: string };
+  [QUEUES.appointmentNotify]: {
+    tenantId: string;
+    appointmentId: string;
+    kind: 'booked' | 'confirmed' | 'rescheduled' | 'cancelled' | 'completed' | 'no_show';
+  };
 }
 export type QueueName = keyof JobData;
 
@@ -30,7 +36,8 @@ export const createBoss = (ownerUrl: string) => new PgBoss({ connectionString: o
 
 export async function ensureQueues(boss: PgBoss) {
   await boss.createQueue(QUEUES.deadLetter);
-  for (const name of [QUEUES.firstReply, QUEUES.metaLeadgen]) await boss.createQueue(name, RETRY);
+  for (const name of [QUEUES.firstReply, QUEUES.metaLeadgen, QUEUES.appointmentNotify])
+    await boss.createQueue(name, RETRY);
   // stately + singletonKey(leadId): at most one queued and one running turn per lead, so a burst
   // of messages becomes one reply and two turns never race. Short retries: it's a live chat.
   await boss.createQueue(QUEUES.assistantTurn, {

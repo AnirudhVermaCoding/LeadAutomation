@@ -8,6 +8,9 @@ export interface TurnHints {
   answers: Record<string, string>;
   missing: string[];
   lastInbound: string;
+  /** Lead display status at the start of the turn (e.g. booking_offered, booked). */
+  status: string;
+  appointment: { service: string; label: string } | null;
 }
 
 // A few Hindi/Hinglish synonyms so the demo understands common replies.
@@ -88,6 +91,41 @@ const toolUse = (name: string, input: object) => ({
   input,
 });
 
+const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth'];
+const HINDI_ORDINALS = ['pehla', 'doosra', 'teesra'];
+/** "2", "option 2", "the second one", "doosra" -> 1 (zero-based). */
+function choiceIndex(text: string): number | null {
+  const digit = /(^|\D)([1-5])(\D|$)/.exec(text);
+  if (digit?.[2] && text.trim().length <= 20) return Number(digit[2]) - 1;
+  const i = ORDINALS.findIndex((o) => has(text, o));
+  if (i >= 0) return i;
+  const j = HINDI_ORDINALS.findIndex((o) => has(text, o));
+  return j >= 0 ? j : null;
+}
+
+/** Best-guess service for the lead's treatment answer (first service otherwise). */
+function serviceFor(h: TurnHints): string {
+  const services = h.config.booking.services;
+  const answer = Object.values(h.answers).join(' ').replaceAll('_', ' ');
+  const words = answer.split(/\s+/).filter((w) => w.length > 3);
+  return (services.find((s) => words.some((w) => has(s.name, w))) ?? services[0])?.name ?? '';
+}
+
+const CANCEL = /\b(cancel|radd|nahi aa paunga|nahi aa paungi)\b/i;
+const RESCHEDULE = /\b(reschedule|change|another time|different time|postpone|badal|shift)\b/i;
+const BOOK = /\b(book|slot|appointment|available|time)\b/i;
+
+type Slot = { date: string; time: string; label: string };
+const parse = <T>(s: string): T | null => {
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return null;
+  }
+};
+const reply = (t: string) => Promise.resolve(message([text(t)], 'end_turn'));
+const call = (name: string, input: object) => Promise.resolve(message([toolUse(name, input)], 'tool_use'));
+
 /**
  * Mock-mode assistant: a rule-based receptionist that drives the same tools as the real model,
  * so tests, the simulator and the demo sandbox run the full flow with zero credentials.
@@ -98,68 +136,82 @@ export function createFakeLlm(): LlmProvider {
     model: 'fake',
     complete(request: LlmRequest, rawHints?: unknown) {
       const h = rawHints as TurnHints;
+      const inbound = h.lastInbound;
+      const choice = choiceIndex(inbound);
+      const picking = choice !== null && (h.status === 'booking_offered' || h.appointment !== null);
       const nonSystem = request.messages.filter((m) => (m.role as string) !== 'system');
       const last = nonSystem.at(-1);
       const toolResults = Array.isArray(last?.content)
         ? last.content.filter((b): b is Anthropic.ToolResultBlockParam => b.type === 'tool_result')
         : [];
 
-      // Second step of a turn: tools ran, now talk.
+      // Second step of a turn: tools ran, now act on their results.
       if (toolResults.length) {
         const prev = nonSystem.at(-2);
         const calls = Array.isArray(prev?.content)
           ? prev.content.filter((b): b is Anthropic.ToolUseBlockParam => b.type === 'tool_use')
           : [];
+        const names = calls.map((c) => c.name);
         const results = toolResults.map((r) => (typeof r.content === 'string' ? r.content : ''));
-        if (calls.some((c) => c.name === 'escalate_to_human'))
-          return Promise.resolve(
-            message([text('Sure — a member of our team will reply to you here shortly.')], 'end_turn'),
+        const failed = toolResults.some((r) => r.is_error);
+
+        if (names.includes('escalate_to_human'))
+          return reply('Sure — a member of our team will reply to you here shortly.');
+        if (names.includes('cancel'))
+          return reply(
+            failed
+              ? "I couldn't find an upcoming appointment to cancel."
+              : 'Your appointment is cancelled. Message us any time to book again.',
           );
-        const info = calls.some((c) => c.name === 'lookup_knowledge') ? `${results.join(' ')} ` : '';
+        if (names.includes('book_slot') || names.includes('reschedule')) {
+          if (failed)
+            return reply('Sorry, that time is no longer free. Would you like me to share other times?');
+          const r =
+            parse<{ booked?: string; rescheduled_to?: string; status?: string }>(results[0] ?? '') ?? {};
+          if (r.rescheduled_to) return reply(`Done! Your appointment is moved to ${r.rescheduled_to}.`);
+          return reply(
+            r.status === 'confirmed'
+              ? `Done! You're booked for ${r.booked}. See you then!`
+              : `Thanks! I've requested ${r.booked} for you — the team will confirm shortly.`,
+          );
+        }
+        if (names.includes('get_available_slots')) {
+          const slots = parse<{ slots: Slot[] }>(results[0] ?? '')?.slots ?? [];
+          if (!slots.length)
+            return reply('Sorry, there are no free times in the next two weeks. Shall the team call you?');
+          const chosen = picking && choice !== null ? slots[choice] : undefined;
+          if (chosen)
+            return h.appointment
+              ? call('reschedule', { date: chosen.date, time: chosen.time })
+              : call('book_slot', { service: serviceFor(h), date: chosen.date, time: chosen.time });
+          return reply(
+            `I have these times free: ${slots.map((s, i) => `${i + 1}) ${s.label}`).join(', ')}. Which one suits you?`,
+          );
+        }
+
+        const info = names.includes('lookup_knowledge') ? `${results.join(' ')} ` : '';
         const state = results
-          .map((r) => {
-            try {
-              return JSON.parse(r) as { still_missing?: string[]; status?: string };
-            } catch {
-              return {};
-            }
-          })
+          .map((r) => parse<{ still_missing?: string[]; status?: string }>(r) ?? {})
           .find((r) => r.status);
         if (state?.status === 'disqualified')
-          return Promise.resolve(
-            message(
-              [
-                text(
-                  'Thanks for letting me know. This may not be the right fit for you, but our team can call you if you would like.',
-                ),
-              ],
-              'end_turn',
-            ),
+          return reply(
+            'Thanks for letting me know. This may not be the right fit for you, but our team can call you if you would like.',
           );
-        const missing = state?.still_missing ?? h.missing;
-        const next = missing[0];
-        return Promise.resolve(
-          message(
-            [
-              text(
-                next
-                  ? `${info}${info ? '' : 'Thanks! '}${ask(h.config, next)}`
-                  : `${info}Thank you! That's everything I need — our team will share available times shortly.`,
-              ),
-            ],
-            'end_turn',
-          ),
-        );
+        const next = (state?.still_missing ?? h.missing)[0];
+        if (next) return reply(`${info}${info ? '' : 'Thanks! '}${ask(h.config, next)}`);
+        if (state?.status === 'qualified' && !h.appointment)
+          return call('get_available_slots', { service: serviceFor(h) });
+        return reply(`${info}Is there anything else I can help you with?`);
       }
 
-      const inbound = h.lastInbound;
-      if (HUMAN.test(inbound))
-        return Promise.resolve(
-          message([toolUse('escalate_to_human', { reason: 'Lead asked for a person' })], 'tool_use'),
-        );
+      // First step: decide what to do with the new message.
+      if (HUMAN.test(inbound)) return call('escalate_to_human', { reason: 'Lead asked for a person' });
+      if (h.appointment && CANCEL.test(inbound)) return call('cancel', {});
+      if (h.appointment && RESCHEDULE.test(inbound))
+        return call('get_available_slots', { service: h.appointment.service });
+      if (picking) return call('get_available_slots', { service: h.appointment?.service ?? serviceFor(h) });
       const fact = FACTS.find(([re]) => re.test(inbound));
-      if (fact)
-        return Promise.resolve(message([toolUse('lookup_knowledge', { query: fact[1] })], 'tool_use'));
+      if (fact) return call('lookup_knowledge', { query: fact[1] });
 
       const records = h.config.qualification.questions
         .filter((q) => h.answers[q.key] === undefined)
@@ -177,18 +229,15 @@ export function createFakeLlm(): LlmProvider {
         );
 
       const next = h.missing[0];
+      if (!next && !h.appointment && (BOOK.test(inbound) || h.status === 'qualified'))
+        return call('get_available_slots', { service: serviceFor(h) });
+      if (h.appointment)
+        return reply(`You're booked for ${h.appointment.label}. Anything else I can help with?`);
       const name = h.config.brand.assistant_name;
-      return Promise.resolve(
-        message(
-          [
-            text(
-              next
-                ? `Hi! I'm ${name} from ${h.config.brand.business_name}. ${ask(h.config, next)}`
-                : 'Thanks! Our team will share available times shortly.',
-            ),
-          ],
-          'end_turn',
-        ),
+      return reply(
+        next
+          ? `Hi! I'm ${name} from ${h.config.brand.business_name}. ${ask(h.config, next)}`
+          : 'How can I help you today?',
       );
     },
   };

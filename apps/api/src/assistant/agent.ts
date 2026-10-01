@@ -1,5 +1,5 @@
 import { fillVariables } from '@instantlead/config';
-import { detectLanguage, displayStatus, matchesEmergency, scoreLead } from '@instantlead/core';
+import { detectLanguage, displayStatus, formatSlot, matchesEmergency, scoreLead } from '@instantlead/core';
 import { Anthropic, llmCostUsd, type LlmProvider, type LlmRequest } from '@instantlead/integrations';
 import { asc, eq, sum } from 'drizzle-orm';
 import { getActiveConfig } from '../config-store.ts';
@@ -8,6 +8,7 @@ import { leads, llmRuns, messages } from '../db/schema.ts';
 import { sendToLead, type MessagingDeps } from '../outbound.ts';
 import type { TurnHints } from './fake-llm.ts';
 import { buildSystemPrompt, buildTools, stateMessage } from './prompt.ts';
+import { activeAppointment } from '../booking.ts';
 import { escalate, loadAnswers, runTool } from './tools.ts';
 
 export interface AssistantDeps extends MessagingDeps {
@@ -44,13 +45,22 @@ export async function runAssistantTurn(
     const active = await getActiveConfig(tx);
     if (!lead || !active) return null;
     const history = (
-      await tx.select().from(messages).where(eq(messages.leadId, leadId)).orderBy(asc(messages.occurredAt))
+      await tx
+        .select()
+        .from(messages)
+        .where(eq(messages.leadId, leadId))
+        .orderBy(asc(messages.occurredAt), asc(messages.createdAt))
     ).slice(-HISTORY);
     const [spend] = await tx
       .select({ total: sum(llmRuns.costUsd) })
       .from(llmRuns)
       .where(eq(llmRuns.leadId, leadId));
     const answers = await loadAnswers(tx, leadId);
+    const appt = await activeAppointment(tx, leadId);
+    const appointment = appt && {
+      service: appt.service,
+      label: `${appt.service}, ${formatSlot(appt.startsAt, active.config.locale.timezone)}${appt.status === 'pending' ? ' (pending staff confirmation)' : ''}`,
+    };
 
     // Only reply to messages that haven't been answered yet (debounced bursts become one turn).
     const lastOut = history.findLastIndex((m) => m.direction === 'out');
@@ -68,6 +78,7 @@ export async function runAssistantTurn(
       inboundText,
       answers,
       spentUsd: Number(spend?.total ?? 0),
+      appointment,
     };
   });
 
@@ -123,6 +134,7 @@ export async function runAssistantTurn(
           answers: ctx.answers,
           missing: scored.status === 'incomplete' ? scored.missing : [],
           status: displayStatus(lead),
+          appointment: ctx.appointment?.label ?? null,
         }),
       } as unknown as Anthropic.MessageParam,
     ],
@@ -139,6 +151,8 @@ export async function runAssistantTurn(
           return s.status === 'incomplete' ? s.missing : [];
         })(),
         lastInbound: ctx.inboundText,
+        status: displayStatus(lead),
+        appointment: ctx.appointment,
       };
       const response = await callModel(deps, tenantId, leadId, request, hints);
 

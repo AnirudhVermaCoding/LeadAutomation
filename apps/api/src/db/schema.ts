@@ -381,3 +381,76 @@ export const llmRuns = pgTable(
   },
   () => [tenantScoped()],
 );
+
+// ---- M4: booking ----
+
+const WEEKDAY = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+
+/** When each resource (chair, doctor, site-visit agent) takes appointments, in tenant-local time. */
+export const availabilityRules = pgTable(
+  'availability_rules',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    weekday: text({ enum: WEEKDAY }).notNull(),
+    startTime: text().notNull(), // HH:MM
+    endTime: text().notNull(),
+    resource: text().notNull().default('default'),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);
+
+/** Holidays, leave, maintenance. `resource` null blocks every resource. */
+export const blockedTimes = pgTable(
+  'blocked_times',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    startsAt: ts().notNull(),
+    endsAt: ts().notNull(),
+    resource: text(),
+    reason: text(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);
+
+export const APPOINTMENT_STATUSES = [
+  'pending',
+  'scheduled',
+  'confirmed',
+  'completed',
+  'no_show',
+  'cancelled',
+] as const;
+export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
+/** Statuses that hold the resource (the no-double-booking constraint applies to these). */
+export const ACTIVE_APPOINTMENT_STATUSES = ['pending', 'scheduled', 'confirmed'] as const;
+
+/**
+ * No double booking: an exclusion constraint (migration 0004) forbids two active appointments
+ * on the same resource whose [starts_at, busy_until) ranges overlap.
+ */
+export const appointments = pgTable(
+  'appointments',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid()
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    service: text().notNull(),
+    resource: text().notNull(),
+    startsAt: ts().notNull(),
+    endsAt: ts().notNull(),
+    /** endsAt + buffer: the resource is held until then. */
+    busyUntil: ts().notNull(),
+    status: text({ enum: APPOINTMENT_STATUSES }).notNull(),
+    source: text({ enum: ['assistant', 'staff'] }).notNull(),
+    googleEventId: text(),
+    notes: text(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);

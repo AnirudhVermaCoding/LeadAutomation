@@ -22,6 +22,20 @@
       "when": 1790857484198,
       "tag": "0002_m3_assistant",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790858096502,
+      "tag": "0003_m4_booking",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790858097362,
+      "tag": "0004_m4_no_double_booking",
+      "breakpoints": true
     }
   ]
 }

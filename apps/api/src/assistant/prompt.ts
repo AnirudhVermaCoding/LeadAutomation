@@ -5,6 +5,15 @@ import { z } from 'zod';
 /** Tool input schemas. The LLM's arguments are untrusted: every call is validated with these. */
 export function toolSchemas(config: TenantConfig) {
   const keys = config.qualification.questions.map((q) => q.key) as [string, ...string[]];
+  const services = config.booking.services.map((x) => x.name) as [string, ...string[]];
+  const date = z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .describe('Local date, YYYY-MM-DD');
+  const time = z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .describe('Local time, HH:MM (24h)');
   return {
     record_answer: z.strictObject({
       key: z.enum(keys).describe('Which qualification question this answers'),
@@ -23,6 +32,16 @@ export function toolSchemas(config: TenantConfig) {
     mark_disqualified: z.strictObject({
       reason: z.string().min(3).max(300).describe('Which answer disqualifies the lead and why'),
     }),
+    get_available_slots: z.strictObject({
+      service: z.enum(services),
+      date: date
+        .optional()
+        .describe('Only this local date (YYYY-MM-DD), if the person asked for a specific day'),
+      part_of_day: z.enum(['morning', 'afternoon', 'evening']).optional(),
+    }),
+    book_slot: z.strictObject({ service: z.enum(services), date, time }),
+    reschedule: z.strictObject({ date, time }),
+    cancel: z.strictObject({}),
   };
 }
 export type ToolName = keyof ReturnType<typeof toolSchemas>;
@@ -36,6 +55,13 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     'Hand the conversation to staff: the lead asks for a person or a call, is upset, has a complaint, has a medical concern, or you cannot help. After calling it, tell the lead a team member will reply.',
   mark_disqualified:
     'Mark the lead as not a fit, only when an answer clearly matches a disqualifier and the lead has confirmed it.',
+  get_available_slots:
+    'Real free appointment times for a service (next two weeks, or one date). Offer only times returned here, using their labels.',
+  book_slot:
+    'Book the time the person chose, using the exact date and time from get_available_slots. A confirmation message is sent to them automatically.',
+  reschedule:
+    'Move their existing appointment to a new time (date and time from get_available_slots). A confirmation is sent automatically.',
+  cancel: 'Cancel their existing appointment, only after they clearly asked to cancel.',
 };
 
 export function buildTools(config: TenantConfig): Anthropic.Tool[] {
@@ -74,7 +100,6 @@ How to write
 
 Facts
 - Prices, services, doctors, timings, address and policies come only from KNOWLEDGE or lookup_knowledge. If something isn't there, say you'll check with the team and offer a call back — never guess or invent a price, a person, a time or an offer.
-- You cannot book appointments yet. When the required questions are answered, thank them and say the team will share available times shortly.
 ${
   clinic
     ? `- Never diagnose, never suggest medicines or treatments for a symptom, and never say whether something is serious. For health concerns, recommend a consultation with the doctor and use escalate_to_human if they seem worried.\n`
@@ -87,9 +112,14 @@ Safety and trust
 Tools
 - Call record_answer as soon as they answer a question (it may answer more than one; record each). Then ask the next unanswered required question naturally — never re-ask something already answered.
 - Call mark_disqualified only when an answer clearly matches a disqualifier and they've confirmed it.
+- Booking: once the required questions are answered, or whenever they ask to book, call get_available_slots for the right service and offer the options by their labels. When they choose, call book_slot with exactly that date and time. Never offer or confirm a time that did not come from get_available_slots. A confirmation is sent automatically, so just say it's done (or pending confirmation if the result says so).
+- To change or cancel an existing appointment use reschedule or cancel.
 
 QUALIFICATION QUESTIONS
 ${questions}
+
+SERVICES (for booking)
+${config.booking.services.map((x) => `- ${x.name} (${x.duration_minutes} min)`).join('\n')}
 
 KNOWLEDGE
 ${knowledge}`;
@@ -103,6 +133,7 @@ export function stateMessage(s: {
   answers: Record<string, string>;
   missing: string[];
   status: string;
+  appointment: string | null;
 }): string {
   return [
     'CRM state for this conversation (from our database, not from the customer):',
@@ -112,5 +143,6 @@ export function stateMessage(s: {
     `- Answers so far: ${Object.keys(s.answers).length ? JSON.stringify(s.answers) : 'none'}`,
     `- Required questions still to ask: ${s.missing.length ? s.missing.join(', ') : 'none — all answered'}`,
     `- Lead status: ${s.status}`,
+    `- Upcoming appointment: ${s.appointment ?? 'none'}`,
   ].join('\n');
 }

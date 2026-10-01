@@ -75,7 +75,7 @@ exports[`lead state machine > full state x event matrix 1`] = `
     "SLOTS_OFFERED": "x",
   },
   "contacted": {
-    "BOOKED": "x",
+    "BOOKED": "booked",
     "CANCELLED": "x",
     "COMPLETED": "x",
     "CONFIRMED": "x",
@@ -111,7 +111,7 @@ exports[`lead state machine > full state x event matrix 1`] = `
     "SLOTS_OFFERED": "x",
   },
   "new": {
-    "BOOKED": "x",
+    "BOOKED": "booked",
     "CANCELLED": "x",
     "COMPLETED": "x",
     "CONFIRMED": "x",

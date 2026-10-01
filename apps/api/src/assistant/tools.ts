@@ -5,6 +5,13 @@ import { withTenant, type Tx } from '../db/client.ts';
 import { answers, leads } from '../db/schema.ts';
 import { emit, transitionLead, transitionLeadIfAllowed, type LeadDeps } from '../leads.ts';
 import type { Db } from '../db/client.ts';
+import {
+  BookingError,
+  bookSlot,
+  cancelLeadAppointment,
+  findSlots,
+  rescheduleLeadAppointment,
+} from '../booking.ts';
 import { toolSchemas, type ToolName } from './prompt.ts';
 
 export interface ToolContext {
@@ -133,5 +140,69 @@ export async function runTool(c: ToolContext, name: string, rawInput: unknown): 
         await emit(tx, c.deps.clock, 'lead.disqualified', { leadId: c.leadId, reason: input.reason });
       });
       return { content: 'Marked as not a fit. Close politely and offer a call from the team.' };
+    case 'get_available_slots':
+    case 'book_slot':
+    case 'reschedule':
+    case 'cancel':
+      try {
+        return { content: JSON.stringify(await booking(c, name as Parameters<typeof booking>[1], input)) };
+      } catch (err) {
+        if (!(err instanceof BookingError)) throw err;
+        const retry = err.code === 'taken' || err.code === 'unavailable';
+        return {
+          content: `${err.message}.${retry ? ' Call get_available_slots again and offer other times.' : ''}`,
+          isError: true,
+        };
+      }
+  }
+}
+
+async function booking(
+  c: ToolContext,
+  name: 'get_available_slots' | 'book_slot' | 'reschedule' | 'cancel',
+  input: Record<string, string>,
+) {
+  const { deps, tenantId, leadId } = c;
+  switch (name) {
+    case 'get_available_slots': {
+      const { slots } = await findSlots(deps, tenantId, {
+        service: input.service ?? '',
+        date: input.date,
+        prefer: input.part_of_day as 'morning' | 'afternoon' | 'evening' | undefined,
+      });
+      if (slots.length)
+        await withTenant(deps.db, tenantId, (tx) =>
+          transitionLeadIfAllowed(tx, leadId, { type: 'SLOTS_OFFERED' }),
+        );
+      return slots.length
+        ? { slots, note: 'Offer these by label. When they choose, call book_slot with that date and time.' }
+        : { slots, note: 'Nothing free then. Offer to check other days, or a call from the team.' };
+    }
+    case 'book_slot': {
+      const r = await bookSlot(deps, tenantId, {
+        leadId,
+        service: input.service ?? '',
+        date: input.date ?? '',
+        time: input.time ?? '',
+        source: 'assistant',
+      });
+      return {
+        booked: r.label,
+        status: r.pending ? 'pending staff confirmation' : 'confirmed',
+        note: 'Confirmation sent automatically.',
+      };
+    }
+    case 'reschedule': {
+      const r = await rescheduleLeadAppointment(deps, tenantId, {
+        leadId,
+        date: input.date ?? '',
+        time: input.time ?? '',
+        source: 'assistant',
+      });
+      return { rescheduled_to: r.label, note: 'Confirmation sent automatically.' };
+    }
+    case 'cancel':
+      await cancelLeadAppointment(deps, tenantId, leadId);
+      return { cancelled: true };
   }
 }

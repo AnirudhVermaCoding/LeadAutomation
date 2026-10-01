@@ -178,7 +178,7 @@ export function registerRoutes(app: FastifyInstance, ctx: AppContext) {
         .select()
         .from(messages)
         .where(eq(messages.leadId, id))
-        .orderBy(asc(messages.occurredAt));
+        .orderBy(asc(messages.occurredAt), asc(messages.createdAt));
       return { lead, conversation: conversation ?? null, messages: thread };
     });
     return result ?? reply.code(404).send({ error: 'not_found' });

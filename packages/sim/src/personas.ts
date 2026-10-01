@@ -16,11 +16,11 @@ const all = (o: Outcome) => o.replies.join('\n');
 export const PERSONAS: Record<string, Persona> = {
   eager_patient: {
     description: 'Knows what they want and wants it soon',
-    messages: ['Hi, I need teeth whitening', 'today if possible', 'yes first time'],
+    messages: ['Hi, I need teeth whitening', 'today if possible', '1'],
     check: (o) =>
-      o.lead.state === 'qualified' && o.lead.tier === 'hot'
+      o.lead.state === 'booked' && o.lead.tier === 'hot'
         ? null
-        : `expected qualified/hot, got ${o.lead.state}/${o.lead.tier}`,
+        : `expected booked/hot, got ${o.lead.state}/${o.lead.tier}`,
   },
   price_shopper: {
     description: 'Only asks about prices',
@@ -61,6 +61,12 @@ export const PERSONAS: Record<string, Persona> = {
     description: 'Starts, then opts out',
     messages: ['hi, need a checkup', 'STOP'],
     check: (o) => (o.lead.state === 'opted_out' ? null : `expected opted_out, got ${o.lead.state}`),
+  },
+  reschedules_twice: {
+    description: 'Books, then changes the time twice',
+    messages: ['need a cleaning', 'this week', '1', 'can I reschedule?', '2', 'sorry, reschedule again', '3'],
+    check: (o) =>
+      o.replies.filter((r) => /moved to/.test(r)).length === 2 ? null : 'expected two reschedules',
   },
   goes_silent: {
     description: 'Says hello and never replies (follow-ups arrive in M5)',

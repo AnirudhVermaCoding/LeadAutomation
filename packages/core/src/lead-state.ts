@@ -38,8 +38,19 @@ const FUNNEL = {
     from: ['qualifying', 'qualified', 'booking_offered', 'nurturing', 'no_show', 'completed'],
     to: 'booking_offered',
   },
+  // Staff can book anyone who calls in, so every non-terminal state may book.
   BOOKED: {
-    from: ['qualifying', 'qualified', 'booking_offered', 'nurturing', 'unresponsive', 'no_show', 'completed'],
+    from: [
+      'new',
+      'contacted',
+      'qualifying',
+      'qualified',
+      'booking_offered',
+      'nurturing',
+      'unresponsive',
+      'no_show',
+      'completed',
+    ],
     to: 'booked',
   },
   CONFIRMED: { from: ['booked'], to: 'confirmed' },

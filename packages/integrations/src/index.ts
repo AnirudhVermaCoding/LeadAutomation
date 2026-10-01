@@ -17,3 +17,5 @@ export {
   type LlmProvider,
   type LlmRequest,
 } from './llm.ts';
+export * from './calendar.ts';
+export * from './email.ts';

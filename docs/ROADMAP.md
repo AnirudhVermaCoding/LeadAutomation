@@ -25,3 +25,6 @@ Deferred during the build:
 - Langfuse tracing for assistant runs (`llm_runs` covers cost/latency for now).
 - LLM-played simulator leads (v0 personas are scripted).
 - Rename `leads.phone_e_164` to `phone_e164` (drizzle snake_case artefact; cosmetic).
+- Two-way calendar sync (read busy times from Google Calendar).
+- Cancellation template (v0 can only tell a lead their appointment is cancelled inside the 24 h window).
+- Resource preferences (book a specific doctor) — v0 picks the first free resource.

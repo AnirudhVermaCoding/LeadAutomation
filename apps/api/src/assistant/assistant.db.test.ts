@@ -1,5 +1,5 @@
 import type { Anthropic, LlmProvider, LlmRequest } from '@instantlead/integrations';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { createTestContext, PASSWORD, type TestContext } from '../../test/context.ts';
 import { withTenant } from '../db/client.ts';
@@ -64,7 +64,15 @@ const say = async (from: string, text: string) => {
 const lead = async (phone: string) =>
   (await withTenant(t.ctx.db, A, (tx) => tx.select().from(leads).where(eq(leads.phoneE164, phone))))[0]!;
 const outbound = async (leadId: string) =>
-  (await withTenant(t.ctx.db, A, (tx) => tx.select().from(messages).where(eq(messages.leadId, leadId))))
+  (
+    await withTenant(t.ctx.db, A, (tx) =>
+      tx
+        .select()
+        .from(messages)
+        .where(eq(messages.leadId, leadId))
+        .orderBy(asc(messages.occurredAt), asc(messages.createdAt)),
+    )
+  )
     .filter((m) => m.direction === 'out')
     .map((m) => m.body);
 
@@ -78,7 +86,8 @@ describe('qualification conversation (mock-mode assistant)', () => {
     await say('9800000001', 'today if possible');
     await t.drainAssistant();
     const after = await lead('+919800000001');
-    expect(after).toMatchObject({ state: 'qualified', tier: 'hot', score: 7 });
+    // Qualified (deterministic score), then straight on to offering times.
+    expect(after).toMatchObject({ state: 'booking_offered', tier: 'hot', score: 7 });
     const saved = await withTenant(t.ctx.db, A, (tx) =>
       tx.select().from(answers).where(eq(answers.leadId, l.id)),
     );
@@ -86,7 +95,7 @@ describe('qualification conversation (mock-mode assistant)', () => {
       treatment_interest: 'whitening',
       urgency: 'today',
     });
-    expect((await outbound(l.id)).at(-1)).toMatch(/team will share available times/);
+    expect((await outbound(l.id)).at(-1)).toMatch(/I have these times free: 1\) /);
   });
 
   test('the request keeps a cacheable prefix: stable system + tools, per-turn state as a trailing system message', async () => {

@@ -4,7 +4,16 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { generateApiKey, hashApiKey } from '../api-keys.ts';
 import { audit, type Actor } from '../audit.ts';
 import type { Db } from '../db/client.ts';
-import { apiKeys, templates, tenantConfigs, tenants, users, type UserRole } from '../db/schema.ts';
+import { rulesFromBusinessHours } from '../booking.ts';
+import {
+  apiKeys,
+  availabilityRules,
+  templates,
+  tenantConfigs,
+  tenants,
+  users,
+  type UserRole,
+} from '../db/schema.ts';
 import type { Auth } from './auth.ts';
 
 export interface NewUser {
@@ -110,10 +119,15 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
       const tenant = await systemDb.transaction(async (tx) => {
         const [t] = await tx.insert(tenants).values({ slug: input.slug, name: input.name }).returning();
         if (!t) throw new Error('tenant insert failed');
+        const config = PRESETS[input.preset](input.name);
+        // Bookable hours start as the business hours (one resource); editable later.
+        await tx
+          .insert(availabilityRules)
+          .values(rulesFromBusinessHours(config).map((r) => ({ ...r, tenantId: t.id })));
         await tx.insert(tenantConfigs).values({
           tenantId: t.id,
           revision: 1,
-          config: PRESETS[input.preset](input.name),
+          config,
           createdBy: actor.type === 'user' ? actor.id : null,
         });
         // Every registry template, both languages, starts as a draft the client must get approved.

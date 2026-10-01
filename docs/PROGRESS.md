@@ -44,3 +44,12 @@
 - `packages/sim`: `pnpm sim --tenant demo-clinic --persona <name|all>` — 9 scripted personas with hard checks.
 - Verified: lint, typecheck, 134 tests (8 assistant DB tests: qualification + scoring, cache-friendly request shape, debounce, run logging, emergency, human handover, invalid tool args, refusal, cost cap, Hindi holding reply). Live: `pnpm sim --persona all` passes 9/9 against the running app with workers (mock assistant).
 - Not verified: real-model behaviour — `assistant.eval.db.test.ts` (injection, invented prices, off-topic, no medical advice, Hinglish replies) needs `RUN_LLM_EVALS=1` and an Anthropic API key. Booking tools come in M4.
+
+## M4 — Booking
+
+- `packages/core`: availability engine (rules − blocked − busy incl. buffer, multi-resource, min notice), time-zone helpers via `Intl` (DST-safe), spread-out offers, slot labels.
+- `packages/integrations`: `EmailProvider` (Resend + fake), `CalendarProvider` (Google one-way + fake), Google OAuth helpers.
+- `apps/api`: `availability_rules`, `blocked_times`, `appointments` with an exclusion constraint against double booking (+ backfill of rules for existing tenants); booking module (find slots, book, reschedule, cancel, confirm, complete, no-show); `appointment-notify` job (lead template, staff WhatsApp/email, calendar sync); assistant tools `get_available_slots`, `book_slot`, `reschedule`, `cancel`; routes `/v1/slots`, `/v1/appointments*`, `/v1/availability`, `/v1/blocked-times*`, Google connect/callback.
+- Mock assistant books, reschedules and cancels by chat; new sim persona `reschedules_twice`.
+- Verified: lint, typecheck, 150 tests (incl. 10-way concurrent booking race, staff-confirm flow with notifications + calendar, reschedule/cancel, blocked times, booking via chat). Live: `pnpm sim --persona all` 10/10 against the running app with workers.
+- Not verified: real Google Calendar and Resend credentials.

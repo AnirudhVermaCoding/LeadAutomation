@@ -2,6 +2,7 @@ import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../system/context.ts';
 import { decorateRequests, registerAuthRoutes } from './auth.ts';
+import { registerBookingRoutes } from './booking.ts';
 import { registerIntakeRoutes } from './intake.ts';
 import { registerRoutes } from './routes.ts';
 import { registerWebhookRoutes } from './webhooks.ts';
@@ -15,4 +16,5 @@ export async function registerHttp(app: FastifyInstance, ctx: AppContext) {
   registerRoutes(app, ctx);
   registerIntakeRoutes(app, ctx);
   registerWebhookRoutes(app, ctx);
+  registerBookingRoutes(app, ctx);
 }
