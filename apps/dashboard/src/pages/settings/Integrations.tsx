@@ -141,6 +141,8 @@ export function Integrations({ canEdit }: { canEdit: boolean }) {
 
       {s.form_url && <FormEmbed url={s.form_url} />}
       {canEdit && <ApiKeys />}
+      {canEdit && <Webhooks />}
+      {canEdit && <DataExport />}
     </>
   );
 }
@@ -291,6 +293,134 @@ function ApiKeys() {
           Create key
         </Button>
       </div>
+    </Card>
+  );
+}
+
+const WEBHOOK_EVENTS = [
+  'lead.created',
+  'lead.qualified',
+  'appointment.booked',
+  'appointment.completed',
+  'lead.opted_out',
+] as const;
+
+/** Outbound webhooks: push events to the clinic's CRM / Zapier / Make, HMAC-signed. */
+function Webhooks() {
+  const qc = useQueryClient();
+  const hooks = useQuery({
+    queryKey: ['webhooks'],
+    queryFn: () =>
+      api<
+        {
+          id: string;
+          url: string;
+          events: string[];
+          lastStatus: number | null;
+          lastError: string | null;
+          lastDeliveredAt: string | null;
+        }[]
+      >('/v1/webhooks'),
+  });
+  const [url, setUrl] = useState('');
+  const [events, setEvents] = useState<string[]>([...WEBHOOK_EVENTS]);
+  const create = useMutation({
+    mutationFn: () => api<{ secret: string }>('/v1/webhooks', { body: { url, events } }),
+    onSuccess: () => {
+      setUrl('');
+      return qc.invalidateQueries({ queryKey: ['webhooks'] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/v1/webhooks/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['webhooks'] }),
+  });
+  return (
+    <Card
+      title="Webhooks"
+      actions={<span className="text-xs text-slate-500">Signed with x-instantlead-signature (see docs)</span>}
+    >
+      {create.data && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+          <p className="font-medium text-amber-900">Signing secret — copy it now, it won't be shown again:</p>
+          <code className="mt-1 block break-all font-mono text-xs">{create.data.secret}</code>
+        </div>
+      )}
+      <ul className="mb-3 divide-y divide-slate-100 text-sm">
+        {hooks.data?.map((h) => (
+          <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span className="min-w-0">
+              <code className="break-all text-xs">{h.url}</code>
+              <span className="block text-xs text-slate-500">
+                {h.events.join(', ')} ·{' '}
+                {h.lastError ? (
+                  <span className="text-red-700">{h.lastError}</span>
+                ) : h.lastDeliveredAt ? (
+                  `delivered ${fmt.ago(h.lastDeliveredAt)}`
+                ) : (
+                  'nothing sent yet'
+                )}
+              </span>
+            </span>
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => confirm('Delete this webhook?') && remove.mutate(h.id)}
+            >
+              Delete
+            </Button>
+          </li>
+        ))}
+      </ul>
+      <fieldset className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <legend className="sr-only">Events</legend>
+        {WEBHOOK_EVENTS.map((e) => (
+          <label key={e} className="inline-flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={events.includes(e)}
+              onChange={(ev) => setEvents(ev.target.checked ? [...events, e] : events.filter((x) => x !== e))}
+            />
+            {e}
+          </label>
+        ))}
+      </fieldset>
+      <div className="flex items-end gap-2">
+        <Field label="Endpoint URL">
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://hooks.zapier.com/…"
+          />
+        </Field>
+        <Button
+          size="sm"
+          disabled={!url.trim() || !events.length}
+          loading={create.isPending}
+          onClick={() => create.mutate()}
+        >
+          Add webhook
+        </Button>
+      </div>
+      {create.error && <p className="mt-2 text-sm text-red-700">{create.error.message}</p>}
+    </Card>
+  );
+}
+
+/** DPDP data portability: everything this clinic's account holds, as one JSON file. */
+function DataExport() {
+  return (
+    <Card title="Your data">
+      <p className="mb-3 text-sm text-slate-600">
+        Download every lead, message, consent and appointment as JSON. To erase one person, open their
+        conversation and use “Erase lead”.
+      </p>
+      <a
+        href="/v1/export"
+        className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+      >
+        Download export
+      </a>
     </Card>
   );
 }

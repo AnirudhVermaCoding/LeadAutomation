@@ -190,6 +190,7 @@ export function clinicPreset(variant: ClinicVariant, businessName = 'Demo Clinic
         google_review_link: 'https://g.page/r/REPLACE-WITH-CLINIC-REVIEW-ID/review',
       },
     },
+    privacy: { retention_days: 365, mode: 'anonymize' },
     reports: {
       weekly_day: 'mon',
       send_to: ['owner@example.com'],

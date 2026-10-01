@@ -106,6 +106,7 @@ export function realEstatePreset(businessName = 'Demo Realty'): TenantConfig {
       no_show_recovery: { enabled: true, after_hours: 2 },
       review_request: { enabled: false, after_hours: 24 },
     },
+    privacy: { retention_days: 365, mode: 'anonymize' },
     reports: {
       weekly_day: 'mon',
       send_to: ['owner@example.com'],

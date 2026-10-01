@@ -11,6 +11,8 @@ export const QUEUES = {
   sequenceStep: 'sequence-step',
   reportsCron: 'reports-cron',
   monitorCron: 'monitor-cron',
+  maintenanceCron: 'maintenance-cron',
+  webhookDeliver: 'webhook-deliver',
   deadLetter: 'dead-letter',
 } as const;
 
@@ -22,6 +24,8 @@ export interface JobData {
   [QUEUES.sequenceStep]: { tenantId: string; stepId: string };
   [QUEUES.reportsCron]: Record<string, never>;
   [QUEUES.monitorCron]: Record<string, never>;
+  [QUEUES.maintenanceCron]: Record<string, never>;
+  [QUEUES.webhookDeliver]: { tenantId: string; eventId: string; endpointId: string };
   [QUEUES.appointmentNotify]: {
     tenantId: string;
     appointmentId: string;
@@ -45,9 +49,15 @@ export const createBoss = (ownerUrl: string) => new PgBoss({ connectionString: o
 export async function ensureQueues(boss: PgBoss) {
   await boss.createQueue(QUEUES.deadLetter);
   // One sweep at a time (cron fires every minute).
-  for (const cron of [QUEUES.sequenceSweep, QUEUES.reportsCron, QUEUES.monitorCron])
+  for (const cron of [QUEUES.sequenceSweep, QUEUES.reportsCron, QUEUES.monitorCron, QUEUES.maintenanceCron])
     await boss.createQueue(cron, { policy: 'singleton', retryLimit: 0 });
-  for (const name of [QUEUES.firstReply, QUEUES.metaLeadgen, QUEUES.appointmentNotify, QUEUES.sequenceStep])
+  for (const name of [
+    QUEUES.firstReply,
+    QUEUES.metaLeadgen,
+    QUEUES.appointmentNotify,
+    QUEUES.sequenceStep,
+    QUEUES.webhookDeliver,
+  ])
     await boss.createQueue(name, RETRY);
   // stately + singletonKey(leadId): at most one queued and one running turn per lead, so a burst
   // of messages becomes one reply and two turns never race. Short retries: it's a live chat.

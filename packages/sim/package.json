@@ -4,5 +4,8 @@
   "type": "module",
   "bin": {
     "instantlead-sim": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@instantlead/core": "workspace:*"
   }
 }

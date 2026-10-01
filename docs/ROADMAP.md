@@ -21,7 +21,6 @@ Deferred during the build:
 - Opt-out confirmation message ("you won't hear from us again") — v0 opts out silently.
 - Treat Meta error 131050 (user stopped marketing messages) as a marketing-only suppression.
 - Sync template approval status from Meta's API instead of marking it by hand.
-- ONBOARDING (M8) must cover: Meta webhook URL `/webhooks/meta` + verify token, subscribing the page to `leadgen`, and adding the tenant's consent notice as the Lead Ads form's custom disclaimer.
 - Langfuse tracing for assistant runs (`llm_runs` covers cost/latency for now).
 - LLM-played simulator leads (v0 personas are scripted).
 - Rename `leads.phone_e_164` to `phone_e164` (drizzle snake_case artefact; cosmetic).
@@ -30,3 +29,8 @@ Deferred during the build:
 - Resource preferences (book a specific doctor) — v0 picks the first free resource.
 - Weekly report and agency alerts over WhatsApp (v0: email).
 - Retry / discard actions for dead-lettered jobs in the Agency view (v0: list only).
+- Webhook endpoint SSRF guard (block private/link-local addresses; v0 requires https in production only) and a "resend" / delivery log per webhook.
+- Content-Security-Policy header for the dashboard.
+- pg-boss LISTEN/NOTIFY for live queues once its wake-up behaviour under load is understood (v0 polls fast).
+- Automated off-site backups (v0: documented cron + `pg_dump`).
+- Data principal self-service (patients request access/erasure themselves; v0 goes through the clinic).

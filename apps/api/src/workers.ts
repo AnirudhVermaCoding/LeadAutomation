@@ -2,6 +2,8 @@ import { fillVariables } from '@instantlead/config';
 import { runAssistantTurn } from './assistant/agent.ts';
 import { notifyAppointmentChange } from './notify.ts';
 import { runMonitor } from './monitoring.ts';
+import { runRetention } from './privacy.ts';
+import { deliverWebhook, dispatchWebhookEvents } from './webhooks-out.ts';
 import { runScheduledReports } from './reports.ts';
 import { enrollFollowups, runStep, sweepDueSteps } from './sequences.ts';
 import { ChannelError, fetchMetaLead } from '@instantlead/integrations';
@@ -80,15 +82,53 @@ async function runJob(log: FastifyBaseLogger, name: string, fn: () => Promise<un
   }
 }
 
+/**
+ * Per-item queues: poll every 0.5 s, take up to 10 jobs and keep fetching while batches come back
+ * full, so a burst (100 form leads, or every follow-up released when quiet hours end) drains in
+ * seconds. Per-job results: one failure retries only that job. First replies (independent leads)
+ * run in parallel; everything else in order, so one lead's messages never overtake each other.
+ */
+async function workBatched<Q extends keyof JobData>(
+  ctx: AppContext,
+  log: FastifyBaseLogger,
+  queue: Q,
+  handler: (data: JobData[Q]) => Promise<unknown>,
+  parallel = false,
+) {
+  const one = async (job: { id: string; data: JobData[Q] }) => {
+    try {
+      await runJob(log, queue, () => handler(job.data));
+      return { id: job.id, status: 'completed' as const };
+    } catch (err) {
+      return { id: job.id, status: 'failed' as const, output: { message: String(err) } };
+    }
+  };
+  await ctx.boss.work<JobData[Q]>(
+    queue,
+    { pollingIntervalSeconds: 0.5, batchSize: 10, burstWhenBatchFull: true, perJobResults: true },
+    async (jobs) => {
+      if (parallel) return Promise.all(jobs.map(one));
+      const results = [];
+      for (const job of jobs) results.push(await one(job));
+      return results;
+    },
+  );
+}
+
 export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
-  await ctx.boss.work<JobData['first-reply']>(QUEUES.firstReply, async (jobs) => {
-    for (const job of jobs) await runJob(log, QUEUES.firstReply, () => sendFirstReply(ctx, job.data));
-  });
+  // The 60-second promise.
+  await workBatched(ctx, log, QUEUES.firstReply, (d) => sendFirstReply(ctx, d), true);
+  await workBatched(ctx, log, QUEUES.sequenceStep, (d) => runStep(ctx, d));
+  await workBatched(ctx, log, QUEUES.appointmentNotify, (d) => notifyAppointmentChange(ctx, d));
+  await workBatched(ctx, log, QUEUES.webhookDeliver, (d) => deliverWebhook(ctx, d));
   await ctx.boss.work<JobData['meta-leadgen']>(QUEUES.metaLeadgen, async (jobs) => {
     for (const job of jobs) await runJob(log, QUEUES.metaLeadgen, () => importMetaLead(ctx, job.data));
   });
   await ctx.boss.work(QUEUES.sequenceSweep, async () => {
-    await runJob(log, QUEUES.sequenceSweep, () => sweepDueSteps(ctx));
+    await runJob(log, QUEUES.sequenceSweep, async () => ({
+      steps: await sweepDueSteps(ctx),
+      webhookEvents: await dispatchWebhookEvents(ctx),
+    }));
   });
   await ctx.boss.schedule(QUEUES.sequenceSweep, '* * * * *');
   await ctx.boss.work(QUEUES.reportsCron, async () => {
@@ -106,17 +146,18 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
     );
   });
   await ctx.boss.schedule(QUEUES.monitorCron, '*/5 * * * *');
-  await ctx.boss.work<JobData['sequence-step']>(QUEUES.sequenceStep, async (jobs) => {
-    for (const job of jobs) await runJob(log, QUEUES.sequenceStep, () => runStep(ctx, job.data));
+  await ctx.boss.work(QUEUES.maintenanceCron, async () => {
+    await runJob(log, QUEUES.maintenanceCron, () => runRetention(ctx));
   });
-  await ctx.boss.work<JobData['appointment-notify']>(QUEUES.appointmentNotify, async (jobs) => {
-    for (const job of jobs)
-      await runJob(log, QUEUES.appointmentNotify, () => notifyAppointmentChange(ctx, job.data));
-  });
-  await ctx.boss.work<JobData['assistant-turn']>(QUEUES.assistantTurn, async (jobs) => {
-    for (const job of jobs)
-      await runJob(log, QUEUES.assistantTurn, () =>
-        runAssistantTurn(ctx, job.data.tenantId, job.data.leadId),
-      );
-  });
+  await ctx.boss.schedule(QUEUES.maintenanceCron, '30 2 * * *'); // daily, quiet time
+  await ctx.boss.work<JobData['assistant-turn']>(
+    QUEUES.assistantTurn,
+    { localConcurrency: 4 },
+    async (jobs) => {
+      for (const job of jobs)
+        await runJob(log, QUEUES.assistantTurn, () =>
+          runAssistantTurn(ctx, job.data.tenantId, job.data.leadId),
+        );
+    },
+  );
 }

@@ -50,6 +50,13 @@
       "when": 1790876101509,
       "tag": "0006_m7_reports_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790876463727,
+      "tag": "0007_m8_webhooks_privacy",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import { decorateRequests, registerAuthRoutes } from './auth.ts';
 import { registerBookingRoutes } from './booking.ts';
 import { registerDashboardRoutes } from './dashboard.ts';
 import { registerIntakeRoutes } from './intake.ts';
+import { registerPrivacyRoutes } from './privacy.ts';
 import { registerRoutes } from './routes.ts';
 import { registerWebhookRoutes } from './webhooks.ts';
 
@@ -22,6 +23,7 @@ export async function registerHttp(app: FastifyInstance, ctx: AppContext) {
   registerWebhookRoutes(app, ctx);
   registerBookingRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
+  registerPrivacyRoutes(app, ctx);
   await serveDashboard(app);
 }
 

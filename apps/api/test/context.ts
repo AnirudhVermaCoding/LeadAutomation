@@ -12,6 +12,7 @@ import { runAssistantTurn } from '../src/assistant/agent.ts';
 import { notifyAppointmentChange } from '../src/notify.ts';
 import { runStep, sweepDueSteps } from '../src/sequences.ts';
 import { importMetaLead, sendFirstReply } from '../src/workers.ts';
+import { deliverWebhook } from '../src/webhooks-out.ts';
 import type { CalendarProvider } from '@instantlead/integrations';
 import type { Tx } from '../src/db/client.ts';
 import type { LlmProvider } from '@instantlead/integrations';
@@ -97,6 +98,7 @@ export async function createTestContext(
         [QUEUES.metaLeadgen]: (d: JobData['meta-leadgen']) => importMetaLead(ctx, d),
         [QUEUES.appointmentNotify]: (d: JobData['appointment-notify']) => notifyAppointmentChange(ctx, d),
         [QUEUES.sequenceStep]: (d: JobData['sequence-step']) => runStep(ctx, d),
+        [QUEUES.webhookDeliver]: (d: JobData['webhook-deliver']) => deliverWebhook(ctx, d),
       } as Record<string, (d: never) => Promise<unknown>>;
       for (const [queue, handler] of Object.entries(handlers)) {
         for (;;) {

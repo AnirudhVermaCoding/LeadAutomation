@@ -334,6 +334,8 @@ export const events = pgTable(
     type: text().notNull(),
     payload: jsonb().$type<Record<string, unknown>>().notNull(),
     occurredAt: ts().notNull(),
+    /** Outbound-webhook outbox: set once the event has been fanned out to the tenant's endpoints. */
+    webhookDispatchedAt: ts(),
     ...timestamps,
   },
   () => [tenantScoped()],
@@ -561,6 +563,51 @@ export const alerts = pgTable(
     message: text().notNull(),
     lastSeenAt: ts().notNull(),
     lastSentAt: ts(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);
+
+// ---- M8: integrations out, privacy ----
+
+export const WEBHOOK_EVENTS = [
+  'lead.created',
+  'lead.qualified',
+  'appointment.booked',
+  'appointment.completed',
+  'lead.opted_out',
+] as const;
+
+/** Client-owned endpoints that receive signed event POSTs (secret kept in tenant_secrets). */
+export const webhookEndpoints = pgTable(
+  'webhook_endpoints',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    url: text().notNull(),
+    events: jsonb().$type<string[]>().notNull(),
+    active: boolean().notNull().default(true),
+    lastStatus: integer(),
+    lastError: text(),
+    lastDeliveredAt: ts(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);
+
+/** DPDP: personal-data breaches the agency recorded (and when the Board / users were told). */
+export const breachLog = pgTable(
+  'breach_log',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid().references(() => tenants.id, { onDelete: 'set null' }),
+    detectedAt: ts().notNull(),
+    description: text().notNull(),
+    affectedCount: integer(),
+    reportedToBoardAt: ts(),
+    usersNotifiedAt: ts(),
+    notes: text(),
+    recordedBy: uuid(),
     ...timestamps,
   },
   () => [tenantScoped()],

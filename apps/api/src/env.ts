@@ -7,6 +7,11 @@ const EnvSchema = z
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().positive().default(3000),
     HOST: z.string().default('0.0.0.0'),
+    /** true when a reverse proxy (Caddy) sits in front; see docs/OPERATIONS.md. */
+    TRUST_PROXY: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
     /** Public base URL of the app (auth cookies, trusted origin). */
     APP_URL: z.url().default('http://localhost:3000'),
@@ -18,6 +23,19 @@ const EnvSchema = z
     SECRETS_KEY: z
       .string()
       .refine((v) => Buffer.from(v, 'base64').length === 32, 'must be 32 random bytes, base64-encoded'),
+    /**
+     * Keys the opt-out phone hashes; defaults to SECRETS_KEY. Before the first SECRETS_KEY
+     * rotation set it to the current SECRETS_KEY and never change it (docs/OPERATIONS.md).
+     */
+    HASH_KEY: z
+      .string()
+      .refine((v) => Buffer.from(v, 'base64').length === 32, 'must be 32 random bytes, base64-encoded')
+      .optional(),
+    /** Only during a key rotation: the old key, still accepted for decryption. */
+    SECRETS_KEY_PREVIOUS: z
+      .string()
+      .refine((v) => Buffer.from(v, 'base64').length === 32, 'must be 32 random bytes, base64-encoded')
+      .optional(),
     AGENCY_ADMIN_EMAIL: z.email().optional(),
     AGENCY_ADMIN_PASSWORD: z.string().min(12, 'use at least 12 characters').optional(),
     SEED_PASSWORD: z.string().min(12, 'use at least 12 characters').optional(),

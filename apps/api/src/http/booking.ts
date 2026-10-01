@@ -233,7 +233,7 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
 
   app.get('/v1/integrations/google/start', { preHandler: admins }, (req, reply) => {
     if (!ctx.googleOAuth) return reply.code(503).send({ error: 'google_not_configured' });
-    const state = makeState(ctx.secretsKey, tenantOf(req), ctx.clock.now().getTime() + 10 * 60_000);
+    const state = makeState(ctx.hashKey, tenantOf(req), ctx.clock.now().getTime() + 10 * 60_000);
     return { url: googleConsentUrl(ctx.googleOAuth, state) };
   });
 
@@ -242,7 +242,7 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
     const q = z
       .object({ code: z.string().min(1).optional(), state: z.string().min(1), error: z.string().optional() })
       .parse(req.query);
-    const tenantId = readState(ctx.secretsKey, q.state, ctx.clock.now().getTime());
+    const tenantId = readState(ctx.hashKey, q.state, ctx.clock.now().getTime());
     if (!oauth || !tenantId)
       return reply.code(400).type('text/plain').send('This link has expired. Start again from Settings.');
     if (q.error || !q.code) return reply.redirect(`${ctx.env.APP_URL}/settings?google=denied`);

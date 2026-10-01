@@ -1,0 +1,6 @@
+# Automatic HTTPS (Let's Encrypt) for the app. Replace the domain; point its DNS A record at the VPS.
+app.example.in {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	reverse_proxy app:3000
+}

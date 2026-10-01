@@ -11,7 +11,7 @@ import {
   type GoogleOAuthClient,
   type LlmProvider,
 } from '@instantlead/integrations';
-import { getTenantSecret } from '../secrets.ts';
+import { getTenantSecret, type SecretsKey } from '../secrets.ts';
 import type { Tx } from '../db/client.ts';
 import { createFakeLlm } from '../assistant/fake-llm.ts';
 import { createDb } from '../db/client.ts';
@@ -35,7 +35,9 @@ export function createAppContext(
   const owner = createSystemDb(env.DATABASE_OWNER_URL);
   const auth = createAuth(owner.db, env);
   const boss = createBoss(env.DATABASE_OWNER_URL);
-  const secretsKey = Buffer.from(env.SECRETS_KEY, 'base64');
+  const secretsKey: SecretsKey = env.SECRETS_KEY_PREVIOUS
+    ? [Buffer.from(env.SECRETS_KEY, 'base64'), Buffer.from(env.SECRETS_KEY_PREVIOUS, 'base64')]
+    : Buffer.from(env.SECRETS_KEY, 'base64');
   const mockMode = env.ALLOW_FAKE_CHANNEL ?? env.NODE_ENV !== 'production';
   // Mock mode runs on a clock the demo can fast-forward; production on real time.
   const clock: Clock = clockOverride ?? (mockMode ? new OffsetClock() : systemClock);
@@ -78,6 +80,7 @@ export function createAppContext(
     enqueue: createEnqueue(boss),
     system: createSystem({ systemDb: owner.db, auth, clock }),
     secretsKey,
+    hashKey: Buffer.from(env.HASH_KEY ?? env.SECRETS_KEY, 'base64'),
     fakeChannel: createFakeChannel(),
     allowFakeChannel: mockMode,
     llm:

@@ -7,7 +7,8 @@
     "start": "node src/main.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=../../.env src/db/migrate.ts",
-    "db:seed": "node --env-file-if-exists=../../.env src/system/seed.ts"
+    "db:seed": "node --env-file-if-exists=../../.env src/system/seed.ts",
+    "secrets:rotate": "node --env-file-if-exists=../../.env src/system/rotate-secrets.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "^10.3.0",

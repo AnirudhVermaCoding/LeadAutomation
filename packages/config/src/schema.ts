@@ -86,6 +86,13 @@ export const TenantConfigSchema = z.strictObject({
       google_review_link: z.url().optional(),
     }),
   }),
+  /** DPDP: how long to keep lead data after the last activity. 0 = keep. Optional for configs saved before it existed. */
+  privacy: z
+    .strictObject({
+      retention_days: z.int().min(0).max(3650),
+      mode: z.enum(['anonymize', 'delete']),
+    })
+    .optional(),
   reports: z.strictObject({
     weekly_day: Weekday,
     send_to: z.array(z.email('must be an email address')),

@@ -8,14 +8,18 @@ import { rulesFromBusinessHours } from '../booking.ts';
 import {
   alerts,
   apiKeys,
+  breachLog,
+  tenantSecrets,
   availabilityRules,
   templates,
   tenantConfigs,
   tenants,
   users,
   type UserRole,
+  WEBHOOK_EVENTS,
 } from '../db/schema.ts';
 import type { Auth } from './auth.ts';
+import { decryptSecret, encryptSecret, type SecretsKey } from '../secrets.ts';
 
 export interface NewUser {
   email: string;
@@ -160,6 +164,56 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         llmUsd: Number(r.llm_usd),
         bookings: Number(r.bookings),
       }));
+    },
+
+    /**
+     * Outbound-webhook outbox: claim subscribed events not yet fanned out (one pass marks them
+     * dispatched, SKIP LOCKED for concurrent sweeps) and return the endpoints to deliver to.
+     */
+    async claimWebhookEvents(limit = 500) {
+      const res = await systemDb.execute<{ tenant_id: string; id: string; endpoint_ids: string[] }>(sql`
+        with due as (
+          select e.id from events e
+          where e.webhook_dispatched_at is null
+            and e.type in (${sql.join(
+              WEBHOOK_EVENTS.map((t) => sql`${t}`),
+              sql`, `,
+            )})
+          order by e.occurred_at
+          limit ${limit}
+          for update skip locked
+        )
+        update events e set webhook_dispatched_at = now()
+        from due where e.id = due.id
+        returning e.tenant_id, e.id, array(
+          select w.id from webhook_endpoints w
+          where w.tenant_id = e.tenant_id and w.active and w.events ? e.type
+        ) as endpoint_ids`);
+      return res.rows
+        .filter((r) => r.endpoint_ids.length)
+        .map((r) => ({ tenantId: r.tenant_id, eventId: r.id, endpointIds: r.endpoint_ids }));
+    },
+
+    /** Re-encrypt every tenant secret with the current key (after setting SECRETS_KEY_PREVIOUS). */
+    async rotateSecrets(keys: SecretsKey) {
+      const rows = await systemDb.select().from(tenantSecrets);
+      for (const r of rows) {
+        const plain = decryptSecret(keys, r.tenantId, r.name, r.valueEnc);
+        await systemDb
+          .update(tenantSecrets)
+          .set({ valueEnc: encryptSecret(keys, r.tenantId, r.name, plain) })
+          .where(eq(tenantSecrets.id, r.id));
+      }
+      return rows.length;
+    },
+
+    /** Agency: the DPDP breach register. */
+    listBreaches() {
+      return systemDb.select().from(breachLog).orderBy(desc(breachLog.detectedAt)).limit(200);
+    },
+    async recordBreach(b: typeof breachLog.$inferInsert) {
+      const [row] = await systemDb.insert(breachLog).values(b).returning();
+      return row;
     },
 
     /** Cross-tenant health signals for the agency monitor (real time, DB clock). */

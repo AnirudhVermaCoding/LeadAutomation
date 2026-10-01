@@ -23,6 +23,10 @@ pnpm build          # build the dashboard (served by the API from apps/dashboard
 pnpm db:generate    # drizzle-kit generate after editing apps/api/src/db/schema.ts
 pnpm db:migrate     # create app role, run migrations, grant
 pnpm db:seed        # agency admin + demo tenants (idempotent)
+pnpm demo           # 4 acceptance scenarios against the running app (needs AGENCY_ADMIN_* in .env)
+pnpm loadtest       # 100 leads / 20 s, pass if p95 first reply < 60 s
+pnpm e2e            # Playwright smoke against the running app (seeded)
+pnpm secrets:rotate # re-encrypt tenant secrets after setting SECRETS_KEY_PREVIOUS
 docker compose up -d --build   # db + app on :3000
 ```
 
@@ -32,7 +36,8 @@ docker compose up -d --build   # db + app on :3000
 - `packages/core` — pure domain logic (Clock, lead state machine, later scoring/availability). No I/O, no runtime deps.
 - `packages/config` — tenant config zod schema, validation, presets (`clinic` dental/skin/hair, `real_estate`), WhatsApp template registry.
 - `packages/integrations` — `MessagingChannel` (fake, Meta Cloud API), Meta webhook parsing/signatures, Lead Ads fetch.
-- `packages/sim` — `pnpm sim`: scripted personas against a running API.
+- `packages/sim` — `pnpm sim` (scripted personas), `pnpm demo`, `pnpm loadtest` against a running API.
+- `e2e/` — Playwright smoke test. `deploy/` — Caddy + production compose overlay. Docs index in README.md.
 - `apps/dashboard` — React + Vite + Tailwind + TanStack Query. `pnpm dev:dashboard` (port 5173, proxies to :3000); `pnpm build` → `dist/`, which the API serves same-origin in production. Pages: Today, Inbox, Demo sandbox, Settings, Agency.
 
 ## Conventions (enforced where possible)
@@ -48,7 +53,8 @@ docker compose up -d --build   # db + app on :3000
   `apps/api/src/system/**` (lint rule) — use it for pre-tenant lookups only.
 - **Messaging:** every outbound message goes through `sendToLead` (apps/api/src/outbound.ts): opt-out, 24 h window, template approval, idempotency key. Jobs are enqueued with `ctx.enqueue(tx, …)` inside the tenant transaction.
 - **Validation:** zod at every trust boundary (HTTP bodies, env, webhooks, config, LLM tool args).
-- **Secrets:** never committed. Per-tenant secrets go through `apps/api/src/secrets.ts` (AES-256-GCM).
+- **Secrets:** never committed. Per-tenant secrets go through `apps/api/src/secrets.ts` (AES-256-GCM, key ring for rotation). Phone hashes use `ctx.hashKey`, never the rotating secrets key.
+- **Privacy:** erasure/retention live in `apps/api/src/privacy.ts`; outbound webhooks in `webhooks-out.ts` (events table is the outbox).
 - **External APIs:** check current official docs before implementing; everything must work in mock mode with zero credentials.
 - **Auth:** Better Auth (admin plugin) on the owner connection; roles `agency_admin | client_admin | client_staff`.
   Routes use `guard(ctx, roles, { tenant })`: client users and API keys are pinned to their tenant; only the

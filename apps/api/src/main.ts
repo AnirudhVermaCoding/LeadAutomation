@@ -6,7 +6,7 @@ import { startWorkers } from './workers.ts';
 
 const env = loadEnv();
 const ctx = createAppContext(env);
-const app = buildApp({ logLevel: env.LOG_LEVEL, checkDb: ctx.checkDb });
+const app = buildApp({ logLevel: env.LOG_LEVEL, checkDb: ctx.checkDb, trustProxy: env.TRUST_PROXY });
 await registerHttp(app, ctx);
 await ctx.start();
 if (env.ROLE !== 'api') await startWorkers(ctx, app.log);

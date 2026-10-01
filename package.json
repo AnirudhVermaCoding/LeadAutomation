@@ -20,10 +20,15 @@
     "db:local": "node --env-file-if-exists=.env apps/api/test/dev-db.ts",
     "sim": "node --env-file-if-exists=.env packages/sim/src/cli.ts",
     "dev:dashboard": "pnpm --filter @instantlead/dashboard dev",
-    "build": "pnpm --filter @instantlead/dashboard build"
+    "build": "pnpm --filter @instantlead/dashboard build",
+    "secrets:rotate": "pnpm --filter @instantlead/api secrets:rotate",
+    "demo": "node --env-file-if-exists=.env packages/sim/src/demo.ts",
+    "loadtest": "node --env-file-if-exists=.env packages/sim/src/loadtest.ts",
+    "e2e": "node --env-file-if-exists=.env node_modules/@playwright/test/cli.js test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^24.19.0",
     "eslint": "^10.11.0",
     "prettier": "^3.9.9",

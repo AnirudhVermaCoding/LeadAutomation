@@ -72,3 +72,14 @@
 - Weekly report: leads, median first-reply time, reply rate, qualified, booked, shows / no-shows / show rate, estimated revenue from visits, upcoming bookings, topics asked, running cost this month; stored in `reports`, emailed once per period; `GET /v1/reports`, `GET /v1/reports/preview`; dashboard Reports page (live 7-day funnel, KPI tiles, email preview, history).
 - Monitoring: derived integration health (`GET /v1/health`, Settings → Integrations → Health); 5-minute monitor with deduped alert emails; dead-letter list; Agency → Monitoring with "Run checks now".
 - Verified: lint, typecheck, full suite incl. demo scenario 4 (a week of activity → Monday 09:05 report with exact numbers, sent once) and monitor alert + dedupe. Live: Reports page with real numbers from earlier simulator runs.
+
+## M8 — Hardening, privacy, demo, load test
+
+- Privacy (DPDP): lead erasure (`DELETE /v1/leads/:id`, Inbox → Erase lead; opt-out hash survives), tenant export (`GET /v1/export`, Settings → Your data), per-tenant retention (`privacy.retention_days` + `anonymize|delete`, daily maintenance cron), agency breach register (`/v1/admin/breaches`).
+- Outbound webhooks: endpoints per tenant (Settings → Integrations → Webhooks), event outbox claimed by the per-minute sweep, signed delivery job (`x-instantlead-signature: t=…,v1=HMAC`), 5xx/429/network retried, other 4xx final, last status shown.
+- Security: `nosniff`, `referrer-policy`, `X-Frame-Options: DENY` (except the embeddable `/f/*` form); `TRUST_PROXY` for Caddy; key rotation (`SECRETS_KEY_PREVIOUS` + `pnpm secrets:rotate`) with a separate stable `HASH_KEY` for opt-out hashes and OAuth state.
+- Workers for per-item queues: 0.5 s polling, batches of 10 with per-job results, bursting while batches are full (first replies in parallel). Found by the demo: a backlog of ~200 follow-ups released at once drained at one job per 2 s.
+- `pnpm demo` (4 scenarios on fresh tenants over HTTP with clock fast-forward), `pnpm loadtest`, `pnpm e2e` (Playwright smoke, desktop + mobile), `deploy/` (Caddy + prod compose overlay).
+- Docs: README (architecture diagram), ONBOARDING, DEMO-SCRIPT, PRIVACY, OPERATIONS (deploy, backups, monitoring, rotation, webhooks, incidents).
+- Verified: lint, typecheck, 183 tests (10 new: headers, webhooks create/deliver/sign/4xx/delete, erasure, export, retention, breach register, key rotation). Live against the running app: `pnpm demo` 4/4 (happy path with 2 h reminder + review request; silent lead day 0→2→5→unresponsive; no-show recovery; weekly report leads 3 / replied 1 / booked 2 / shows 1 / no-shows 1 / ₹4,000); `pnpm loadtest` 100 leads in 20 s → first reply p50 0.27 s, p95 0.50 s (was p95 172 s before the worker change); `pnpm e2e` 2/2.
+- Not verified: Docker images and the Caddy overlay (Docker Desktop is broken on the dev machine), real Meta / Anthropic / Resend / Google credentials, real-model evals (`RUN_LLM_EVALS=1`).

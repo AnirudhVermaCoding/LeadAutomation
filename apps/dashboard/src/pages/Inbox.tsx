@@ -31,7 +31,7 @@ const FILTERS = [
   },
 ] as const;
 
-export function InboxPage({ config }: { config: TenantConfig; role: Role }) {
+export function InboxPage({ config, role }: { config: TenantConfig; role: Role }) {
   const { search } = useLocation();
   const selected = new URLSearchParams(search).get('lead');
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['key']>('all');
@@ -98,7 +98,7 @@ export function InboxPage({ config }: { config: TenantConfig; role: Role }) {
         </div>
         <div className={cx(!selected && 'hidden lg:block')}>
           {selected ? (
-            <Conversation leadId={selected} config={config} />
+            <Conversation leadId={selected} config={config} canErase={role !== 'client_staff'} />
           ) : (
             <Card>
               <Empty title="Pick a lead to see the conversation" />
@@ -110,7 +110,15 @@ export function InboxPage({ config }: { config: TenantConfig; role: Role }) {
   );
 }
 
-function Conversation({ leadId, config }: { leadId: string; config: TenantConfig }) {
+function Conversation({
+  leadId,
+  config,
+  canErase,
+}: {
+  leadId: string;
+  config: TenantConfig;
+  canErase: boolean;
+}) {
   const qc = useQueryClient();
   const detail = useQuery({
     queryKey: ['lead', leadId],
@@ -125,6 +133,14 @@ function Conversation({ leadId, config }: { leadId: string; config: TenantConfig
   const toggle = useMutation({
     mutationFn: (to: 'takeover' | 'resume') => api(`/v1/leads/${leadId}/${to}`, { method: 'POST' }),
     onSettled: refresh,
+  });
+  // DPDP erasure request: removes the lead and their messages for good (opt-outs stay suppressed).
+  const erase = useMutation({
+    mutationFn: () => api(`/v1/leads/${leadId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['inbox'] });
+      navigate('/inbox');
+    },
   });
   const [text, setText] = useState('');
   const send = useMutation({
@@ -229,6 +245,19 @@ function Conversation({ leadId, config }: { leadId: string; config: TenantConfig
             {lead.aiPaused
               ? 'AI is paused for this lead.'
               : 'Sending a reply does not pause the AI. Use "Take over" for that.'}
+            {canErase && (
+              <button
+                type="button"
+                className="ml-2 text-red-700 underline-offset-2 hover:underline"
+                onClick={() =>
+                  confirm(
+                    'Erase this person and all their messages permanently? Use this for a data deletion request.',
+                  ) && erase.mutate()
+                }
+              >
+                Erase lead
+              </button>
+            )}
           </p>
           <Button type="submit" size="sm" loading={send.isPending} disabled={!windowOpen || !text.trim()}>
             <Send className="size-3.5" aria-hidden /> Send

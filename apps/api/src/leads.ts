@@ -12,11 +12,14 @@ import { and, eq } from 'drizzle-orm';
 import type { TenantTx, Tx } from './db/client.ts';
 import { consents, events, leads, suppressions, type LeadSource } from './db/schema.ts';
 import { QUEUES, type Enqueue } from './jobs.ts';
+import type { SecretsKey } from './secrets.ts';
 import { stopOnLeadEvent } from './sequences.ts';
 
 export interface LeadDeps {
   clock: Clock;
-  secretsKey: Buffer;
+  secretsKey: SecretsKey;
+  /** Keys the opt-out phone hashes. Stable: never rotated with SECRETS_KEY. */
+  hashKey: Buffer;
   enqueue: Enqueue;
 }
 
@@ -34,7 +37,7 @@ export async function isSuppressed(tx: Tx, deps: LeadDeps, tenantId: string, e16
   const [row] = await tx
     .select({ id: suppressions.id })
     .from(suppressions)
-    .where(eq(suppressions.phoneHash, hashPhone(deps.secretsKey, tenantId, e164)));
+    .where(eq(suppressions.phoneHash, hashPhone(deps.hashKey, tenantId, e164)));
   return Boolean(row);
 }
 
@@ -64,7 +67,7 @@ export async function optOut(
   await tx
     .insert(suppressions)
     .values({
-      phoneHash: hashPhone(deps.secretsKey, tenantId, lead.phoneE164),
+      phoneHash: hashPhone(deps.hashKey, tenantId, lead.phoneE164),
       reason,
       optedOutAt: deps.clock.now(),
     })

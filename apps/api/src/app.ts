@@ -23,11 +23,14 @@ const REDACT = [
 export interface AppDeps {
   logLevel: string;
   checkDb: () => Promise<void>;
+  /** Behind a reverse proxy (Caddy): take the client IP from X-Forwarded-For (rate limits, logs). */
+  trustProxy?: boolean;
 }
 
 export function buildApp(deps: AppDeps) {
   const app = Fastify({
     logger: { level: deps.logLevel, redact: { paths: REDACT, censor: '[redacted]' } },
+    trustProxy: deps.trustProxy ?? false,
   });
 
   app.setErrorHandler((err, _req, reply) => {
@@ -40,6 +43,13 @@ export function buildApp(deps: AppDeps) {
       error: status >= 500 ? 'internal_error' : 'bad_request',
       message: status >= 500 ? undefined : err instanceof Error ? err.message : undefined,
     });
+  });
+
+  // Baseline security headers. The public lead form (/f/*) may be iframed by the clinic's site.
+  app.addHook('onSend', async (req, reply) => {
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('referrer-policy', 'strict-origin-when-cross-origin');
+    if (!req.url.startsWith('/f/')) reply.header('x-frame-options', 'DENY');
   });
 
   app.get('/healthz', () => ({ ok: true }));
