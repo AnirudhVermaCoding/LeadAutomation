@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "test:fast": "vitest run --project unit --project api",
     "format": "prettier --write .",
     "db:generate": "pnpm --filter @instantlead/api db:generate",
     "db:migrate": "pnpm --filter @instantlead/api db:migrate",

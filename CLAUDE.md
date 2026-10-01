@@ -6,12 +6,16 @@ out-of-scope items in `docs/ROADMAP.md`.
 
 ## Commands
 
+pnpm is pinned to 12.x via `packageManager`; on this machine run it as `corepack pnpm …`.
+
 ```bash
+cp .env.example .env
 pnpm install
-pnpm dev            # API with node --watch (needs Postgres: docker compose up -d db)
+pnpm dev            # API with node --watch (needs Postgres: docker compose up -d db, then db:migrate)
 pnpm lint           # eslint (type-aware)
 pnpm typecheck      # tsc --noEmit over the whole workspace
-pnpm test           # vitest; DB tests start a Postgres testcontainer (Docker must be running)
+pnpm test           # all vitest projects; *.db.test.ts start a Postgres testcontainer (Docker required)
+pnpm test:fast      # unit + api projects only, no Docker
 pnpm db:generate    # drizzle-kit generate after editing apps/api/src/db/schema.ts
 pnpm db:migrate     # create app role, run migrations, grant
 pnpm db:seed        # agency admin + demo tenants (idempotent)
@@ -39,4 +43,8 @@ docker compose up -d --build   # db + app on :3000
 - **Validation:** zod at every trust boundary (HTTP bodies, env, webhooks, config, LLM tool args).
 - **Secrets:** never committed. Per-tenant secrets go through `apps/api/src/secrets.ts` (AES-256-GCM).
 - **External APIs:** check current official docs before implementing; everything must work in mock mode with zero credentials.
-- Tests are co-located `*.test.ts`. After each milestone: tests green, update `docs/PROGRESS.md`, commit.
+- **Auth:** Better Auth (admin plugin) on the owner connection; roles `agency_admin | client_admin | client_staff`.
+  Routes use `guard(ctx, roles, { tenant })`: client users and API keys are pinned to their tenant; only the
+  agency admin picks one via `x-tenant-id`. No public sign-up — create users via `ctx.system.createUser`.
+- Tests are co-located `*.test.ts`; DB-backed ones are `*.db.test.ts` and use `apps/api/test/context.ts`
+  (fresh cloned database + wired app per file). After each milestone: tests green, update `docs/PROGRESS.md`, commit.

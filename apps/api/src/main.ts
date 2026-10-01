@@ -1,21 +1,20 @@
-import pg from 'pg';
 import { buildApp } from './app.ts';
 import { loadEnv } from './env.ts';
+import { decorateRequests, registerAuthRoutes } from './http/auth.ts';
+import { registerRoutes } from './http/routes.ts';
+import { createAppContext } from './system/context.ts';
 
 const env = loadEnv();
-const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: 10 });
-
-const app = buildApp({
-  logLevel: env.LOG_LEVEL,
-  checkDb: async () => {
-    await pool.query('select 1');
-  },
-});
+const ctx = createAppContext(env);
+const app = buildApp({ logLevel: env.LOG_LEVEL, checkDb: ctx.checkDb });
+decorateRequests(app);
+registerAuthRoutes(app, ctx);
+registerRoutes(app, ctx);
 
 async function shutdown(signal: string) {
   app.log.info({ signal }, 'shutting down');
   await app.close();
-  await pool.end();
+  await ctx.close();
   process.exit(0);
 }
 process.once('SIGINT', () => void shutdown('SIGINT'));

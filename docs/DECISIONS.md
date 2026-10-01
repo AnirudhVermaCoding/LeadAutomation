@@ -15,3 +15,9 @@ Format: decision — why — alternative considered.
 11. **zod at boundaries via plain `parse` + Fastify error handler; no type-provider plugin.** — One less dependency.
 12. **WhatsApp: Meta Cloud API direct first (FIRST_CLIENT_BSP = none).** BSP adapters wait for a client that uses one.
 13. **Repo lives at `C:\dev\instantlead`, outside OneDrive.** — OneDrive sync fights node_modules and pnpm links.
+14. **Better Auth admin plugin for roles and server-side user creation.** — With `disableSignUp`, the plain sign-up endpoint is blocked even server-side; the admin plugin's `createUser` works without a session when called from the server and sets `role` + `tenantId`. Roles: `agency_admin` (admin permissions), `client_admin`/`client_staff` (none inside Better Auth; app-level guards decide). — Alt: sign-up then patch the row (non-atomic).
+15. **API keys use SHA-256, not a password KDF.** — Keys are 192-bit random, so brute force is not a concern; lookup is a single indexed equality.
+16. **Tenant secrets bind tenant + name as AES-GCM AAD**, so a ciphertext copied to another tenant's row fails to decrypt. `v1.` prefix leaves room for key rotation (M8).
+17. **Config history = append-only `tenant_configs` revisions**; import/export is the same JSON as GET/PUT `/v1/config`.
+18. **`.env.example` dev secrets are refused when `NODE_ENV=production`.** — Keeps `docker compose up` zero-config locally without risking a shipped dev key.
+19. **DB tests live in a separate Vitest project** (`*.db.test.ts`); each test file clones a migrated template database, so files run in parallel against a clean DB.

@@ -1,0 +1,73 @@
+import { describe, expect, test } from 'vitest';
+import { PRESETS, PRESET_KEYS, validateConfig, type TenantConfig } from './index.ts';
+
+const clinic = (): TenantConfig => PRESETS.clinic_dental('Smile Dental');
+const errorsFor = (mutate: (c: TenantConfig) => void): string[] => {
+  const c = clinic();
+  mutate(c);
+  const r = validateConfig(c);
+  return r.ok ? [] : r.errors;
+};
+
+describe('presets', () => {
+  test.each(PRESET_KEYS)('%s is valid', (key) => {
+    const r = validateConfig(PRESETS[key]());
+    expect(r.ok ? [] : r.errors).toEqual([]);
+  });
+
+  test('JSON export -> import round-trips', () => {
+    const r = validateConfig(JSON.parse(JSON.stringify(clinic())));
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe('readable errors', () => {
+  test('unknown template variable names the field and suggests valid ones', () => {
+    expect(errorsFor((c) => (c.qualification.safety.emergency_response = 'Hi {{answers.budget}}'))).toEqual([
+      expect.stringMatching(
+        /^qualification\.safety\.emergency_response: unknown variable \{\{answers\.budget\}\}; use one of/,
+      ),
+    ]);
+  });
+
+  test('answers variables are allowed for configured question keys', () => {
+    expect(errorsFor((c) => (c.intake.consent_notice_text += ' Re: {{answers.urgency}}'))).toEqual([]);
+  });
+
+  test('cross-field rules', () => {
+    const errors = errorsFor((c) => {
+      c.locale.timezone = 'India/Delhi';
+      c.brand.default_language = 'hi';
+      c.brand.languages = ['en'];
+      c.booking.services.push({ name: 'consultation', duration_minutes: 10 });
+      c.qualification.scoring.hot = 2;
+      c.qualification.scoring.disqualifiers = [{ question: 'urgency', any_of: ['next_year'] }];
+    });
+    expect(errors).toEqual([
+      'brand.default_language: "hi" must also be listed in brand.languages',
+      'locale.timezone: "India/Delhi" is not a known timezone (e.g. "Asia/Kolkata")',
+      'qualification.scoring: hot threshold (2) must be higher than warm (4)',
+      'qualification.scoring.disqualifiers[0].any_of: "next_year" is not an option of question "urgency"',
+      'booking.services: service "consultation" is listed more than once',
+    ]);
+  });
+
+  test('field errors carry their path', () => {
+    const c = clinic() as unknown as Record<string, unknown>;
+    (c.booking as Record<string, unknown>).mode = 'manual';
+    (c.locale as { quiet_hours: { start: string } }).quiet_hours.start = '9pm';
+    c.extra = true;
+    const r = validateConfig(c);
+    expect(r.ok).toBe(false);
+    const errors = r.ok ? [] : r.errors;
+    expect(errors).toContainEqual(expect.stringMatching(/^booking\.mode: /));
+    expect(errors).toContainEqual('locale.quiet_hours.start: use 24-hour HH:MM, e.g. "09:30"');
+    expect(errors).toContainEqual(expect.stringMatching(/^\(root\): Unrecognized key.*extra/));
+  });
+
+  test('review link required when review requests are on', () => {
+    expect(errorsFor((c) => delete c.sequences.review_request.google_review_link)).toEqual([
+      'sequences.review_request.google_review_link: required when review requests are enabled',
+    ]);
+  });
+});

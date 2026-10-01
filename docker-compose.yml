@@ -20,7 +20,9 @@ services:
     env_file: .env
     environment:
       # Same credentials as .env, but the database host is the compose service.
-      DATABASE_URL: postgres://instantlead:${POSTGRES_PASSWORD:-instantlead_dev}@db:5432/instantlead
+      DATABASE_OWNER_URL: postgres://instantlead:${POSTGRES_PASSWORD:-instantlead_dev}@db:5432/instantlead
+      DATABASE_URL: postgres://instantlead_app:${APP_DB_PASSWORD:-app_dev_pw}@db:5432/instantlead
+    command: ['sh', '-c', 'node apps/api/src/db/migrate.ts && exec node apps/api/src/main.ts']
     ports:
       - '3000:3000'
     depends_on:
