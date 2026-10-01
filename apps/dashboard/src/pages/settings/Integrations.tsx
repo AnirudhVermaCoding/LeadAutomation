@@ -93,6 +93,8 @@ export function Integrations({ canEdit }: { canEdit: boolean }) {
         )}
       </Card>
 
+      <Health />
+
       {canEdit && (
         <div className="grid gap-4 lg:grid-cols-2">
           <Connect
@@ -289,6 +291,47 @@ function ApiKeys() {
           Create key
         </Button>
       </div>
+    </Card>
+  );
+}
+
+interface HealthData {
+  lastSuccessfulSend: string | null;
+  lastDeliveryReceipt: string | null;
+  lastInboundMessage: string | null;
+  failedSends24h: number;
+  llmErrors24h: number;
+  lastAssistantReply: string | null;
+}
+
+/** What actually happened recently: the quickest way to see if something is broken. */
+function Health() {
+  const q = useQuery({
+    queryKey: ['health'],
+    queryFn: () => api<HealthData>('/v1/health'),
+    refetchInterval: 30_000,
+  });
+  if (!q.data) return null;
+  const h = q.data;
+  const when = (iso: string | null) => (iso ? fmt.ago(iso) : 'never');
+  const rows: [string, string, boolean][] = [
+    ['Last message sent', when(h.lastSuccessfulSend), true],
+    ['Last delivery receipt (webhook)', when(h.lastDeliveryReceipt), true],
+    ['Last message received', when(h.lastInboundMessage), true],
+    ['Last AI reply', when(h.lastAssistantReply), true],
+    ['Failed sends (24 h)', String(h.failedSends24h), h.failedSends24h === 0],
+    ['AI errors (24 h)', String(h.llmErrors24h), h.llmErrors24h === 0],
+  ];
+  return (
+    <Card title="Health">
+      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        {rows.map(([label, value, ok]) => (
+          <div key={label} className="flex justify-between gap-3">
+            <dt className="text-slate-500">{label}</dt>
+            <dd className={ok ? 'font-medium text-slate-800' : 'font-semibold text-red-700'}>{value}</dd>
+          </div>
+        ))}
+      </dl>
     </Card>
   );
 }

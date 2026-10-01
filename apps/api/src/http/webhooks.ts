@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { handleInboundMessage, handleStatusUpdate } from '../inbound.ts';
 import { QUEUES } from '../jobs.ts';
+import { runScheduledReports } from '../reports.ts';
 import { sweepDueSteps } from '../sequences.ts';
 import type { AppContext } from '../system/context.ts';
 import { guard } from './auth.ts';
@@ -126,7 +127,8 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
         .parse(req.body);
       clock.advance(hours * 3_600_000);
       const queued = await sweepDueSteps(ctx);
-      return { now: ctx.clock.now().toISOString(), steps_queued: queued };
+      const reports = await runScheduledReports(ctx);
+      return { now: ctx.clock.now().toISOString(), steps_queued: queued, reports_sent: reports.length };
     },
   );
 }

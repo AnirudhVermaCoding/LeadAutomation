@@ -43,6 +43,13 @@
       "when": 1790874567691,
       "tag": "0005_m5_sequences",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790876101509,
+      "tag": "0006_m7_reports_alerts",
+      "breakpoints": true
     }
   ]
 }

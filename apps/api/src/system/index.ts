@@ -1,11 +1,12 @@
 import { PRESETS, TEMPLATE_KEYS, TEMPLATE_LANGUAGES, TEMPLATES, type PresetKey } from '@instantlead/config';
 import type { Clock } from '@instantlead/core';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { generateApiKey, hashApiKey } from '../api-keys.ts';
 import { audit, type Actor } from '../audit.ts';
 import type { Db } from '../db/client.ts';
 import { rulesFromBusinessHours } from '../booking.ts';
 import {
+  alerts,
   apiKeys,
   availabilityRules,
   templates,
@@ -159,6 +160,73 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         llmUsd: Number(r.llm_usd),
         bookings: Number(r.bookings),
       }));
+    },
+
+    /** Cross-tenant health signals for the agency monitor (real time, DB clock). */
+    async monitorSignals() {
+      const rows = async <T extends Record<string, unknown>>(q: ReturnType<typeof sql>) =>
+        (await systemDb.execute<T>(q)).rows;
+      return {
+        failedSends: await rows<{ tenant_id: string; name: string; n: string }>(sql`
+          select m.tenant_id, t.name, count(*) as n from messages m join tenants t on t.id = m.tenant_id
+          where m.direction = 'out' and m.status = 'failed' and m.updated_at > now() - interval '1 hour'
+          group by m.tenant_id, t.name having count(*) >= 3`),
+        llmErrors: await rows<{ tenant_id: string; name: string; n: string }>(sql`
+          select r.tenant_id, t.name, count(*) as n from llm_runs r join tenants t on t.id = r.tenant_id
+          where r.error is not null and r.created_at > now() - interval '1 hour'
+          group by r.tenant_id, t.name having count(*) >= 5`),
+        // Live WhatsApp sends but no delivery receipt for an hour: the webhook is probably not reaching us.
+        noReceipts: await rows<{ tenant_id: string; name: string; n: string }>(sql`
+          select m.tenant_id, t.name, count(*) as n from messages m join tenants t on t.id = m.tenant_id
+          where m.provider = 'meta' and m.direction = 'out' and m.created_at > now() - interval '24 hours'
+          group by m.tenant_id, t.name
+          having count(*) filter (where m.status in ('delivered', 'read')) = 0
+             and min(m.created_at) < now() - interval '1 hour'`),
+        backlog: Number(
+          (
+            await rows<{ n: string }>(sql`
+            select count(*) as n from pgboss.job where state = 'created' and start_after < now() - interval '10 minutes'`)
+          )[0]?.n ?? 0,
+        ),
+        deadLetters: Number(
+          (
+            await rows<{ n: string }>(sql`
+            select count(*) as n from pgboss.job where name = 'dead-letter' and created_on > now() - interval '1 hour'`)
+          )[0]?.n ?? 0,
+        ),
+      };
+    },
+
+    /** Upsert an alert; true when it should be (re)sent (first time, or quiet for 6 h). */
+    async raiseAlert(a: { key: string; tenantId: string | null; kind: string; message: string; now: Date }) {
+      const [row] = await systemDb
+        .insert(alerts)
+        .values({ key: a.key, tenantId: a.tenantId, kind: a.kind, message: a.message, lastSeenAt: a.now })
+        .onConflictDoUpdate({ target: alerts.key, set: { message: a.message, lastSeenAt: a.now } })
+        .returning({ id: alerts.id, lastSentAt: alerts.lastSentAt });
+      if (!row || (row.lastSentAt && a.now.getTime() - row.lastSentAt.getTime() < 6 * 3_600_000))
+        return false;
+      await systemDb.update(alerts).set({ lastSentAt: a.now }).where(eq(alerts.id, row.id));
+      return true;
+    },
+
+    recentAlerts() {
+      return systemDb.select().from(alerts).orderBy(desc(alerts.lastSeenAt)).limit(50);
+    },
+
+    /** Jobs that exhausted their retries (agency view). */
+    async deadLetters(limit = 50) {
+      return (
+        await systemDb.execute<{
+          id: string;
+          source_name: string | null;
+          data: unknown;
+          source_output: unknown;
+          created_on: Date;
+        }>(sql`
+          select id, source_name, data, source_output, created_on from pgboss.job where name = 'dead-letter'
+          order by created_on desc limit ${limit}`)
+      ).rows;
     },
 
     async findTenantBySlug(slug: string) {

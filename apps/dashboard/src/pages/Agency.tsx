@@ -131,6 +131,8 @@ export function Agency({ onSwitch }: { onSwitch: (tenantId: string) => void }) {
         )}
       </Card>
 
+      <Monitoring />
+
       <Card title="New client from a preset">
         <form onSubmit={submit} className="grid gap-4 sm:grid-cols-3">
           <Field label="Business name">
@@ -202,5 +204,81 @@ export function Agency({ onSwitch }: { onSwitch: (tenantId: string) => void }) {
         </form>
       </Card>
     </>
+  );
+}
+
+interface MonitoringData {
+  alerts: { id: string; kind: string; message: string; lastSeenAt: string; lastSentAt: string | null }[];
+  deadLetters: {
+    id: string;
+    source_name: string | null;
+    data: unknown;
+    source_output: unknown;
+    created_on: string;
+  }[];
+}
+
+function Monitoring() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ['monitoring'],
+    queryFn: () => api<MonitoringData>('/v1/admin/monitoring'),
+    refetchInterval: 60_000,
+  });
+  const run = useMutation({
+    mutationFn: () => api<{ found: number; emailed: number }>('/v1/admin/monitoring/run', { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['monitoring'] }),
+  });
+  return (
+    <Card
+      title="Monitoring"
+      className="mb-6"
+      actions={
+        <Button size="sm" variant="secondary" loading={run.isPending} onClick={() => run.mutate()}>
+          Run checks now
+        </Button>
+      }
+    >
+      {q.isPending && <Loading />}
+      {q.error && <ErrorState error={q.error} />}
+      {run.data && (
+        <p className="mb-3 text-sm text-slate-600">
+          {run.data.found} issue(s) found, {run.data.emailed} alert email(s) sent.
+        </p>
+      )}
+      {q.data && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Alerts</h3>
+            {!q.data.alerts.length && <p className="text-sm text-slate-500">All quiet.</p>}
+            <ul className="space-y-2 text-sm">
+              {q.data.alerts.map((a) => (
+                <li key={a.id} className="rounded-lg bg-amber-50 p-2 text-amber-900">
+                  {a.message}
+                  <span className="block text-xs text-amber-700">last seen {fmt.ago(a.lastSeenAt)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Failed jobs (dead letter)
+            </h3>
+            {!q.data.deadLetters.length && <p className="text-sm text-slate-500">None.</p>}
+            <ul className="space-y-2 text-xs">
+              {q.data.deadLetters.map((d) => (
+                <li key={d.id} className="rounded-lg bg-slate-50 p-2">
+                  <span className="font-medium text-slate-800">{d.source_name ?? 'job'}</span> ·{' '}
+                  {fmt.ago(d.created_on)}
+                  <code className="mt-1 block break-all text-slate-600">
+                    {JSON.stringify(d.source_output ?? d.data).slice(0, 300)}
+                  </code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

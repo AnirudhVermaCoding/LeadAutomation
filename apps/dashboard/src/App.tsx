@@ -1,10 +1,21 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, CalendarCheck, FlaskConical, Inbox, LogOut, Menu, Settings, X } from 'lucide-react';
+import {
+  BarChart3,
+  Building2,
+  CalendarCheck,
+  FlaskConical,
+  Inbox,
+  LogOut,
+  Menu,
+  Settings,
+  X,
+} from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, ApiError, tenantSelection, type Me, type TenantConfig, type TenantRow } from './api.ts';
 import { Agency } from './pages/Agency.tsx';
 import { InboxPage } from './pages/Inbox.tsx';
 import { Login } from './pages/Login.tsx';
+import { ReportsPage } from './pages/Reports.tsx';
 import { Sandbox } from './pages/Sandbox.tsx';
 import { SettingsPage } from './pages/Settings.tsx';
 import { Today } from './pages/Today.tsx';
@@ -14,6 +25,7 @@ import { Button, cx, ErrorState, Loading, Select } from './ui.tsx';
 const NAV = [
   { path: '/', label: 'Today', icon: CalendarCheck },
   { path: '/inbox', label: 'Inbox', icon: Inbox },
+  { path: '/reports', label: 'Reports', icon: BarChart3 },
   { path: '/sandbox', label: 'Demo sandbox', icon: FlaskConical },
   { path: '/settings', label: 'Settings', icon: Settings },
 ] as const;
@@ -79,6 +91,8 @@ function Shell({ me }: { me: Me }) {
     switch (path) {
       case '/inbox':
         return <InboxPage {...props} />;
+      case '/reports':
+        return <ReportsPage {...props} />;
       case '/sandbox':
         return <Sandbox {...props} />;
       case '/settings':

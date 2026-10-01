@@ -9,6 +9,8 @@ export const QUEUES = {
   appointmentNotify: 'appointment-notify',
   sequenceSweep: 'sequence-sweep',
   sequenceStep: 'sequence-step',
+  reportsCron: 'reports-cron',
+  monitorCron: 'monitor-cron',
   deadLetter: 'dead-letter',
 } as const;
 
@@ -18,6 +20,8 @@ export interface JobData {
   [QUEUES.assistantTurn]: { tenantId: string; leadId: string };
   [QUEUES.sequenceSweep]: Record<string, never>;
   [QUEUES.sequenceStep]: { tenantId: string; stepId: string };
+  [QUEUES.reportsCron]: Record<string, never>;
+  [QUEUES.monitorCron]: Record<string, never>;
   [QUEUES.appointmentNotify]: {
     tenantId: string;
     appointmentId: string;
@@ -41,7 +45,8 @@ export const createBoss = (ownerUrl: string) => new PgBoss({ connectionString: o
 export async function ensureQueues(boss: PgBoss) {
   await boss.createQueue(QUEUES.deadLetter);
   // One sweep at a time (cron fires every minute).
-  await boss.createQueue(QUEUES.sequenceSweep, { policy: 'singleton', retryLimit: 0 });
+  for (const cron of [QUEUES.sequenceSweep, QUEUES.reportsCron, QUEUES.monitorCron])
+    await boss.createQueue(cron, { policy: 'singleton', retryLimit: 0 });
   for (const name of [QUEUES.firstReply, QUEUES.metaLeadgen, QUEUES.appointmentNotify, QUEUES.sequenceStep])
     await boss.createQueue(name, RETRY);
   // stately + singletonKey(leadId): at most one queued and one running turn per lead, so a burst

@@ -18,7 +18,9 @@ import {
   tenantConfigs,
 } from '../db/schema.ts';
 import { transitionLead } from '../leads.ts';
+import { integrationHealth, runMonitor } from '../monitoring.ts';
 import { sendToLead } from '../outbound.ts';
+import { computeReport, listReports, renderReportEmail } from '../reports.ts';
 import { getTenantSecret } from '../secrets.ts';
 import type { AppContext } from '../system/context.ts';
 import { guard, type Principal } from './auth.ts';
@@ -257,6 +259,47 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
     });
     return rows.length ? { revoked: true } : reply.code(404).send({ error: 'not_found' });
   });
+
+  // ---- Reports ----
+
+  app.get('/v1/reports', { preHandler: staff }, (req) => withTenant(ctx.db, tenantOf(req), listReports));
+
+  // Preview / live funnel: any window (default: the last 7 days up to now). Same numbers as the weekly email.
+  app.get('/v1/reports/preview', { preHandler: staff }, async (req) => {
+    const q = z
+      .object({
+        from: z.iso.datetime({ offset: true }).optional(),
+        to: z.iso.datetime({ offset: true }).optional(),
+      })
+      .parse(req.query);
+    const now = ctx.clock.now();
+    const end = q.to ? new Date(q.to) : now;
+    const start = q.from ? new Date(q.from) : new Date(end.getTime() - 7 * 86_400_000);
+    return withTenant(ctx.db, tenantOf(req), async (tx) => {
+      const config = (await getActiveConfig(tx))?.config;
+      if (!config) throw new Error('tenant has no config');
+      const data = await computeReport(tx, config, start, end, now);
+      return { data, email: renderReportEmail(config.brand.business_name, data) };
+    });
+  });
+
+  // ---- Monitoring ----
+
+  app.get('/v1/health', { preHandler: staff }, (req) => withTenant(ctx.db, tenantOf(req), integrationHealth));
+
+  app.get('/v1/admin/monitoring', { preHandler: agency }, async () => ({
+    alerts: await ctx.system.recentAlerts(),
+    deadLetters: await ctx.system.deadLetters(),
+  }));
+
+  app.post('/v1/admin/monitoring/run', { preHandler: agency }, () =>
+    runMonitor({
+      system: ctx.system,
+      email: ctx.email,
+      alertEmail: ctx.env.ALERT_EMAIL,
+      now: () => ctx.clock.now(),
+    }),
+  );
 
   // Inbox list with the few filters the UI needs.
   app.get('/v1/inbox', { preHandler: staff }, async (req) => {

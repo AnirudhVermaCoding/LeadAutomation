@@ -28,3 +28,5 @@ Deferred during the build:
 - Two-way calendar sync (read busy times from Google Calendar).
 - Cancellation template (v0 can only tell a lead their appointment is cancelled inside the 24 h window).
 - Resource preferences (book a specific doctor) — v0 picks the first free resource.
+- Weekly report and agency alerts over WhatsApp (v0: email).
+- Retry / discard actions for dead-lettered jobs in the Agency view (v0: list only).

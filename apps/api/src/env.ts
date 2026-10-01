@@ -41,6 +41,8 @@ const EnvSchema = z
     /** Google OAuth client for the optional one-way Google Calendar sync. */
     GOOGLE_CLIENT_ID: z.string().min(1).optional(),
     GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+    /** Where operational alerts go (failed sends, silent webhooks, LLM errors, dead jobs). */
+    ALERT_EMAIL: z.email().optional(),
   })
   .superRefine((env, ctx) => {
     // .env.example ships dev-only secrets; never let them reach production.

@@ -66,3 +66,9 @@
 - `apps/api`: `GET /v1/leads/:id`, `/v1/inbox`, takeover / resume, staff send, `/v1/onboarding`, `/v1/integrations/test` (Meta number check, test email), API key management, `/v1/admin/usage`, `/v1/dev/clock`; static dashboard serving with SPA fallback; template buttons stored on messages.
 - Verified: lint, typecheck (API + dashboard), build, 169 tests (5 new: inbox actions incl. window enforcement, onboarding, API keys, integration tests, agency usage). Live in the browser: sign-in, Today (desktop + mobile), Inbox, full Sandbox flow (form lead → template + buttons → qualify → offered slots → booked pending → `booking_pending` template), Settings validation error in the save bar.
 - Fixed while testing: React crash from `scrollIntoView()` returning a Promise in newer Chromium; static serving of assets built after server start; mobile row layout on Today; tapped-button text in the sandbox.
+
+## M7 — Reports + monitoring
+
+- Weekly report: leads, median first-reply time, reply rate, qualified, booked, shows / no-shows / show rate, estimated revenue from visits, upcoming bookings, topics asked, running cost this month; stored in `reports`, emailed once per period; `GET /v1/reports`, `GET /v1/reports/preview`; dashboard Reports page (live 7-day funnel, KPI tiles, email preview, history).
+- Monitoring: derived integration health (`GET /v1/health`, Settings → Integrations → Health); 5-minute monitor with deduped alert emails; dead-letter list; Agency → Monitoring with "Run checks now".
+- Verified: lint, typecheck, full suite incl. demo scenario 4 (a week of activity → Monday 09:05 report with exact numbers, sent once) and monitor alert + dedupe. Live: Reports page with real numbers from earlier simulator runs.

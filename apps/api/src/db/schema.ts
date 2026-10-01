@@ -510,3 +510,58 @@ export const enrollmentSteps = pgTable(
   },
   (t) => [unique().on(t.enrollmentId, t.step), tenantScoped()],
 );
+
+// ---- M7: reports, alerts ----
+
+export interface ReportData {
+  period: { start: string; end: string; label: string };
+  leads: number;
+  medianFirstResponseSec: number | null;
+  repliedLeads: number;
+  replyRate: number | null;
+  qualified: number;
+  booked: number;
+  shows: number;
+  noShows: number;
+  showRate: number | null;
+  revenueRecoveredInr: number;
+  upcomingBookings: number;
+  topTopics: { topic: string; count: number }[];
+  costs: { monthStart: string; whatsappInr: number; llmUsd: number };
+}
+
+/** Weekly reports as sent (numbers computed from the database, never by the LLM). */
+export const reports = pgTable(
+  'reports',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    periodStart: ts().notNull(),
+    periodEnd: ts().notNull(),
+    data: jsonb().$type<ReportData>().notNull(),
+    sentTo: jsonb().$type<string[]>(),
+    sentAt: ts(),
+    error: text(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.tenantId, t.periodStart), tenantScoped()],
+);
+
+/**
+ * Operational alerts for the agency (deduped by key). tenant_id is null for system-wide ones
+ * (queue backlog, dead letters); RLS still applies, so the app role never sees those.
+ */
+export const alerts = pgTable(
+  'alerts',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid().references(() => tenants.id, { onDelete: 'cascade' }),
+    key: text().notNull().unique(),
+    kind: text().notNull(),
+    message: text().notNull(),
+    lastSeenAt: ts().notNull(),
+    lastSentAt: ts(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);

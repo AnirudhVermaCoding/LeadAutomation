@@ -1,6 +1,8 @@
 import { fillVariables } from '@instantlead/config';
 import { runAssistantTurn } from './assistant/agent.ts';
 import { notifyAppointmentChange } from './notify.ts';
+import { runMonitor } from './monitoring.ts';
+import { runScheduledReports } from './reports.ts';
 import { enrollFollowups, runStep, sweepDueSteps } from './sequences.ts';
 import { ChannelError, fetchMetaLead } from '@instantlead/integrations';
 import type { FastifyBaseLogger } from 'fastify';
@@ -89,6 +91,21 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
     await runJob(log, QUEUES.sequenceSweep, () => sweepDueSteps(ctx));
   });
   await ctx.boss.schedule(QUEUES.sequenceSweep, '* * * * *');
+  await ctx.boss.work(QUEUES.reportsCron, async () => {
+    await runJob(log, QUEUES.reportsCron, () => runScheduledReports(ctx));
+  });
+  await ctx.boss.schedule(QUEUES.reportsCron, '5 * * * *'); // hourly; each tenant's report day/time is checked inside
+  await ctx.boss.work(QUEUES.monitorCron, async () => {
+    await runJob(log, QUEUES.monitorCron, () =>
+      runMonitor({
+        system: ctx.system,
+        email: ctx.email,
+        alertEmail: ctx.env.ALERT_EMAIL,
+        now: () => ctx.clock.now(),
+      }),
+    );
+  });
+  await ctx.boss.schedule(QUEUES.monitorCron, '*/5 * * * *');
   await ctx.boss.work<JobData['sequence-step']>(QUEUES.sequenceStep, async (jobs) => {
     for (const job of jobs) await runJob(log, QUEUES.sequenceStep, () => runStep(ctx, job.data));
   });
