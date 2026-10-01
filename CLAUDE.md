@@ -11,11 +11,13 @@ pnpm is pinned to 12.x via `packageManager`; on this machine run it as `corepack
 ```bash
 cp .env.example .env
 pnpm install
-pnpm dev            # API with node --watch (needs Postgres: docker compose up -d db, then db:migrate)
+pnpm db:local       # Postgres 16 on :5432 without Docker (embedded-postgres, data in .data/pg)
+pnpm dev            # API + workers with node --watch (needs Postgres: db:local or docker compose up -d db; then db:migrate)
 pnpm lint           # eslint (type-aware)
 pnpm typecheck      # tsc --noEmit over the whole workspace
-pnpm test           # all vitest projects; *.db.test.ts start a Postgres testcontainer (Docker required)
-pnpm test:fast      # unit + api projects only, no Docker
+pnpm test           # all vitest projects; *.db.test.ts start a throwaway embedded Postgres 16
+pnpm test:fast      # unit + api projects only, no database
+pnpm templates:doc  # regenerate docs/TEMPLATES-TO-SUBMIT.md after editing the template registry
 pnpm db:generate    # drizzle-kit generate after editing apps/api/src/db/schema.ts
 pnpm db:migrate     # create app role, run migrations, grant
 pnpm db:seed        # agency admin + demo tenants (idempotent)
@@ -26,8 +28,9 @@ docker compose up -d --build   # db + app on :3000
 
 - `apps/api` — Fastify HTTP, webhooks, workers (one process, `ROLE=all|api|worker`). DB schema, migrations, repositories.
 - `packages/core` — pure domain logic (Clock, lead state machine, later scoring/availability). No I/O, no runtime deps.
-- `packages/config` — tenant config zod schema, validation, presets (`clinic` dental/skin/hair, `real_estate`).
-- Later: `packages/integrations` (M2), `packages/sim` (M3), `apps/dashboard` (M6). Create packages only when needed.
+- `packages/config` — tenant config zod schema, validation, presets (`clinic` dental/skin/hair, `real_estate`), WhatsApp template registry.
+- `packages/integrations` — `MessagingChannel` (fake, Meta Cloud API), Meta webhook parsing/signatures, Lead Ads fetch.
+- Later: `packages/sim` (M3), `apps/dashboard` (M6). Create packages only when needed.
 
 ## Conventions (enforced where possible)
 
@@ -40,6 +43,7 @@ docker compose up -d --build   # db + app on :3000
 - **Tenancy:** every tenant table has `tenant_id` + RLS policy via `tenantScoped()`. Touch tenant data only inside
   `withTenant(tenantId, tx => …)`. `systemDb` (owner role, bypasses RLS) may be imported only under
   `apps/api/src/system/**` (lint rule) — use it for pre-tenant lookups only.
+- **Messaging:** every outbound message goes through `sendToLead` (apps/api/src/outbound.ts): opt-out, 24 h window, template approval, idempotency key. Jobs are enqueued with `ctx.enqueue(tx, …)` inside the tenant transaction.
 - **Validation:** zod at every trust boundary (HTTP bodies, env, webhooks, config, LLM tool args).
 - **Secrets:** never committed. Per-tenant secrets go through `apps/api/src/secrets.ts` (AES-256-GCM).
 - **External APIs:** check current official docs before implementing; everything must work in mock mode with zero credentials.

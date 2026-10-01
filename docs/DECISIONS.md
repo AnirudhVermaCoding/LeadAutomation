@@ -30,3 +30,4 @@ Format: decision — why — alternative considered.
 26. **Hosted form is a same-origin page (`/f/:formKey`) embedded by iframe.** No CORS, consent text comes from config, honeypot + per-IP rate limit (`@fastify/rate-limit`).
 27. **Duplicate submissions (same phone) don't re-send the first reply.** They update missing name/email and add a consent record. Re-engagement of old leads is the AI's job once they reply.
 28. **Graph API pinned to v23.0**, matching Meta's published OpenAPI spec; bump deliberately.
+29. **DB tests run on embedded-postgres (real Postgres 16 binaries from npm), not testcontainers.** — Works without Docker or admin rights (Docker Desktop is broken on the dev machine), starts faster, same on CI. `pnpm db:local` uses it for local dev too. Compose remains the deployment path. The cluster is forced to UTF-8 (Windows defaults to WIN1252, which rejects Hindi).

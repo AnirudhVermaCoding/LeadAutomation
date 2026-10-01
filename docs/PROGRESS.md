@@ -18,8 +18,7 @@
   - Better Auth email+password at `/api/auth/*`, no public sign-up; role/tenant guards; API-key principals.
   - AES-256-GCM tenant secrets; hashed API keys; audit log.
   - Routes: `GET /v1/me`, `GET|PUT /v1/config`, `GET|POST /v1/admin/tenants`. `pnpm db:seed` creates the agency admin and two demo tenants.
-- Verified: lint, typecheck, `test:fast` (unit + api, 21 tests).
-- **Not yet verified:** the DB test suite (`tenancy.db.test.ts`, `routes.db.test.ts`: tenant isolation, RLS guard, append-only audit, secrets/API keys against Postgres, HTTP role checks), `docker compose up`, `db:migrate`, `db:seed`. Docker Desktop 4.84 on the dev machine crashes at startup (stale `AppData\Local\Docker\run\dockerInference` socket). Run `pnpm test` once Docker works; CI runs them on push.
+- Verified: lint, typecheck, all tests incl. DB suite (see M2 note on how).
 
 ## M2 — Intake + channels
 
@@ -32,5 +31,6 @@
   - pg-boss queues (`first-reply`, `meta-leadgen`, dead letter); jobs enqueue in the same transaction as the lead.
   - `sendToLead` (window, opt-out, template approval, idempotency, cost estimate), inbound handling (dedupe, window, opt-out, state), delivery statuses (monotonic).
   - Routes: `/webhooks/meta`, `/v1/dev/whatsapp/inbound` (mock mode), `/v1/integrations*`, `/v1/templates*`, `/v1/leads`, `/v1/leads/:id/messages`.
-- Verified: lint, typecheck, `test:fast` (70 tests: core, config, integrations, CSV, env).
-- **Not yet verified:** `messaging.db.test.ts` (intake → first reply, dedupe, consent, window, opt-out incl. after erasure, Meta webhooks, approved templates via Cloud API, statuses, Lead Ads, hosted form, CSV) and all M1 DB tests — they need Docker, which is still broken on this machine.
+- Verified: lint, typecheck, full suite (107 tests) on real Postgres 16 incl. tenant isolation, M2 messaging flows and HTTP roles. Docker Desktop is broken on the dev machine, so DB tests now use embedded-postgres (no Docker).
+- Verified live: `pnpm db:local` + `db:migrate` + `db:seed` (idempotent) + API with workers: API lead -> approved-template first reply (fake channel) in ~2.5 s; hosted form renders with the tenant consent notice.
+- Not verified: `docker compose up` (needs Docker) and real Meta credentials.

@@ -12,7 +12,7 @@ export default defineConfig({
         },
       },
       {
-        // Needs Docker: one Postgres testcontainer per run, a cloned database per test file.
+        // Real Postgres 16 (embedded-postgres) per run, a cloned database per test file.
         test: {
           name: 'db',
           include: ['apps/api/src/**/*.db.test.ts'],

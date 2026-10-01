@@ -5,6 +5,11 @@ import { withTenant } from './db/client.ts';
 import { apiKeys, auditLog, sessions, tenantConfigs, tenants, tenantSecrets, users } from './db/schema.ts';
 import { getTenantSecret, setTenantSecret } from './secrets.ts';
 
+/** Drizzle wraps driver errors; the Postgres message is on `cause`. */
+const pgError = (message: RegExp) => ({
+  cause: expect.objectContaining({ message: expect.stringMatching(message) }),
+});
+
 let t: TestContext;
 let A: string;
 let B: string;
@@ -86,7 +91,7 @@ describe('tenant isolation (RLS)', () => {
       withTenant(t.ctx.db, A, (tx) =>
         tx.insert(tenantSecrets).values({ tenantId: B, name: 'x', valueEnc: 'v1.x.y.z' }),
       ),
-    ).rejects.toThrow(/row-level security/);
+    ).rejects.toMatchObject(pgError(/row-level security/));
   });
 
   test('without a tenant context nothing is visible and nothing can be written', async () => {
@@ -100,9 +105,11 @@ describe('tenant isolation (RLS)', () => {
   test('audit log is append-only and auth tables are off-limits to the app role', async () => {
     await expect(
       withTenant(t.ctx.db, A, (tx) => tx.update(auditLog).set({ action: 'tampered' })),
-    ).rejects.toThrow(/permission denied/);
-    await expect(withTenant(t.ctx.db, A, (tx) => tx.delete(auditLog))).rejects.toThrow(/permission denied/);
-    await expect(t.ctx.db.select().from(sessions)).rejects.toThrow(/permission denied/);
+    ).rejects.toMatchObject(pgError(/permission denied/));
+    await expect(withTenant(t.ctx.db, A, (tx) => tx.delete(auditLog))).rejects.toMatchObject(
+      pgError(/permission denied/),
+    );
+    await expect(t.ctx.db.select().from(sessions)).rejects.toMatchObject(pgError(/permission denied/));
   });
 
   test('withTenant rejects non-uuid tenant ids', async () => {

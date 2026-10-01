@@ -22,8 +22,8 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "^12.2.0",
     "@types/pg": "^8.23.1",
-    "drizzle-kit": "~0.31.11"
+    "drizzle-kit": "~0.31.11",
+    "embedded-postgres": "16.14.0-beta.17"
   }
 }

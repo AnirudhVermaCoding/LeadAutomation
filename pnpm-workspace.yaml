@@ -14,6 +14,8 @@ minimumReleaseAgeExclude:
 # pnpm 11+: dependency build scripts are opt-in.
 allowBuilds:
   esbuild: true
+  '@embedded-postgres/windows-x64': true
+  '@embedded-postgres/linux-x64': true
   cpu-features: false
   protobufjs: false
   ssh2: false
