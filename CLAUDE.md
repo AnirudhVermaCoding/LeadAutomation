@@ -6,7 +6,7 @@ out-of-scope items in `docs/ROADMAP.md`.
 
 ## Commands
 
-pnpm is pinned to 12.x via `packageManager`; on this machine run it as `corepack pnpm …`.
+pnpm is pinned to 12.x via `packageManager`.
 
 ```bash
 cp .env.example .env
