@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: instantlead
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-instantlead_dev}
+      POSTGRES_DB: instantlead
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U instantlead -d instantlead']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # Same credentials as .env, but the database host is the compose service.
+      DATABASE_URL: postgres://instantlead:${POSTGRES_PASSWORD:-instantlead_dev}@db:5432/instantlead
+    ports:
+      - '3000:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

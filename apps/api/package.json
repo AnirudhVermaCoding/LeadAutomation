@@ -1,0 +1,17 @@
+{
+  "name": "@instantlead/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=../../.env src/main.ts",
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "fastify": "^5.12.5",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

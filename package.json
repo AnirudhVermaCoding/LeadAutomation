@@ -1,0 +1,28 @@
+{
+  "name": "instantlead",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=24.12"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @instantlead/api dev",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "db:generate": "pnpm --filter @instantlead/api db:generate",
+    "db:migrate": "pnpm --filter @instantlead/api db:migrate",
+    "db:seed": "pnpm --filter @instantlead/api db:seed"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.0",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.9",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.2"
+  }
+}
