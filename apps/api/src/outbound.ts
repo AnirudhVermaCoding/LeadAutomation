@@ -175,6 +175,13 @@ export async function sendToLead(
       body: renderTemplateBody(key, language, values),
       templateKey: key,
       templateCategory: def.category,
+      // Kept so the inbox and demo sandbox can show (and tap) the quick-reply buttons.
+      payload: {
+        buttons: (def.buttons as readonly { id: string; text: Record<string, string> }[]).map((b) => ({
+          id: buttonPayload(key, b.id),
+          title: b.text[language] ?? b.text.en ?? b.id,
+        })),
+      },
       language,
       provider: channel.provider,
       idempotencyKey: req.idempotencyKey,

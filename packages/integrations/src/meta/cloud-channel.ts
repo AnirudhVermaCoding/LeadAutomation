@@ -94,3 +94,36 @@ export function createMetaCloudChannel(opts: {
     },
   };
 }
+
+/** Check credentials without sending anything: read the phone number's details. */
+export async function verifyWhatsAppNumber(opts: {
+  accessToken: string;
+  phoneNumberId: string;
+  fetch?: Fetch;
+  baseUrl?: string;
+}): Promise<{ displayPhoneNumber?: string; verifiedName?: string; qualityRating?: string }> {
+  const url = new URL(
+    `${opts.baseUrl ?? GRAPH_BASE_URL}/${GRAPH_VERSION}/${encodeURIComponent(opts.phoneNumberId)}`,
+  );
+  url.searchParams.set('fields', 'display_phone_number,verified_name,quality_rating');
+  const res = await (opts.fetch ?? globalThis.fetch)(url, {
+    headers: { authorization: `Bearer ${opts.accessToken}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    display_phone_number?: string;
+    verified_name?: string;
+    quality_rating?: string;
+    error?: { code?: number; message?: string };
+  };
+  if (!res.ok)
+    throw new ChannelError(`WhatsApp check failed: ${json.error?.message ?? `HTTP ${res.status}`}`, {
+      code: json.error?.code,
+      retryable: res.status >= 500,
+    });
+  return {
+    displayPhoneNumber: json.display_phone_number,
+    verifiedName: json.verified_name,
+    qualityRating: json.quality_rating,
+  };
+}

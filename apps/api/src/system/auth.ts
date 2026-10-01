@@ -6,11 +6,12 @@ import type { Db } from '../db/client.ts';
 import { accounts, sessions, users, verifications } from '../db/schema.ts';
 import type { Env } from '../env.ts';
 
-export function createAuth(systemDb: Db, env: Pick<Env, 'APP_URL' | 'BETTER_AUTH_SECRET'>) {
+export function createAuth(systemDb: Db, env: Pick<Env, 'APP_URL' | 'BETTER_AUTH_SECRET' | 'NODE_ENV'>) {
   return betterAuth({
     baseURL: env.APP_URL,
     secret: env.BETTER_AUTH_SECRET,
-    trustedOrigins: [env.APP_URL],
+    // The Vite dev server (pnpm dev:dashboard) proxies to the API from its own origin.
+    trustedOrigins: env.NODE_ENV === 'production' ? [env.APP_URL] : [env.APP_URL, 'http://localhost:5173'],
     // Sign-in happens before we know the tenant, so auth runs on the owner connection.
     database: drizzleAdapter(systemDb, {
       provider: 'pg',

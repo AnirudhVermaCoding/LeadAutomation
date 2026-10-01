@@ -1,10 +1,14 @@
 {
   "compilerOptions": {
     "target": "es2024",
-    "lib": ["es2024"],
+    "lib": [
+      "es2024"
+    ],
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noFallthroughCasesInSwitch": true,
@@ -15,5 +19,11 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["apps/*/src", "apps/*/test", "packages/*/src", "*.ts", "apps/*/*.ts"]
+  "include": [
+    "apps/api/src",
+    "apps/api/test",
+    "apps/api/*.ts",
+    "packages/*/src",
+    "*.ts"
+  ]
 }

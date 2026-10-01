@@ -18,6 +18,8 @@ pnpm typecheck      # tsc --noEmit over the whole workspace
 pnpm test           # all vitest projects; *.db.test.ts start a throwaway embedded Postgres 16
 pnpm test:fast      # unit + api projects only, no database
 pnpm templates:doc  # regenerate docs/TEMPLATES-TO-SUBMIT.md after editing the template registry
+pnpm dev:dashboard  # dashboard dev server on :5173 (API must run on :3000)
+pnpm build          # build the dashboard (served by the API from apps/dashboard/dist)
 pnpm db:generate    # drizzle-kit generate after editing apps/api/src/db/schema.ts
 pnpm db:migrate     # create app role, run migrations, grant
 pnpm db:seed        # agency admin + demo tenants (idempotent)
@@ -30,7 +32,8 @@ docker compose up -d --build   # db + app on :3000
 - `packages/core` — pure domain logic (Clock, lead state machine, later scoring/availability). No I/O, no runtime deps.
 - `packages/config` — tenant config zod schema, validation, presets (`clinic` dental/skin/hair, `real_estate`), WhatsApp template registry.
 - `packages/integrations` — `MessagingChannel` (fake, Meta Cloud API), Meta webhook parsing/signatures, Lead Ads fetch.
-- Later: `packages/sim` (M3), `apps/dashboard` (M6). Create packages only when needed.
+- `packages/sim` — `pnpm sim`: scripted personas against a running API.
+- `apps/dashboard` — React + Vite + Tailwind + TanStack Query. `pnpm dev:dashboard` (port 5173, proxies to :3000); `pnpm build` → `dist/`, which the API serves same-origin in production. Pages: Today, Inbox, Demo sandbox, Settings, Agency.
 
 ## Conventions (enforced where possible)
 

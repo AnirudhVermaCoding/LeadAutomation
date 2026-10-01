@@ -100,6 +100,15 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
    * Mock mode: fast-forward the (process-wide) business clock, then run due sequence steps,
    * so a demo can show day-2 follow-ups and reminders without waiting.
    */
+  app.get(
+    '/v1/dev/clock',
+    { preHandler: guard(ctx, ['client_staff', 'client_admin', 'agency_admin'], { tenant: true }) },
+    () => ({
+      now: ctx.clock.now().toISOString(),
+      canAdvance: ctx.allowFakeChannel && typeof (ctx.clock as { advance?: unknown }).advance === 'function',
+    }),
+  );
+
   app.post(
     '/v1/dev/clock/advance',
     { preHandler: guard(ctx, ['client_admin', 'agency_admin'], { tenant: true }) },

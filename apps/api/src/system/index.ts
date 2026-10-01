@@ -125,6 +125,42 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
       return res.rows.map((r) => ({ stepId: r.id, tenantId: r.tenant_id }));
     },
 
+    /** Agency view: per-tenant volume and running costs since `since` (protects margin). */
+    async usageSince(since: Date) {
+      const res = await systemDb.execute<{
+        id: string;
+        name: string;
+        slug: string;
+        leads: string;
+        messages_out: string;
+        whatsapp_inr: string;
+        llm_usd: string;
+        bookings: string;
+      }>(sql`
+        select t.id, t.name, t.slug,
+          (select count(*) from leads l where l.tenant_id = t.id and l.received_at >= ${since}) as leads,
+          (select count(*) from messages m where m.tenant_id = t.id and m.direction = 'out'
+             and m.status in ('sent', 'delivered', 'read') and m.occurred_at >= ${since}) as messages_out,
+          (select coalesce(sum(m.est_cost_inr), 0) from messages m where m.tenant_id = t.id
+             and m.status in ('sent', 'delivered', 'read') and m.occurred_at >= ${since}) as whatsapp_inr,
+          (select coalesce(sum(r.cost_usd), 0) from llm_runs r
+             where r.tenant_id = t.id and r.occurred_at >= ${since}) as llm_usd,
+          (select count(*) from appointments a where a.tenant_id = t.id and a.status <> 'cancelled'
+             and a.created_at >= ${since}) as bookings
+        from tenants t
+        order by t.name`);
+      return res.rows.map((r) => ({
+        tenantId: r.id,
+        name: r.name,
+        slug: r.slug,
+        leads: Number(r.leads),
+        messagesOut: Number(r.messages_out),
+        whatsappInr: Number(r.whatsapp_inr),
+        llmUsd: Number(r.llm_usd),
+        bookings: Number(r.bookings),
+      }));
+    },
+
     async findTenantBySlug(slug: string) {
       const [row] = await systemDb.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, slug));
       return row ?? null;

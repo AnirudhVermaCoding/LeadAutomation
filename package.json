@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "pnpm --filter @instantlead/api dev",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/dashboard/tsconfig.json",
     "test": "vitest run",
     "test:fast": "vitest run --project unit --project api",
     "format": "prettier --write .",
@@ -18,7 +18,9 @@
     "db:seed": "pnpm --filter @instantlead/api db:seed",
     "templates:doc": "node packages/config/src/templates-doc.ts",
     "db:local": "node --env-file-if-exists=.env apps/api/test/dev-db.ts",
-    "sim": "node --env-file-if-exists=.env packages/sim/src/cli.ts"
+    "sim": "node --env-file-if-exists=.env packages/sim/src/cli.ts",
+    "dev:dashboard": "pnpm --filter @instantlead/dashboard dev",
+    "build": "pnpm --filter @instantlead/dashboard build"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
