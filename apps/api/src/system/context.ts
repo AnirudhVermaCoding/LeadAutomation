@@ -1,4 +1,4 @@
-import { systemClock, type Clock } from '@instantlead/core';
+import { OffsetClock, systemClock, type Clock } from '@instantlead/core';
 import {
   ChannelError,
   createAnthropicProvider,
@@ -24,7 +24,7 @@ import { createSystem } from './index.ts';
 /** Composition root. `systemDb` stays in here; the rest of the app only sees `system` functions. */
 export function createAppContext(
   env: Env,
-  clock: Clock = systemClock,
+  clockOverride?: Clock,
   overrides: {
     fetch?: typeof globalThis.fetch;
     llm?: LlmProvider;
@@ -37,6 +37,8 @@ export function createAppContext(
   const boss = createBoss(env.DATABASE_OWNER_URL);
   const secretsKey = Buffer.from(env.SECRETS_KEY, 'base64');
   const mockMode = env.ALLOW_FAKE_CHANNEL ?? env.NODE_ENV !== 'production';
+  // Mock mode runs on a clock the demo can fast-forward; production on real time.
+  const clock: Clock = clockOverride ?? (mockMode ? new OffsetClock() : systemClock);
   if (!env.ANTHROPIC_API_KEY && !mockMode)
     throw new Error(
       'ANTHROPIC_API_KEY is required outside mock mode (set ALLOW_FAKE_CHANNEL=true for a demo)',

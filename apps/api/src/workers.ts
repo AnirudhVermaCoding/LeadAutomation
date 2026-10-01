@@ -1,6 +1,7 @@
 import { fillVariables } from '@instantlead/config';
 import { runAssistantTurn } from './assistant/agent.ts';
 import { notifyAppointmentChange } from './notify.ts';
+import { enrollFollowups, runStep, sweepDueSteps } from './sequences.ts';
 import { ChannelError, fetchMetaLead } from '@instantlead/integrations';
 import type { FastifyBaseLogger } from 'fastify';
 import { getActiveConfig } from './config-store.ts';
@@ -20,6 +21,8 @@ export async function sendFirstReply(deps: MessagingDeps, { tenantId, leadId }: 
     onSent: async (tx) => {
       await transitionLeadIfAllowed(tx, leadId, { type: 'FIRST_CONTACT_SENT' });
       await emit(tx, deps.clock, 'lead.contacted', { leadId });
+      const config = (await getActiveConfig(tx))?.config;
+      if (config) await enrollFollowups(tx, deps.clock, config, leadId);
     },
   });
 }
@@ -81,6 +84,13 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   });
   await ctx.boss.work<JobData['meta-leadgen']>(QUEUES.metaLeadgen, async (jobs) => {
     for (const job of jobs) await runJob(log, QUEUES.metaLeadgen, () => importMetaLead(ctx, job.data));
+  });
+  await ctx.boss.work(QUEUES.sequenceSweep, async () => {
+    await runJob(log, QUEUES.sequenceSweep, () => sweepDueSteps(ctx));
+  });
+  await ctx.boss.schedule(QUEUES.sequenceSweep, '* * * * *');
+  await ctx.boss.work<JobData['sequence-step']>(QUEUES.sequenceStep, async (jobs) => {
+    for (const job of jobs) await runJob(log, QUEUES.sequenceStep, () => runStep(ctx, job.data));
   });
   await ctx.boss.work<JobData['appointment-notify']>(QUEUES.appointmentNotify, async (jobs) => {
     for (const job of jobs)

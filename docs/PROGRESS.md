@@ -53,3 +53,9 @@
 - Mock assistant books, reschedules and cancels by chat; new sim persona `reschedules_twice`.
 - Verified: lint, typecheck, 150 tests (incl. 10-way concurrent booking race, staff-confirm flow with notifications + calendar, reschedule/cancel, blocked times, booking via chat). Live: `pnpm sim --persona all` 10/10 against the running app with workers.
 - Not verified: real Google Calendar and Resend credentials.
+
+## M5 — Sequences
+
+- `packages/core`: quiet-hours helpers (wrapping windows), `OffsetClock` for demo fast-forward.
+- `apps/api`: `enrollments`, `enrollment_steps`; follow-ups (day 2 / day 5 / unresponsive, email or WhatsApp), reminders (24 h / 2 h) with Confirm / Reschedule / Cancel buttons, no-show recovery, review request; per-minute sweep cron + per-step jobs with retries; stop rules on reply / booking / opt-out / disqualification; quiet hours and deadlines; `POST /v1/dev/clock/advance`.
+- Verified: lint, typecheck, 164 tests (10 sequence tests: silent lead day 0→2→5→unresponsive, reply stops follow-ups, email follow-up, reminders + Confirm button + staff alert + review request, Cancel button, no-show recovery, opt-out stops all, duplicate step job, dev clock, quiet hours). Live: real cron sweep runs every minute; a form lead fast-forwarded 48 h got its follow-up deferred over quiet hours and sent at 09:45 IST.

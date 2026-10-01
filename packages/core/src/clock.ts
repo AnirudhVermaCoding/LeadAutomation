@@ -29,3 +29,20 @@ export class FakeClock implements Clock {
     this.#ms += ms;
   }
 }
+
+/**
+ * Real time plus a shift that only moves forward: the demo's "fast-forward" control.
+ * Only used in mock mode; production runs on systemClock.
+ */
+export class OffsetClock implements Clock {
+  #offsetMs = 0;
+
+  now(): Date {
+    return new Date(Date.now() + this.#offsetMs);
+  }
+
+  advance(ms: number): void {
+    if (ms < 0) throw new Error('OffsetClock cannot go backwards');
+    this.#offsetMs += ms;
+  }
+}

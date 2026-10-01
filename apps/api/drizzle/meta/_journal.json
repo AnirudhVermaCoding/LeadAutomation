@@ -36,6 +36,13 @@
       "when": 1790858097362,
       "tag": "0004_m4_no_double_booking",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790874567691,
+      "tag": "0005_m5_sequences",
+      "breakpoints": true
     }
   ]
 }

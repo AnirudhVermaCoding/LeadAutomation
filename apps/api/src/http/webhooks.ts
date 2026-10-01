@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { handleInboundMessage, handleStatusUpdate } from '../inbound.ts';
 import { QUEUES } from '../jobs.ts';
+import { sweepDueSteps } from '../sequences.ts';
 import type { AppContext } from '../system/context.ts';
 import { guard } from './auth.ts';
 
@@ -92,6 +93,31 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
           headline: body.referral.headline,
         },
       });
+    },
+  );
+
+  /**
+   * Mock mode: fast-forward the (process-wide) business clock, then run due sequence steps,
+   * so a demo can show day-2 follow-ups and reminders without waiting.
+   */
+  app.post(
+    '/v1/dev/clock/advance',
+    { preHandler: guard(ctx, ['client_admin', 'agency_admin'], { tenant: true }) },
+    async (req, reply) => {
+      const clock = ctx.clock as { advance?: (ms: number) => void };
+      if (!ctx.allowFakeChannel || typeof clock.advance !== 'function')
+        return reply.code(404).send({ error: 'not_found' });
+      const { hours } = z
+        .strictObject({
+          hours: z
+            .number()
+            .positive()
+            .max(24 * 30),
+        })
+        .parse(req.body);
+      clock.advance(hours * 3_600_000);
+      const queued = await sweepDueSteps(ctx);
+      return { now: ctx.clock.now().toISOString(), steps_queued: queued };
     },
   );
 }

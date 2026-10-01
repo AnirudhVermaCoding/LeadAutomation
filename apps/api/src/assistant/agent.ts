@@ -1,4 +1,4 @@
-import { fillVariables } from '@instantlead/config';
+import { fillVariables, parseButtonPayload } from '@instantlead/config';
 import { detectLanguage, displayStatus, formatSlot, matchesEmergency, scoreLead } from '@instantlead/core';
 import { Anthropic, llmCostUsd, type LlmProvider, type LlmRequest } from '@instantlead/integrations';
 import { asc, eq, sum } from 'drizzle-orm';
@@ -8,7 +8,7 @@ import { leads, llmRuns, messages } from '../db/schema.ts';
 import { sendToLead, type MessagingDeps } from '../outbound.ts';
 import type { TurnHints } from './fake-llm.ts';
 import { buildSystemPrompt, buildTools, stateMessage } from './prompt.ts';
-import { activeAppointment } from '../booking.ts';
+import { activeAppointment, BookingError, updateAppointment } from '../booking.ts';
 import { escalate, loadAnswers, runTool } from './tools.ts';
 
 export interface AssistantDeps extends MessagingDeps {
@@ -79,6 +79,7 @@ export async function runAssistantTurn(
       answers,
       spentUsd: Number(spend?.total ?? 0),
       appointment,
+      appointmentId: appt?.id ?? null,
     };
   });
 
@@ -109,6 +110,46 @@ export async function runAssistantTurn(
     await escalate(tool, 'emergency keywords');
     return { status: 'escalated', reason: 'emergency' };
   }
+  // Quick-reply buttons with a fixed meaning are handled in code, not by the model.
+  const payload = (lastInbound.payload as { buttonPayload?: string } | null)?.buttonPayload;
+  const button = payload ? parseButtonPayload(payload) : null;
+  if (button) {
+    const aboutAppointment = ['reminder_24h', 'reminder_2h', 'booking_confirmed'].includes(button.key);
+    if (button.buttonId === 'call') {
+      await escalate(tool, 'lead asked for a call');
+      await reply('Sure — someone from our team will call you shortly.', 'button');
+      return { status: 'escalated', reason: 'call requested' };
+    }
+    if (aboutAppointment && (button.buttonId === 'confirm' || button.buttonId === 'cancel')) {
+      if (!ctx.appointmentId) {
+        await reply("I couldn't find an upcoming appointment for you. Would you like to book one?", 'button');
+        return { status: 'replied' };
+      }
+      try {
+        if (button.buttonId === 'cancel') {
+          // The cancellation message itself is sent by the appointment-notify job.
+          await updateAppointment(deps, tenantId, ctx.appointmentId, 'cancelled');
+          return { status: 'replied', reason: 'cancelled by button' };
+        }
+        await updateAppointment(deps, tenantId, ctx.appointmentId, 'lead_confirmed');
+        await reply(
+          `Thanks for confirming! See you on ${ctx.appointment?.label ?? 'your appointment'}.`,
+          'button',
+        );
+        return { status: 'replied', reason: 'confirmed by button' };
+      } catch (err) {
+        if (!(err instanceof BookingError)) throw err;
+        await reply(
+          button.buttonId === 'confirm' && ctx.appointment?.label.includes('pending')
+            ? 'Thanks! Your booking is still waiting for the team to confirm — we will message you shortly.'
+            : 'Thanks — noted.',
+          'button',
+        );
+        return { status: 'replied', reason: err.code };
+      }
+    }
+  }
+
   if (ctx.spentUsd >= deps.llmCostCapUsd) {
     await escalate(tool, 'LLM cost cap reached');
     await reply(holding, 'holding');

@@ -23,11 +23,12 @@ import {
 } from './db/schema.ts';
 import { QUEUES } from './jobs.ts';
 import { emit, transitionLeadIfAllowed, type LeadDeps } from './leads.ts';
+import { enrollAfterVisit, enrollReminders, stopEnrollments } from './sequences.ts';
 import type { Db } from './db/client.ts';
 
 export type BookingDeps = LeadDeps & { db: Db };
 export type AppointmentChange =
-  'booked' | 'confirmed' | 'rescheduled' | 'cancelled' | 'completed' | 'no_show';
+  'booked' | 'confirmed' | 'lead_confirmed' | 'rescheduled' | 'cancelled' | 'completed' | 'no_show';
 
 const MIN_NOTICE_MIN = 60;
 const SEARCH_DAYS = 14;
@@ -158,6 +159,19 @@ async function change(
 ) {
   if (leadEvent) await transitionLeadIfAllowed(tx, leadId, leadEvent);
   await emit(tx, deps.clock, `appointment.${kind}`, { appointmentId, leadId });
+
+  // Sequences: reminders for confirmed bookings; recovery or review after the visit.
+  const [appt] = await tx.select().from(appointments).where(eq(appointments.id, appointmentId));
+  const config = (await getActiveConfig(tx))?.config;
+  if (appt && config) {
+    if (appt.status === 'scheduled' || appt.status === 'confirmed') {
+      if (kind !== 'lead_confirmed') await enrollReminders(tx, deps.clock, config, appt);
+    } else {
+      await stopEnrollments(tx, leadId, ['reminders'], `appointment ${appt.status}`);
+      if (kind === 'completed') await enrollAfterVisit(tx, deps.clock, config, appt, 'review_request');
+      if (kind === 'no_show') await enrollAfterVisit(tx, deps.clock, config, appt, 'no_show_recovery');
+    }
+  }
   // Lead message, staff alert and calendar sync happen in a job (network calls, retries).
   await deps.enqueue(tx, QUEUES.appointmentNotify, { tenantId, appointmentId, kind });
 }
@@ -251,6 +265,7 @@ const NEXT: Partial<
   >
 > = {
   confirmed: { from: ['pending'], to: 'scheduled', lead: null }, // staff approved a pending booking
+  lead_confirmed: { from: ['scheduled'], to: 'confirmed', lead: { type: 'CONFIRMED' } }, // reminder button
   cancelled: { from: ['pending', 'scheduled', 'confirmed'], to: 'cancelled', lead: { type: 'CANCELLED' } },
   completed: { from: ['scheduled', 'confirmed'], to: 'completed', lead: { type: 'COMPLETED' } },
   no_show: { from: ['scheduled', 'confirmed'], to: 'no_show', lead: { type: 'NO_SHOW' } },
@@ -261,7 +276,7 @@ export async function updateAppointment(
   deps: BookingDeps,
   tenantId: string,
   appointmentId: string,
-  kind: 'confirmed' | 'cancelled' | 'completed' | 'no_show',
+  kind: 'confirmed' | 'lead_confirmed' | 'cancelled' | 'completed' | 'no_show',
 ) {
   return withTenant(deps.db, tenantId, async (tx) => {
     const [appt] = await tx

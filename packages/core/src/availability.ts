@@ -188,3 +188,18 @@ export function formatSlot(at: Date, timeZone: string, locale = 'en-IN'): string
     minute: '2-digit',
   }).format(at);
 }
+
+/** Is local time `time` (HH:MM) inside the quiet window? Windows may wrap midnight (21:00-09:00). */
+export const inQuietHours = (time: string, quiet: { start: string; end: string }) =>
+  quiet.start <= quiet.end
+    ? time >= quiet.start && time < quiet.end
+    : time >= quiet.start || time < quiet.end;
+
+/** `at`, or the end of the quiet window it falls in (tenant-local). */
+export function nextSendTime(at: Date, timeZone: string, quiet: { start: string; end: string }): Date {
+  const { date, time } = localParts(at, timeZone);
+  if (!inQuietHours(time, quiet)) return at;
+  // After the start on the evening side of a wrapping window, the window ends tomorrow morning.
+  const endDate = quiet.start > quiet.end && time >= quiet.start ? addDays(date, 1) : date;
+  return zonedTimeToUtc(endDate, quiet.end, timeZone);
+}

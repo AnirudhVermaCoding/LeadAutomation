@@ -1,6 +1,6 @@
 import { PRESETS, TEMPLATE_KEYS, TEMPLATE_LANGUAGES, TEMPLATES, type PresetKey } from '@instantlead/config';
 import type { Clock } from '@instantlead/core';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { generateApiKey, hashApiKey } from '../api-keys.ts';
 import { audit, type Actor } from '../audit.ts';
 import type { Db } from '../db/client.ts';
@@ -104,6 +104,25 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
 
     async setTenantRouting(tenantId: string, routing: { waPhoneNumberId?: string; metaPageId?: string }) {
       await systemDb.update(tenants).set(routing).where(eq(tenants.id, tenantId));
+    },
+
+    /**
+     * Claim due sequence steps across all tenants (pending and due, or stuck in 'queued' for
+     * 10+ minutes after a crash). SKIP LOCKED lets several workers sweep safely.
+     */
+    async claimDueSteps(now: Date, limit = 200) {
+      const res = await systemDb.execute<{ id: string; tenant_id: string }>(sql`
+        update enrollment_steps set status = 'queued', attempts = attempts + 1, updated_at = now()
+        where id in (
+          select id from enrollment_steps
+          where (status = 'pending' and due_at <= ${now})
+             or (status = 'queued' and updated_at < now() - interval '10 minutes')
+          order by due_at
+          limit ${limit}
+          for update skip locked
+        )
+        returning id, tenant_id`);
+      return res.rows.map((r) => ({ stepId: r.id, tenantId: r.tenant_id }));
     },
 
     async findTenantBySlug(slug: string) {

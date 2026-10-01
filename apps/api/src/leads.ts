@@ -12,6 +12,7 @@ import { and, eq } from 'drizzle-orm';
 import type { TenantTx, Tx } from './db/client.ts';
 import { consents, events, leads, suppressions, type LeadSource } from './db/schema.ts';
 import { QUEUES, type Enqueue } from './jobs.ts';
+import { stopOnLeadEvent } from './sequences.ts';
 
 export interface LeadDeps {
   clock: Clock;
@@ -48,6 +49,7 @@ export async function transitionLead(tx: Tx, leadId: string, event: LeadEvent): 
   const next = transition(lead, event);
   if (next.state !== lead.state || next.tier !== lead.tier || next.aiPaused !== lead.aiPaused)
     await tx.update(leads).set(next).where(eq(leads.id, leadId));
+  await stopOnLeadEvent(tx, leadId, event.type);
   return next;
 }
 

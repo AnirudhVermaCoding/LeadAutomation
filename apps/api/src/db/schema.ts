@@ -454,3 +454,59 @@ export const appointments = pgTable(
   },
   () => [tenantScoped()],
 );
+
+// ---- M5: sequences (definitions live in tenant config `sequences`) ----
+
+export const SEQUENCE_KINDS = ['followup', 'reminders', 'no_show_recovery', 'review_request'] as const;
+export type SequenceKind = (typeof SEQUENCE_KINDS)[number];
+
+/** A lead (optionally an appointment) going through one sequence. */
+export const enrollments = pgTable(
+  'enrollments',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid()
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    appointmentId: uuid().references(() => appointments.id, { onDelete: 'cascade' }),
+    kind: text({ enum: SEQUENCE_KINDS }).notNull(),
+    status: text({ enum: ['active', 'completed', 'stopped'] })
+      .notNull()
+      .default('active'),
+    stopReason: text(),
+    startedAt: ts().notNull(),
+    ...timestamps,
+  },
+  () => [tenantScoped()],
+);
+
+/**
+ * One scheduled action. A per-minute sweep claims due steps (business-clock `due_at`, so the
+ * demo can fast-forward) and runs each as a pg-boss job keyed `enrollment:{id}:step:{n}`.
+ */
+export const enrollmentSteps = pgTable(
+  'enrollment_steps',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    enrollmentId: uuid()
+      .notNull()
+      .references(() => enrollments.id, { onDelete: 'cascade' }),
+    step: integer().notNull(),
+    action: text({ enum: ['message', 'mark_unresponsive'] }).notNull(),
+    templateKey: text(),
+    channel: text({ enum: ['whatsapp', 'email', 'email_or_whatsapp'] }),
+    dueAt: ts().notNull(),
+    /** Don't send after this (e.g. a reminder after the appointment started). */
+    deadlineAt: ts(),
+    status: text({ enum: ['pending', 'queued', 'sent', 'skipped', 'failed', 'cancelled'] })
+      .notNull()
+      .default('pending'),
+    attempts: integer().notNull().default(0),
+    lastError: text(),
+    doneAt: ts(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.enrollmentId, t.step), tenantScoped()],
+);

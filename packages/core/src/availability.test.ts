@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   availableSlots,
   localParts,
+  nextSendTime,
   pickOffers,
   zonedTimeToUtc,
   type AvailabilityRule,
@@ -108,5 +109,17 @@ describe('availability', () => {
     expect(
       pickOffers(pm, 2, { timeZone: IST, prefer: 'evening' }).map((s) => localParts(s.start, IST).time),
     ).toEqual(['17:00', '18:30']);
+  });
+});
+
+describe('quiet hours', () => {
+  const quiet = { start: '21:00', end: '09:00' };
+  test.each([
+    ['2026-10-05', '20:59', '2026-10-05T15:29:00.000Z'], // just before: unchanged
+    ['2026-10-05', '22:30', '2026-10-06T03:30:00.000Z'], // evening -> next morning 09:00 IST
+    ['2026-10-06', '06:15', '2026-10-06T03:30:00.000Z'], // early morning -> 09:00 same day
+    ['2026-10-06', '09:00', '2026-10-06T03:30:00.000Z'], // window end is allowed
+  ])('%s %s IST -> %s', (date, time, expected) => {
+    expect(nextSendTime(zonedTimeToUtc(date, time, IST), IST, quiet).toISOString()).toBe(expected);
   });
 });
