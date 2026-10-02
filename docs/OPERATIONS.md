@@ -6,74 +6,116 @@ One small VM runs everything: Postgres, the app (HTTP + workers) and Caddy for H
 2 vCPU / 4 GB is plenty for dozens of clinics. Pick an Indian region (AWS `ap-south-1` Mumbai,
 GCP `asia-south1`, DigitalOcean BLR1, Azure Central India) so patient data stays in India.
 
+**Status:** the images, compose files and scripts below were written and syntax-checked here, but Docker Desktop on the
+dev machine does not start, so they have **not been run locally**. The CI `docker` job (`.github/workflows/ci.yml`) builds
+the image, starts the stack, runs `pnpm demo` against the container, then takes a backup and restores it into a scratch
+database. Treat the first push that goes green there, and your first deploy to the staging VPS, as the real test.
+
 1. Ubuntu 24.04 LTS, Docker Engine + Compose plugin, firewall open only for 22, 80, 443.
 2. DNS: an A record for your domain (e.g. `app.example.in`) pointing at the VM.
-3. `git clone` the repo, then `cp .env.example .env` and set **real** values:
+3. `git clone` the repo, then `cp .env.example .env` and set **real** values (the app refuses to start in production with the
+   dev passwords or `dev-only` secrets):
 
    | Variable                                      | Value                                                                                              |
    | --------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-   | `NODE_ENV`                                    | `production` (refuses the `dev-only…` secrets from `.env.example`)                                 |
-   | `APP_URL`                                     | `https://app.example.in`                                                                           |
+   | `NODE_ENV`                                    | `production`                                                                                       |
+   | `APP_URL`, `APP_DOMAIN`                       | `https://app.example.in` and `app.example.in` (Caddy's hostname)                                   |
    | `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`        | `openssl rand -hex 24` each; update both `DATABASE_*_URL`s to match                                |
    | `BETTER_AUTH_SECRET`                          | `openssl rand -base64 48`                                                                          |
    | `SECRETS_KEY`                                 | `openssl rand -base64 32`; **back it up offline**, encrypted credentials are unreadable without it |
    | `HASH_KEY`                                    | Set to the same value as `SECRETS_KEY` and never change it (keys the opt-out list)                 |
-   | `AGENCY_ADMIN_EMAIL`, `AGENCY_ADMIN_PASSWORD` | The first agency login                                                                             |
+   | `AGENCY_ADMIN_EMAIL`, `AGENCY_ADMIN_PASSWORD` | The first agency login (12+ characters)                                                            |
    | `META_APP_SECRET`, `META_VERIFY_TOKEN`        | From the Meta app; the verify token is any random string you also enter in Meta                    |
-   | `ANTHROPIC_API_KEY`                           | Claude for the assistant (without it the rule-based fallback answers)                              |
+   | `ANTHROPIC_API_KEY`                           | Claude for the assistant (required in production; mock mode is refused)                            |
    | `RESEND_API_KEY`, `EMAIL_FROM`                | Reports and alerts (verify the sending domain in Resend)                                           |
    | `ALERT_EMAIL`                                 | Where operational alerts go                                                                        |
-   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`    | Optional Google Calendar sync; redirect URI `https://<domain>/v1/integrations/google/callback`     |
-   | `ALLOW_FAKE_CHANNEL`                          | Leave unset (off in production; the sandbox and dev endpoints disappear)                           |
-   | `SEED_PASSWORD`                               | Leave unset in production (no demo tenants)                                                        |
+   | `ALERT_WHATSAPP_*`                            | Optional: agency alerts on your own WhatsApp number (template `il_agency_alert`)                   |
+   | `SENTRY_DSN`                                  | Optional error tracking (Sentry or self-hosted GlitchTip)                                          |
+   | `HEARTBEAT_URL`                               | Optional dead-man's switch: pinged every 5 minutes; your uptime service alerts when it stops       |
+   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`    | Optional Google Calendar; see [GOOGLE-CALENDAR.md](GOOGLE-CALENDAR.md)                             |
+   | `BACKUP_RCLONE_REMOTE` or `BACKUP_S3_URI`     | Where backups are copied off the machine (below)                                                   |
+   | `ALLOW_FAKE_CHANNEL`, `SEED_PASSWORD`         | Leave unset in production (no sandbox, no demo tenants)                                            |
 
-4. Put your domain in `deploy/Caddyfile`, then:
+4. First start:
 
    ```bash
    docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
-   docker compose exec app node apps/api/src/system/seed.ts   # creates the agency admin
+   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml exec app node apps/api/src/system/seed.ts   # agency admin
    ```
 
-   Migrations run automatically on every app start. Caddy gets and renews the TLS certificate, and the app port
-   is not exposed directly (`TRUST_PROXY=true` so rate limits see real client IPs).
+   A one-off `migrate` container (roles, migrations, queues, grants, template rows for new keys) runs and must succeed
+   before the app starts; the app container never migrates. Caddy gets and renews the TLS certificate; the app port is not exposed.
 
-5. Check `https://<domain>/readyz` returns `{"ok":true}`, sign in, then onboard clients ([ONBOARDING.md](ONBOARDING.md)).
+5. Check `https://<domain>/readyz` returns `{"ok":true}` (database **and** job queue), sign in, then onboard clients ([ONBOARDING.md](ONBOARDING.md)).
 
-**Update:** `git pull && docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build`.
-Jobs survive restarts (they live in Postgres); in-flight ones are retried.
+### Every later deploy: one command
 
-**Scaling later:** run a second app container with `ROLE=worker` and set the web one to `ROLE=api`; move Postgres to a managed
-instance in the same region. Nothing else changes.
+```bash
+git pull && deploy/deploy.sh          # builds instantlead:<commit>, backs up, migrates, swaps, waits for healthy
+deploy/rollback.sh                    # back to the previous image (or: deploy/rollback.sh <tag>)
+```
+
+`deploy.sh` runs the migrations while the **old** app is still serving, then replaces the app container (a few seconds; Caddy
+holds requests for up to 20 s and retries instead of answering 502). If the new app does not become healthy it puts the
+previous image back by itself. Jobs live in Postgres, so a restart loses nothing; in-flight ones are retried.
+
+### Zero-downtime migrations: expand, then contract
+
+Because the database is migrated before the new code runs, and a rollback runs old code on the new schema, **every
+migration must be compatible with the previous release**:
+
+- **Add** columns as nullable (or with a default); add tables and indexes. Never rename or drop in the same release that stops using it.
+- To remove or rename: release 1 stops reading/writing the column; release 2 drops it. To rename: add the new column, write both, backfill, switch reads, drop the old one in a later release.
+- A new NOT NULL column needs a default, or a backfill first and the constraint in the next release.
+- `CREATE INDEX` on a table with many rows should be `CREATE INDEX CONCURRENTLY` (drizzle migrations run in a transaction, so do that one by hand on the live database first, then ship the migration as `IF NOT EXISTS`). Current tables are small; the hot-path indexes were added while they are.
+- The migrator takes an advisory lock (two containers can't migrate at once) and a 10 s `lock_timeout`: a migration that can't get its lock fails fast instead of queueing every query behind it. The deploy then stops before swapping the app.
+- Data-destroying changes (drop table/column) are the only thing a rollback can't undo: take the pre-deploy backup (the script does) and note the restore time.
+
+### Managed Postgres instead of the container (optional, later)
+
+Any managed Postgres 16 in India works (AWS RDS Mumbai, DigitalOcean BLR1, **Supabase Pro in Mumbai used as plain Postgres**). The app only needs two connection strings:
+
+- Use the **direct** (or session-pooler) connection, port 5432. pg-boss and the migration lock need session features (LISTEN/NOTIFY, advisory locks, prepared statements) that Supabase's transaction pooler (port 6543) does not provide. Direct connections there are IPv6-only unless you buy the IPv4 add-on; the session pooler is IPv4.
+- `DATABASE_OWNER_URL` must be a role that can `CREATE ROLE` and `CREATE EXTENSION btree_gist` (Supabase's `postgres` can; verify with `deploy/restore-check.sh` after a trial migrate: **not yet tested against Supabase**). Drop the `db` service and point both URLs at the managed host.
+- Backups: Supabase Pro keeps 7 daily backups; point-in-time recovery is a paid add-on; restores cause downtime; custom role passwords are not in its daily backups (our migrate step re-applies the app role). Keep running `deploy/backup.sh` to your own bucket as well.
+- Never use the free tier for patient data (no backups, pauses when idle).
+
+**Scaling later:** run a second app container with `ROLE=worker` and set the web one to `ROLE=api`. Nothing else changes.
 
 ## Backups and restore
 
-Nightly logical backup, kept 14 days, with a copy off the VM (e.g. an S3 bucket in `ap-south-1` with versioning):
-
 ```bash
-# /etc/cron.d/instantlead-backup
-15 3 * * * root cd /opt/instantlead && docker compose exec -T db pg_dump -U instantlead -Fc instantlead > /var/backups/instantlead-$(date +\%F).dump && find /var/backups -name 'instantlead-*.dump' -mtime +14 -delete
+# /etc/cron.d/instantlead-backup   (nightly; 14 days kept locally; the off-site copy follows your bucket's lifecycle rule)
+15 3 * * * root cd /opt/instantlead && deploy/backup.sh >> /var/log/instantlead-backup.log 2>&1
 ```
 
-Restore (to a fresh database, app stopped):
+`deploy/backup.sh` writes a compressed `pg_dump -Fc`, checks it is readable (`pg_restore -l`), optionally encrypts it
+(`BACKUP_GPG_PASSPHRASE_FILE`), **copies it off the machine** (`BACKUP_RCLONE_REMOTE` or `BACKUP_S3_URI`) and prunes old
+local copies. Without an off-site destination it warns loudly. Use a bucket in `ap-south-1` with versioning and a lifecycle rule (e.g. 30 days).
+Recovery point: up to 24 hours (a nightly logical dump). If that is too much, add WAL archiving or a managed Postgres with point-in-time recovery.
 
 ```bash
-docker compose stop app
-docker compose exec -T db dropdb -U instantlead instantlead
-docker compose exec -T db createdb -U instantlead instantlead
-docker compose exec -T db pg_restore -U instantlead -d instantlead --no-owner < /var/backups/instantlead-YYYY-MM-DD.dump
-docker compose start app   # re-creates the app role and grants
+deploy/restore.sh /var/backups/instantlead/instantlead-nightly-<stamp>.dump        # into a SCRATCH database; verifies RLS
+# replacing production (app stopped):  deploy/restore.sh <dump> instantlead --replace
 ```
 
-The backup is useless without `SECRETS_KEY` and `HASH_KEY`; store them separately (password manager). **Test a restore every quarter.**
+A bare `pg_restore` onto a fresh server would lose the `instantlead_app` role and its grants (cluster-level, not in the dump), and the
+row-level-security policies that name that role would fail to load. `restore.sh` creates the role first, restores, re-runs the app's
+migrate step (grants, queues), then `deploy/restore-check.sh` proves: RLS is on with a policy for every tenant table, the app role can't bypass it,
+no tenant is visible without a tenant context, and one tenant sees only its own rows. CI runs this against a freshly seeded stack on every push.
+
+The backup is useless without `SECRETS_KEY` and `HASH_KEY`; store them separately (password manager). **Run a restore drill every quarter** (to the scratch database, on the VPS).
 Erased leads come back if you restore an older backup; re-run erasures recorded in `audit_log` (`action = 'lead.erased'`) after a restore.
 
 ## Monitoring
 
-- **Health endpoints:** `/healthz` (process up) and `/readyz` (database reachable) for an uptime checker (UptimeRobot, Better Stack), every minute.
-- **Built-in monitor** (every 5 minutes) emails `ALERT_EMAIL` about: repeated failed WhatsApp sends, AI errors, no delivery receipts for sent messages (the Meta webhook is probably broken), job backlog, dead-lettered jobs. Alerts are deduped and repeat at most every 6 hours while the problem lasts.
-- **Agency → Monitoring:** recent alerts and dead-lettered jobs; **Run checks now** triggers the monitor.
+- **Health endpoints:** `/healthz` (process up) and `/readyz` (database **and** job queue reachable) for an uptime checker (UptimeRobot, Better Stack), every minute. Also set `HEARTBEAT_URL` to a heartbeat monitor: the monitor job pings it every 5 minutes, so you hear about dead workers, not just a dead web server.
+- **Built-in monitor** (every 5 minutes) emails `ALERT_EMAIL` (and WhatsApps you if `ALERT_WHATSAPP_*` is set) about: repeated failed WhatsApp sends, AI errors, no delivery receipts for sent messages (the Meta webhook is probably broken), job backlog, dead-lettered jobs, a client's Google Calendar access lost or stale, a WhatsApp template Meta paused or disabled, AI budget at 80%. Alerts are deduped and repeat at most every 6 hours while the problem lasts.
+- **Agency → Monitoring:** recent alerts and dead-lettered jobs with **Retry** / **Discard**; **Run checks now** triggers the monitor.
 - **Per clinic:** Settings → Integrations → Health (last send, last delivery receipt, last inbound message, failures in 24 h).
-- **Logs:** `docker compose logs -f app` (JSON, personal data redacted). Every job logs `job done` or a failure.
+- **Logs:** `docker compose logs -f app` (JSON, rotated: 5 x 10 MB). Every request has an `x-request-id` (send your own to trace a call); every job failure logs queue, job id, tenant id and lead id, never message text or phone numbers (errors are scrubbed of SQL parameters, emails and numbers; query strings of webhook and OAuth URLs are dropped). **Error tracking:** set `SENTRY_DSN` (Sentry, or self-hosted GlitchTip) for grouped exceptions; nothing leaves the process without scrubbing.
+- **Lost password:** there is no email reset. Agency admin: `POST /v1/admin/users/reset-password {email, password}` (12+ characters); that user is signed out everywhere.
+- **Pausing a client** (non-payment): `POST /v1/admin/tenants/<id>/status {"status":"paused"}`: sends and the AI stop, leads are still recorded, the dashboard shows a banner. `"active"` resumes. Usage for invoices: `GET /v1/admin/usage?month=2026-10&format=csv`.
 
 ## Rotating secrets
 

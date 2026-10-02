@@ -48,6 +48,7 @@ The client owns the WhatsApp Business Account (WABA); we get access to it.
   2. In the same Meta app, subscribe the **Page** object's webhook to **`leadgen`** (same callback URL), then `POST /v23.0/<PAGE_ID>/subscribed_apps?subscribed_fields=leadgen` with the Page token.
   3. Settings → Integrations → Lead Ads: Page ID + token.
   4. In each lead form, add the clinic's consent notice (Settings → Business) as the **custom disclaimer**, and include a phone number question.
+- **Portal emails** (99acres, MagicBricks, Housing, Practo, JustDial): Settings → Integrations → Leads from portal emails → Create address, then forward the portal's notification emails there. See [LEAD-SOURCES.md](LEAD-SOURCES.md).
 - **Click-to-WhatsApp ads** need nothing extra: the first message arrives on the connected number.
 
 ## 4. AI assistant (5 min)
@@ -102,15 +103,34 @@ The client owns the WhatsApp Business Account (WABA); we get access to it.
 - **Templates:** three more to submit (see TEMPLATES-TO-SUBMIT.md): `il_appointment_change`, `il_running_late`
   and `il_staff_update`.
 
+## 5b. Policies (10 min)
+
+- **Settings → Booking → Changes, cancellations and confirmation:** how late a customer may change or cancel by chat (default 2 hours before; later requests go to your team), the cancellation policy text, and whether staff-confirm bookings auto-confirm.
+- **Family bookings:** one phone can hold several bookings, one per person (a parent booking for themselves and a child). Today shows "for Rhea"; reminders and buttons are per appointment.
+- **Settings → AI & data:** which AI providers may read conversations (Anthropic by default), the monthly AI budget, and how long customer data is kept.
+- **Settings → Reports:** extra WhatsApp numbers for the one-line weekly summary.
+- **Opt-out:** a customer who replies STOP gets one confirmation and nothing more; if they reply START later they are back (their own consent, recorded). Staff can record a phone or in-person opt-out or opt-in from the Inbox.
+
 ## 6. Optional
 
-- **Google Calendar** (one-way: bookings appear in the clinic's calendar): Settings → Integrations → Connect Google Calendar. Needs `GOOGLE_CLIENT_ID/SECRET` on the server.
+- **Google Calendar** (two-way: bookings appear in the calendar, and events their team adds there block those times): Settings → Integrations → Connect Google Calendar, then map each calendar to a doctor / agent (or the whole clinic). Needs `GOOGLE_CLIENT_ID/SECRET` on the server and a verified Google app: see [GOOGLE-CALENDAR.md](GOOGLE-CALENDAR.md).
 - **Webhooks** to their CRM / Zapier / Make: Settings → Integrations → Webhooks (see [OPERATIONS.md](OPERATIONS.md#outbound-webhooks) for the signature format).
 - **Staff accounts:** create `client_staff` users (Inbox, Today, Sandbox; no settings or erasure).
 
 ## 7. Hand-over (15 min)
 
 Show the front desk **Today** (Confirm / Completed / No-show — completion triggers the review request, no-show the recovery message) and **Inbox** (Take over pauses the AI for that patient; Hand back resumes it). Tell the owner when the first weekly report arrives.
+
+## WhatsApp number: new number, or keep the existing one?
+
+Use a **dedicated number** for the pilot (a SIM that is not registered in the WhatsApp or WhatsApp Business app). The clinic's existing
+WhatsApp Business app number cannot be used with the Cloud API as-is.
+
+**Coexistence** (the clinic keeps using the WhatsApp Business app on the same number while the assistant uses the API) is **not built**; it is on the
+roadmap. What Meta requires (checked 2026-10-02): the business customer's WhatsApp Business app version 2.24.17 or higher, onboarding through
+**Embedded Signup by a registered Tech Provider / Solution Partner**, a fixed 20 messages/second for the number, and up to 180 days of chat history
+syncs. Embedded Signup v2 is deprecated on 2026-10-15, so build on v4. Meta's own page names no unsupported countries; vendor guides say India
+is supported (re-verify before you rely on it). To pursue it you need Tech Provider status first (a Meta business process on your side).
 
 ## Done when
 

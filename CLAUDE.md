@@ -28,7 +28,9 @@ pnpm loadtest       # 100 leads / 20 s, pass if p95 first reply < 60 s
 pnpm e2e            # Playwright smoke against the running app (seeded)
 pnpm secrets:rotate # re-encrypt tenant secrets after setting SECRETS_KEY_PREVIOUS
 pnpm evals          # real-model eval suite (RUN_LLM_EVALS=1; $8 cap; EVAL_DRY_RUN=1 for the mock) -> docs/EVALS.md
-docker compose up -d --build   # db + app on :3000
+docker compose up -d --build   # db + one-off migrate + app on :3000
+deploy/deploy.sh                # production: build, backup, migrate, swap, auto-rollback (see docs/OPERATIONS.md)
+pnpm loadtest --mix             # + 60 chatting customers and a reminder burst
 ```
 
 ## Layout
@@ -36,7 +38,7 @@ docker compose up -d --build   # db + app on :3000
 - `apps/api` — Fastify HTTP, webhooks, workers (one process, `ROLE=all|api|worker`). DB schema, migrations, repositories.
 - `packages/core` — pure domain logic (Clock, lead state machine, later scoring/availability). No I/O, no runtime deps.
 - `packages/config` — tenant config zod schema, validation, presets (`clinic` dental/skin/hair, `real_estate`), WhatsApp template registry.
-- `packages/integrations` — `MessagingChannel` (fake, Meta Cloud API), Meta webhook parsing/signatures, Lead Ads fetch.
+- `packages/integrations` — `MessagingChannel` (fake, Meta Cloud API), Meta webhook parsing/signatures (messages, statuses, templates, `user_preferences`, Lead Ads), template list, `CalendarProvider` (Google adapter + in-memory `FakeGoogle`), portal-email lead parser.
 - `packages/sim` — `pnpm sim` (scripted personas), `pnpm demo`, `pnpm loadtest` against a running API.
 - `e2e/` — Playwright smoke test. `deploy/` — Caddy + production compose overlay. Docs index in README.md.
 - `apps/dashboard` — React + Vite + Tailwind + TanStack Query. `pnpm dev:dashboard` (port 5173, proxies to :3000); `pnpm build` → `dist/`, which the API serves same-origin in production. Pages: Today, Inbox, Demo sandbox, Settings, Agency.
@@ -64,3 +66,8 @@ docker compose up -d --build   # db + app on :3000
   agency admin picks one via `x-tenant-id`. No public sign-up — create users via `ctx.system.createUser`.
 - Tests are co-located `*.test.ts`; DB-backed ones are `*.db.test.ts` and use `apps/api/test/context.ts`
   (fresh cloned database + wired app per file). After each milestone: tests green, update `docs/PROGRESS.md`, commit.
+- **Google Calendar:** all Google traffic goes through `CalendarProvider`; tests and mock mode run the real adapter against `FakeGoogle` (sync tokens, 410, channels, revocation). Busy time lives in `blocked_times` (`source = 'google'`); sync never messages anyone (staff decide via the leave flow). `invalid_grant` is `GoogleAuthError`, never a retry loop. See docs/GOOGLE-CALENDAR.md.
+- **Appointments:** one active booking per person (`attendee_name`); reminders, enrolments and button payloads are per appointment id; customer changes go through `change_notice_hours`; "upcoming" means active and not yet ended (`upcomingAppointments`).
+- **Logs and errors:** never log customer data. pino uses `log-scrub.ts` serializers; job failures log ids only; new error paths use `captureError` (`sentry.ts`, optional).
+- **Migrations are expand/contract** (the deploy runs them before the new code and a rollback runs the old code on the new schema); `deploy/*.sh` are LF, tested by the CI `docker` job. New template keys reach existing tenants through `migrate.ts` (never overwriting status).
+- **Docs index:** GO-LIVE (owner to-do + live test script + gap table), SECURITY, GOOGLE-CALENDAR, LEAD-SOURCES, OPERATIONS, ONBOARDING, PRIVACY, DECISIONS (numbered; don't silently reverse one).

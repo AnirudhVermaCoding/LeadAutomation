@@ -58,13 +58,13 @@ Leave `privacy` out to keep data until erased manually. Every run is audited.
 
 ## Processors and where data goes
 
-| Service                             | What it receives                                                       | Notes                                                    |
-| ----------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------- |
-| Meta (WhatsApp Cloud API, Lead Ads) | Phone, message text                                                    | The channel itself                                       |
-| AI provider(s), see below           | Conversation text (identifiers redacted), first name, clinic knowledge | Only providers the clinic allows; default Anthropic only |
-| Resend                              | Staff alerts, weekly reports (counts, no patient lists)                | Only with `RESEND_API_KEY`                               |
-| Google Calendar                     | Appointment time, service, patient name and phone                      | Only if the clinic connects it                           |
-| Client webhooks                     | Lead name, phone, email, status                                        | Only to URLs the clinic adds                             |
+| Service                             | What it receives                                                                                                                                    | Notes                                                                  |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Meta (WhatsApp Cloud API, Lead Ads) | Phone, message text                                                                                                                                 | The channel itself                                                     |
+| AI provider(s), see below           | Conversation text (identifiers redacted), first name, clinic knowledge                                                                              | Only providers the clinic allows; default Anthropic only               |
+| Resend                              | Staff alerts, weekly reports (counts, no patient lists)                                                                                             | Only with `RESEND_API_KEY`                                             |
+| Google Calendar                     | Out: appointment time, service, patient first name and phone. In: only the time of other events (titles and attendees are never read, never stored) | Only if the clinic connects it; erasure removes our events from Google |
+| Client webhooks                     | Lead name, phone, email, status                                                                                                                     | Only to URLs the clinic adds                                           |
 
 Host the database and app in India (e.g. an AWS/GCP/DigitalOcean Mumbai or Bangalore region, see OPERATIONS).
 Cross-border transfer is allowed by the Act except to countries the government restricts. Check the list before

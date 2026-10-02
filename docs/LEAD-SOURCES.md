@@ -2,17 +2,17 @@
 
 Every source ends in the same place: a lead with the consent evidence recorded, and a WhatsApp reply within a minute.
 
-| Source | How | Status |
-| --- | --- | --- |
-| Website form | Hosted form `/f/<key>` (iframe) | built |
-| Their own form / CRM / website backend | `POST /v1/leads` with an API key | built |
-| CSV of old enquiries | `POST /v1/leads/import` (consent column required) | built |
-| Facebook / Instagram Lead Ads | Meta webhook `leadgen` | built |
-| Click-to-WhatsApp ads, people messaging first | WhatsApp inbound | built |
-| **Portal emails** (99acres, MagicBricks, Housing.com, Practo, JustDial…) | Forward the portal's notification emails to the clinic's secret address (below) | built, parser fixtures are synthetic |
-| Zapier / Make | `POST /v1/leads` (below) | documented |
-| Instagram DMs, Facebook Messenger, Google Business Profile messages | | roadmap (Meta / Google app review; each is its own channel) |
-| Portal APIs / CRM push | | roadmap (no public push API; portals sell CRM integrations per account) |
+| Source                                                                   | How                                                                             | Status                                                                  |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Website form                                                             | Hosted form `/f/<key>` (iframe)                                                 | built                                                                   |
+| Their own form / CRM / website backend                                   | `POST /v1/leads` with an API key                                                | built                                                                   |
+| CSV of old enquiries                                                     | `POST /v1/leads/import` (consent column required)                               | built                                                                   |
+| Facebook / Instagram Lead Ads                                            | Meta webhook `leadgen`                                                          | built                                                                   |
+| Click-to-WhatsApp ads, people messaging first                            | WhatsApp inbound                                                                | built                                                                   |
+| **Portal emails** (99acres, MagicBricks, Housing.com, Practo, JustDial…) | Forward the portal's notification emails to the clinic's secret address (below) | built, parser fixtures are synthetic                                    |
+| Zapier / Make                                                            | `POST /v1/leads` (below)                                                        | documented                                                              |
+| Instagram DMs, Facebook Messenger, Google Business Profile messages      |                                                                                 | roadmap (Meta / Google app review; each is its own channel)             |
+| Portal APIs / CRM push                                                   |                                                                                 | roadmap (no public push API; portals sell CRM integrations per account) |
 
 ## Portal emails
 
@@ -28,7 +28,7 @@ The parser reads labelled lines ("Name:", "Mobile:", "Email:", "Requirement:", a
 Indian mobile number in the body. An email without a phone number is acknowledged but creates nothing (the dashboard event log
 records `lead.email_unparsed`). Rotate the address any time (the old one stops working).
 
-**Verify per portal in the pilot:** the fixtures in `packages/integrations/src/lead-email.test.ts` are *synthetic*, shaped like
+**Verify per portal in the pilot:** the fixtures in `packages/integrations/src/lead-email.test.ts` are _synthetic_, shaped like
 portal emails. Forward one real notification from each portal the client uses and check the lead appears with the right name and
 number; adjust the label list in `lead-email.ts` if a portal uses other wording.
 

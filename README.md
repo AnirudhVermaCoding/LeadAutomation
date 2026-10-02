@@ -30,7 +30,7 @@ With Docker: `docker compose up -d --build`, then `docker compose exec app node 
 
 ```bash
 pnpm demo        # the 4 acceptance scenarios against the running app
-pnpm loadtest    # 100 leads in 20 s; passes when p95 first reply < 60 s
+pnpm loadtest    # 100 leads in 20 s; passes when p95 first reply < 60 s (--mix adds 60 chatting customers and a reminder burst)
 pnpm sim         # 10 scripted lead personas against the assistant
 pnpm e2e         # Playwright smoke test (desktop + mobile)
 pnpm evals       # assistant quality across AI providers with keys ($8 cap) -> docs/EVALS.md
@@ -64,14 +64,14 @@ flowchart LR
 - **Clock:** business times come from an injected clock; the demo fast-forwards it to show day-2 follow-ups and Monday reports in seconds.
 - **No build step for the backend:** Node 24 runs the TypeScript directly; only the dashboard is built.
 
-| Path                    | What                                                                       |
-| ----------------------- | -------------------------------------------------------------------------- |
-| `apps/api`              | HTTP, webhooks, workers, DB schema + migrations                            |
-| `apps/dashboard`        | React dashboard (served by the API)                                        |
-| `packages/core`         | Pure domain logic: lead state machine, scoring, availability, quiet hours  |
-| `packages/config`       | Tenant config schema, presets, WhatsApp template registry                  |
-| `packages/integrations` | WhatsApp, Meta Lead Ads, Claude, email, Google Calendar adapters (+ fakes) |
-| `packages/sim`          | Simulator, `pnpm demo`, `pnpm loadtest`                                    |
+| Path                    | What                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `apps/api`              | HTTP, webhooks, workers, DB schema + migrations                                     |
+| `apps/dashboard`        | React dashboard (served by the API)                                                 |
+| `packages/core`         | Pure domain logic: lead state machine, scoring, availability, quiet hours           |
+| `packages/config`       | Tenant config schema, presets, WhatsApp template registry                           |
+| `packages/integrations` | WhatsApp, Meta Lead Ads, Claude, email, two-way Google Calendar (+ in-memory fakes) |
+| `packages/sim`          | Simulator, `pnpm demo`, `pnpm loadtest`                                             |
 
 ## Docs
 
@@ -79,5 +79,7 @@ flowchart LR
 - [DEMO-SCRIPT](docs/DEMO-SCRIPT.md) — the 10-minute sales demo
 - [OPERATIONS](docs/OPERATIONS.md) — deploy (India VPS + Caddy), backups, monitoring, secrets rotation, incidents
 - [PRIVACY](docs/PRIVACY.md) — DPDP Act: consent, opt-out, retention, erasure, export, breaches
+- [GO-LIVE](docs/GO-LIVE.md) — what you do outside the code, the live test script, and the gap table
+- [GOOGLE-CALENDAR](docs/GOOGLE-CALENDAR.md) · [LEAD-SOURCES](docs/LEAD-SOURCES.md) · [SECURITY](docs/SECURITY.md)
 - [TEMPLATES-TO-SUBMIT](docs/TEMPLATES-TO-SUBMIT.md) — WhatsApp templates each client submits to Meta
 - [PROGRESS](docs/PROGRESS.md) · [DECISIONS](docs/DECISIONS.md) · [ROADMAP](docs/ROADMAP.md)
