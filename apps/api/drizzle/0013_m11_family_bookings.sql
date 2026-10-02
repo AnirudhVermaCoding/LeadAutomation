@@ -1,0 +1,2 @@
+ALTER TABLE "appointments" ADD COLUMN "attendee_name" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "appointments_one_active_per_attendee" ON "appointments" USING btree ("tenant_id","lead_id",lower(coalesce("attendee_name", ''))) WHERE "appointments"."status" in ('pending', 'scheduled', 'confirmed');

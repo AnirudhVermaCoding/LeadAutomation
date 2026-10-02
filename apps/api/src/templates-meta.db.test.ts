@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { createTestContext, META_APP_SECRET, PASSWORD, type TestContext } from '../test/context.ts';
 import { withTenant } from './db/client.ts';
+import { migrate } from './db/migrate.ts';
 import { enrollments, leads, templates } from './db/schema.ts';
 import { runMonitor } from './monitoring.ts';
 import { sendToLead } from './outbound.ts';
@@ -351,5 +352,22 @@ describe('customers who stopped marketing messages (131050)', () => {
       (await withTenant(t.ctx.db, A, (tx) => tx.select().from(leads).where(eq(leads.id, leadId))))[0]
         ?.marketingOptOutAt,
     ).not.toBeNull();
+  });
+});
+
+describe('new template keys reach existing clinics', () => {
+  test('migrate backfills missing template rows without touching approval status', async () => {
+    await t.owner.query(`delete from templates where tenant_id = $1 and key = 'cancellation'`, [A]);
+    await t.owner.query(
+      `update templates set status = 'approved' where tenant_id = $1 and key = 'first_reply' and language = 'en'`,
+      [A],
+    );
+    await migrate(t.ctx.env.DATABASE_OWNER_URL, t.ctx.env.DATABASE_URL);
+    const rows = await withTenant(t.ctx.db, A, (tx) =>
+      tx.select().from(templates).where(eq(templates.key, 'cancellation')),
+    );
+    expect(rows.map((r) => r.language).sort()).toEqual(['en', 'hi']);
+    expect(rows.every((r) => r.status === 'draft' && r.providerName === 'il_cancellation')).toBe(true);
+    expect((await tpl('il_first_reply', 'en')).status).toBe('approved');
   });
 });

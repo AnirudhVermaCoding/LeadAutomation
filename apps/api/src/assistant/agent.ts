@@ -14,11 +14,19 @@ import {
   type MediaType,
   type Turn,
 } from '@instantlead/integrations';
-import { and, asc, eq, gte, sum } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, sum } from 'drizzle-orm';
 import { z } from 'zod';
 import { getActiveConfig } from '../config-store.ts';
 import { withTenant } from '../db/client.ts';
-import { availabilityRules, conversations, leads, llmRuns, messages } from '../db/schema.ts';
+import {
+  answers as answersTable,
+  appointments,
+  availabilityRules,
+  conversations,
+  leads,
+  llmRuns,
+  messages,
+} from '../db/schema.ts';
 import { emit, transitionLeadIfAllowed } from '../leads.ts';
 import {
   aiSettings,
@@ -45,7 +53,8 @@ import {
 } from './guard.ts';
 import { buildSystemPrompt, buildTools, jsonSchema, openingStatus, stateMessage } from './prompt.ts';
 import {
-  activeAppointment,
+  PREFERRED_RESOURCE,
+  upcomingAppointments,
   BookingError,
   findSlots,
   lastCancelledAppointment,
@@ -60,11 +69,10 @@ export interface AssistantDeps extends MessagingDeps {
 }
 
 const MAX_STEPS = 6; // model calls per turn
-const HISTORY = 40; // messages of context
 /** More inbound messages than this in 10 minutes = a flood (or another bot): hand over once. */
 const FLOOD_LIMIT = 15;
 /** Logged on every model call, so evals and incidents can be tied to the prompt that produced them. */
-export const PROMPT_VERSION = 'agent-v2';
+export const PROMPT_VERSION = 'agent-v3';
 
 const HOLDING = {
   en: 'Thanks for your message! A member of our team will get back to you shortly.',
@@ -97,7 +105,6 @@ export async function runAssistantTurn(
       .from(messages)
       .where(eq(messages.leadId, leadId))
       .orderBy(asc(messages.occurredAt), asc(messages.createdAt));
-    const history = all.slice(-HISTORY);
     const [conversation] = await tx.select().from(conversations).where(eq(conversations.leadId, leadId));
     const [spend] = await tx
       .select({ total: sum(llmRuns.costUsd) })
@@ -110,11 +117,39 @@ export async function runAssistantTurn(
       ),
     ];
     const answers = await loadAnswers(tx, leadId);
-    const appt = await activeAppointment(tx, leadId);
-    const appointment = appt && {
-      service: appt.service,
-      label: `${appt.service}, ${formatSlot(appt.startsAt, active.config.locale.timezone)}${appt.status === 'pending' ? ' (pending staff confirmation)' : ''}`,
-    };
+    // Returning customers: how old are the answers, and what happened at past visits?
+    const sixtyDaysAgo = deps.clock.now().getTime() - 60 * 86_400_000;
+    const staleAnswers = (
+      await tx
+        .select({ key: answersTable.key, answeredAt: answersTable.answeredAt })
+        .from(answersTable)
+        .where(eq(answersTable.leadId, leadId))
+    )
+      .filter((a) => a.answeredAt.getTime() < sixtyDaysAgo && a.key !== PREFERRED_RESOURCE)
+      .map((a) => a.key);
+    const pastVisits = (
+      await tx
+        .select()
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.leadId, leadId),
+            inArray(appointments.status, ['completed', 'no_show', 'cancelled', 'lapsed']),
+          ),
+        )
+        .orderBy(desc(appointments.startsAt))
+        .limit(3)
+    ).map(
+      (a) =>
+        `${a.service}${a.attendeeName ? ` for ${a.attendeeName}` : ''}, ${formatSlot(a.startsAt, active.config.locale.timezone)} (${a.status.replace('_', '-')})`,
+    );
+    const upcoming = await upcomingAppointments(tx, leadId, deps.clock.now());
+    const apptList = upcoming.map((a) => ({
+      id: a.id,
+      service: a.service,
+      label: `${a.service}, ${formatSlot(a.startsAt, active.config.locale.timezone)}${a.attendeeName ? ` (for ${a.attendeeName})` : ''}${a.status === 'pending' ? ' (pending staff confirmation)' : ''}`,
+    }));
+    const appointment = apptList[0] ?? null; // the single-appointment view (mock assistant, simple cases)
 
     // Only reply to messages that haven't been answered yet (debounced bursts become one turn).
     const lastOut = all.findLastIndex((m) => m.direction === 'out');
@@ -128,6 +163,12 @@ export async function runAssistantTurn(
       })
       .filter(Boolean)
       .join('\n');
+    // How long since we last spoke before this message (a customer returning after months).
+    const answeredIds = new Set(unanswered.map((m) => m.id));
+    const lastBefore = all.filter((m) => !answeredIds.has(m.id)).at(-1);
+    const daysSinceBefore = lastBefore
+      ? Math.floor((deps.clock.now().getTime() - lastBefore.occurredAt.getTime()) / 86_400_000)
+      : null;
     const language = detectLanguage(inboundText) ?? lead.language;
     if (language && language !== lead.language)
       await tx.update(leads).set({ language }).where(eq(leads.id, leadId));
@@ -144,7 +185,6 @@ export async function runAssistantTurn(
       lead: { ...lead, language },
       config: active.config,
       all,
-      history,
       conversation: conversation ?? null,
       unanswered,
       inboundText,
@@ -155,7 +195,10 @@ export async function runAssistantTurn(
       tenantSpendUsd,
       resources,
       appointment,
-      appointmentId: appt?.id ?? null,
+      appointments: apptList,
+      staleAnswers,
+      pastVisits,
+      daysSinceBefore,
     };
   });
 
@@ -189,6 +232,7 @@ export async function runAssistantTurn(
     return { status: 'escalated', reason: 'emergency' };
   }
   // Quick-reply buttons with a fixed meaning are handled in code, not by the model.
+  let buttonNote: string | null = null;
   const payload = (lastInbound.payload as { buttonPayload?: string } | null)?.buttonPayload;
   const button = payload ? parseButtonPayload(payload) : null;
   if (button) {
@@ -225,34 +269,54 @@ export async function runAssistantTurn(
       );
       return { status: 'replied', reason: 'rebooking offered' };
     }
-    if (aboutAppointment && (button.buttonId === 'confirm' || button.buttonId === 'cancel')) {
-      if (!ctx.appointmentId) {
-        await reply("I couldn't find an upcoming appointment for you. Would you like to book one?", 'button');
-        return { status: 'replied' };
-      }
-      try {
-        if (button.buttonId === 'cancel') {
-          // The cancellation message itself is sent by the appointment-notify job.
-          await updateAppointment(deps, tenantId, ctx.appointmentId, 'cancelled', {
-            cancelReason: 'customer',
-          });
-          return { status: 'replied', reason: 'cancelled by button' };
+    if (aboutAppointment && !ctx.appointments.length && button.buttonId !== 'reschedule') {
+      await reply("I couldn't find an upcoming appointment for you. Would you like to book one?", 'button');
+      return { status: 'replied' };
+    }
+    if (aboutAppointment) {
+      // The button says which appointment it was about; without that (older messages) it is unambiguous only if they have one.
+      const target = button.appointmentId
+        ? ctx.appointments.find((a) => a.id === button.appointmentId)
+        : ctx.appointments.length === 1
+          ? ctx.appointments[0]
+          : undefined;
+      if (button.buttonId === 'reschedule' || !target) {
+        buttonNote = target
+          ? `They tapped "${button.buttonId}" on: ${target.label}`
+          : `They tapped "${button.buttonId}" on an appointment reminder, but it is not clear which appointment (they may have several, or that one was already changed). Ask which one they mean.`;
+      } else {
+        try {
+          if (button.buttonId === 'cancel') {
+            // The cancellation message itself is sent by the appointment-notify job.
+            await updateAppointment(deps, tenantId, target.id, 'cancelled', {
+              cancelReason: 'customer',
+              byCustomer: true,
+            });
+            return { status: 'replied', reason: 'cancelled by button' };
+          }
+          if (button.buttonId === 'confirm') {
+            await updateAppointment(deps, tenantId, target.id, 'lead_confirmed');
+            await reply(`Thanks for confirming! See you on ${target.label}.`, 'button');
+            return { status: 'replied', reason: 'confirmed by button' };
+          }
+        } catch (err) {
+          if (!(err instanceof BookingError)) throw err;
+          if (err.code === 'too_late') {
+            await escalate(tool, 'customer tried to cancel inside the notice window');
+            await reply(
+              `Sorry, ${err.message.charAt(0).toLowerCase()}${err.message.slice(1)} A team member will contact you shortly.`,
+              'button',
+            );
+            return { status: 'escalated', reason: 'too late to cancel' };
+          }
+          await reply(
+            button.buttonId === 'confirm' && target.label.includes('pending')
+              ? 'Thanks! Your booking is still waiting for the team to confirm — we will message you shortly.'
+              : 'Thanks — noted.',
+            'button',
+          );
+          return { status: 'replied', reason: err.code };
         }
-        await updateAppointment(deps, tenantId, ctx.appointmentId, 'lead_confirmed');
-        await reply(
-          `Thanks for confirming! See you on ${ctx.appointment?.label ?? 'your appointment'}.`,
-          'button',
-        );
-        return { status: 'replied', reason: 'confirmed by button' };
-      } catch (err) {
-        if (!(err instanceof BookingError)) throw err;
-        await reply(
-          button.buttonId === 'confirm' && ctx.appointment?.label.includes('pending')
-            ? 'Thanks! Your booking is still waiting for the team to confirm — we will message you shortly.'
-            : 'Thanks — noted.',
-          'button',
-        );
-        return { status: 'replied', reason: err.code };
       }
     }
   }
@@ -334,7 +398,11 @@ export async function runAssistantTurn(
       answers: ctx.answers,
       missing: scored.status === 'incomplete' ? scored.missing : [],
       status: displayStatus(lead),
-      appointment: ctx.appointment?.label ?? null,
+      appointments: ctx.appointments.map((a) => a.label),
+      pastVisits: ctx.pastVisits,
+      staleAnswers: ctx.staleAnswers,
+      daysSinceLastContact: ctx.daysSinceBefore,
+      buttonNote,
       resources: ctx.resources,
     }),
   };

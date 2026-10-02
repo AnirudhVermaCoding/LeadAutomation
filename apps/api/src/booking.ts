@@ -3,6 +3,7 @@ import {
   addDays,
   availableSlots,
   formatSlot,
+  HOUR,
   localParts,
   MINUTE,
   pickOffers,
@@ -59,7 +60,16 @@ const SEARCH_DAYS = 14;
 
 export class BookingError extends Error {
   readonly code:
-    'unknown_service' | 'unavailable' | 'taken' | 'already_booked' | 'no_appointment' | 'invalid_status';
+    | 'unknown_service'
+    | 'unavailable'
+    | 'taken'
+    | 'already_booked'
+    | 'no_appointment'
+    | 'invalid_status'
+    /** The customer has several upcoming appointments and did not say which one. */
+    | 'ambiguous'
+    /** A customer change or cancellation inside the clinic's notice window. */
+    | 'too_late';
   constructor(code: BookingError['code'], message: string) {
     super(message);
     this.code = code;
@@ -168,14 +178,90 @@ export async function findSlots(
   });
 }
 
-export async function activeAppointment(tx: Tx, leadId: string) {
-  const [row] = await tx
+/**
+ * A lead's active appointments that have not finished yet. A visit nobody marked Completed / No-show
+ * is not "upcoming" any more, so it never blocks a new booking or shows up as "upcoming" to the assistant.
+ */
+export async function upcomingAppointments(tx: Tx, leadId: string, now: Date) {
+  return tx
     .select()
     .from(appointments)
     .where(
-      and(eq(appointments.leadId, leadId), inArray(appointments.status, [...ACTIVE_APPOINTMENT_STATUSES])),
+      and(
+        eq(appointments.leadId, leadId),
+        inArray(appointments.status, [...ACTIVE_APPOINTMENT_STATUSES]),
+        gt(appointments.endsAt, now),
+      ),
+    )
+    .orderBy(asc(appointments.startsAt));
+}
+
+/** The first upcoming appointment (the dashboard's single-appointment view). */
+export async function activeAppointment(tx: Tx, leadId: string, now: Date) {
+  return (await upcomingAppointments(tx, leadId, now))[0] ?? null;
+}
+
+const SELF = new Set(['me', 'myself', 'self', 'mine', 'main', 'mujhe']);
+
+/**
+ * Who an appointment is for. `undefined` = not said; `null` = the lead themselves ("me", or their own
+ * name); otherwise the family member's name, trimmed.
+ */
+export function attendeeOf(lead: { name: string | null }, forName: string | null | undefined) {
+  if (forName === undefined || forName === null) return forName === null ? null : undefined;
+  const name = forName.trim().replace(/\s+/g, ' ');
+  if (!name || SELF.has(name.toLowerCase())) return null;
+  const own = lead.name?.trim().replace(/\s+/g, ' ').toLowerCase();
+  if (own && (own === name.toLowerCase() || own.split(' ')[0] === name.toLowerCase())) return null;
+  return name;
+}
+const sameAttendee = (a: string | null, b: string | null) =>
+  (a ?? '').toLowerCase() === (b ?? '').toLowerCase();
+
+/** "you" / "Rhea", for messages. */
+const whoFor = (attendee: string | null) => (attendee ? attendee : 'you');
+
+/**
+ * Which appointment does the customer mean? By id, by who it is for, or the only one they have.
+ * Several and no hint: BookingError('ambiguous') listing them, so the assistant can ask.
+ */
+export async function pickAppointment(
+  tx: Tx,
+  config: TenantConfig,
+  lead: { id: string; name: string | null },
+  now: Date,
+  sel: { appointmentId?: string | undefined; forName?: string | null | undefined },
+) {
+  const all = await upcomingAppointments(tx, lead.id, now);
+  if (sel.appointmentId) {
+    const hit = all.find((a) => a.id === sel.appointmentId);
+    if (!hit) throw new BookingError('no_appointment', 'That appointment is not upcoming any more');
+    return hit;
+  }
+  const attendee = attendeeOf(lead, sel.forName);
+  if (attendee !== undefined) {
+    const hit = all.find((a) => sameAttendee(a.attendeeName, attendee));
+    if (!hit)
+      throw new BookingError('no_appointment', `There is no upcoming appointment for ${whoFor(attendee)}`);
+    return hit;
+  }
+  if (all.length === 1) return all[0]!;
+  if (!all.length) throw new BookingError('no_appointment', 'There is no upcoming appointment');
+  const tz = config.locale.timezone;
+  throw new BookingError(
+    'ambiguous',
+    `They have ${all.length} upcoming appointments: ${all.map((a) => `${a.service} on ${formatSlot(a.startsAt, tz)} for ${whoFor(a.attendeeName)}`).join('; ')}. Ask which one they mean, then pass for_name ("me" for their own)`,
+  );
+}
+
+/** Customers (chat, buttons) can change or cancel only up to `change_notice_hours` before the visit; staff always can. */
+function assertChangeAllowed(config: TenantConfig, appt: { startsAt: Date }, now: Date) {
+  const hours = config.booking.change_notice_hours ?? 2;
+  if (appt.startsAt.getTime() - now.getTime() < hours * HOUR)
+    throw new BookingError(
+      'too_late',
+      `Changes are not possible within ${hours} hour${hours === 1 ? '' : 's'} of the appointment.${config.booking.cancellation_policy ? ` Policy: ${config.booking.cancellation_policy}` : ''}`,
     );
-  return row ?? null;
 }
 
 /** Deadlock / serialization failure: concurrent bookings collided; retrying gives the real answer. */
@@ -188,6 +274,14 @@ const isOverlapViolation = (err: unknown) =>
   (err as { code?: string; cause?: { code?: string } }).code === '23P01' ||
   (err as { cause?: { code?: string } }).cause?.code === '23P01';
 
+const isOnePerPersonViolation = (err: unknown) => {
+  const e = err as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } };
+  return (
+    (e.code ?? e.cause?.code) === '23505' &&
+    (e.constraint ?? e.cause?.constraint) === 'appointments_one_active_per_attendee'
+  );
+};
+
 async function change(
   tx: TenantTx,
   deps: BookingDeps,
@@ -197,7 +291,14 @@ async function change(
   kind: AppointmentChange,
   leadEvent: LeadEvent | null,
 ) {
-  if (leadEvent) await transitionLeadIfAllowed(tx, leadId, leadEvent);
+  if (leadEvent) {
+    // Ending their "booked" state only applies when they have nothing else coming up (a parent with two bookings).
+    const ends = ['CANCELLED', 'COMPLETED', 'NO_SHOW'].includes(leadEvent.type);
+    const others = ends
+      ? (await upcomingAppointments(tx, leadId, deps.clock.now())).filter((a) => a.id !== appointmentId)
+      : [];
+    if (!others.length) await transitionLeadIfAllowed(tx, leadId, leadEvent);
+  }
   await emit(tx, deps.clock, `appointment.${kind}`, { appointmentId, leadId });
 
   // Sequences: reminders for confirmed bookings; recovery or review after the visit.
@@ -207,8 +308,9 @@ async function change(
     if (appt.status === 'pending') {
       await enrollPendingWatch(tx, deps.clock, config, appt);
     } else if (appt.status === 'scheduled' || appt.status === 'confirmed') {
-      await stopEnrollments(tx, leadId, ['pending_watch'], 'confirmed');
-      if (kind === 'lead_confirmed') await stopEnrollments(tx, leadId, ['confirm_watch'], 'lead confirmed');
+      await stopEnrollments(tx, leadId, ['pending_watch'], 'confirmed', appt.id);
+      if (kind === 'lead_confirmed')
+        await stopEnrollments(tx, leadId, ['confirm_watch'], 'lead confirmed', appt.id);
       else {
         await enrollReminders(tx, deps.clock, config, appt);
         await enrollConfirmWatch(tx, deps.clock, config, appt);
@@ -219,6 +321,7 @@ async function change(
         leadId,
         ['reminders', 'pending_watch', 'confirm_watch'],
         `appointment ${appt.status}`,
+        appt.id,
       );
       if (kind === 'completed') await enrollAfterVisit(tx, deps.clock, config, appt, 'review_request');
       if (kind === 'no_show') await enrollAfterVisit(tx, deps.clock, config, appt, 'no_show_recovery');
@@ -244,6 +347,8 @@ export async function bookSlot(
     replaceAppointmentId?: string;
     /** A specific doctor / agent the person asked for (remembered for rebooking). */
     resource?: string | undefined;
+    /** Who the visit is for when it is not the lead (a child): undefined = the lead, or the replaced booking's person. */
+    forName?: string | null | undefined;
   },
 ) {
   // Outside the transaction (a network call): pull in Google events the push channel hasn't delivered yet.
@@ -255,6 +360,11 @@ export async function bookSlot(
     } catch (err) {
       if (isOverlapViolation(err))
         throw new BookingError('taken', 'That time was just taken by someone else');
+      if (isOnePerPersonViolation(err))
+        throw new BookingError(
+          'already_booked',
+          'They already have an upcoming appointment; reschedule it instead',
+        );
       if (attempt < 3 && isTransientConflict(err)) continue;
       throw err;
     }
@@ -266,11 +376,43 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
     const config = (await getActiveConfig(tx))?.config;
     if (!config) throw new Error('tenant has no config');
     const service = serviceOf(config, input.service);
-    const existing = await activeAppointment(tx, input.leadId);
-    if (existing && existing.id !== input.replaceAppointmentId)
+    const now = deps.clock.now();
+    const [lead] = await tx.select({ name: leads.name }).from(leads).where(eq(leads.id, input.leadId));
+    // A past visit nobody marked would block them for ever (one active booking per person): close it.
+    const given0 = attendeeOf(lead ?? { name: null }, input.forName);
+    const stale = await tx
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.leadId, input.leadId),
+          inArray(appointments.status, [...ACTIVE_APPOINTMENT_STATUSES]),
+          lt(appointments.endsAt, now),
+        ),
+      );
+    for (const old of stale.filter((a) => sameAttendee(a.attendeeName, given0 ?? null))) {
+      await tx.update(appointments).set({ status: 'lapsed' }).where(eq(appointments.id, old.id));
+      await stopEnrollments(
+        tx,
+        input.leadId,
+        ['reminders', 'pending_watch', 'confirm_watch'],
+        'lapsed',
+        old.id,
+      );
+      await emit(tx, deps.clock, 'appointment.lapsed', { appointmentId: old.id, leadId: input.leadId });
+    }
+    const upcoming = await upcomingAppointments(tx, input.leadId, now);
+    // Who it is for: said explicitly, else the person whose booking is being replaced, else the lead.
+    const replaced = upcoming.find((a) => a.id === input.replaceAppointmentId);
+    const given = attendeeOf(lead ?? { name: null }, input.forName);
+    const attendee = given !== undefined ? given : replaced ? replaced.attendeeName : null;
+    const clash = upcoming.find(
+      (a) => a.id !== input.replaceAppointmentId && sameAttendee(a.attendeeName, attendee),
+    );
+    if (clash)
       throw new BookingError(
         'already_booked',
-        `Lead already has an appointment on ${formatSlot(existing.startsAt, config.locale.timezone)}; reschedule it instead`,
+        `${attendee ? attendee : 'They'} already ${attendee ? 'has' : 'have'} an appointment on ${formatSlot(clash.startsAt, config.locale.timezone)}; reschedule it instead`,
       );
 
     const tz = config.locale.timezone;
@@ -302,6 +444,14 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
         .update(appointments)
         .set({ status: 'cancelled' })
         .where(eq(appointments.id, input.replaceAppointmentId));
+      // Its reminders and watches belong to the old time: stop them now, not when the new booking is confirmed.
+      await stopEnrollments(
+        tx,
+        input.leadId,
+        ['reminders', 'pending_watch', 'confirm_watch'],
+        'rescheduled',
+        input.replaceAppointmentId,
+      );
       // The old slot's calendar event must go too (the new appointment gets its own event).
       await deps.enqueue(tx, QUEUES.appointmentNotify, {
         tenantId,
@@ -322,6 +472,7 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
         busyUntil: new Date(slot.end.getTime() + config.booking.buffer_minutes * MINUTE),
         status,
         source: input.source,
+        attendeeName: attendee,
       })
       .returning();
     if (!appt) throw new Error('appointment insert failed');
@@ -336,22 +487,44 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
 export async function rescheduleLeadAppointment(
   deps: BookingDeps,
   tenantId: string,
-  input: { leadId: string; date: string; time: string; source: 'assistant' | 'staff' },
+  input: {
+    leadId: string;
+    date: string;
+    time: string;
+    source: 'assistant' | 'staff';
+    /** Which appointment, when the lead has several: by id (staff, buttons) or by who it is for (chat). */
+    appointmentId?: string | undefined;
+    forName?: string | null | undefined;
+  },
 ) {
-  const current = await withTenant(deps.db, tenantId, (tx) => activeAppointment(tx, input.leadId));
-  if (!current) throw new BookingError('no_appointment', 'There is no upcoming appointment to reschedule');
-  // Someone who asked for a specific doctor stays with them when they reschedule.
-  const [pref] = await withTenant(deps.db, tenantId, (tx) =>
-    tx
+  const { current, preferred } = await withTenant(deps.db, tenantId, async (tx) => {
+    const config = (await getActiveConfig(tx))?.config;
+    if (!config) throw new Error('tenant has no config');
+    const [lead] = await tx
+      .select({ id: leads.id, name: leads.name })
+      .from(leads)
+      .where(eq(leads.id, input.leadId));
+    if (!lead) throw new BookingError('no_appointment', 'Lead not found');
+    const now = deps.clock.now();
+    const current = await pickAppointment(tx, config, lead, now, input);
+    // Customers (not staff) are held to the clinic's notice window.
+    if (input.source === 'assistant') assertChangeAllowed(config, current, now);
+    // Someone who asked for a specific doctor stays with them when they reschedule.
+    const [pref] = await tx
       .select({ value: answers.value })
       .from(answers)
-      .where(and(eq(answers.leadId, input.leadId), eq(answers.key, PREFERRED_RESOURCE))),
-  );
+      .where(and(eq(answers.leadId, input.leadId), eq(answers.key, PREFERRED_RESOURCE)));
+    return { current, preferred: pref?.value };
+  });
   return bookSlot(deps, tenantId, {
-    ...input,
+    leadId: input.leadId,
+    date: input.date,
+    time: input.time,
+    source: input.source,
     service: current.service,
     replaceAppointmentId: current.id,
-    resource: pref?.value === current.resource ? current.resource : undefined,
+    resource: preferred === current.resource ? current.resource : undefined,
+    forName: current.attendeeName, // null = the lead themselves; keeps the person across the move
   });
 }
 
@@ -366,8 +539,16 @@ const NEXT: Partial<
   cancelled: { from: ['pending', 'scheduled', 'confirmed'], to: 'cancelled', lead: { type: 'CANCELLED' } },
   displaced: { from: ['pending', 'scheduled', 'confirmed'], to: 'cancelled', lead: { type: 'CANCELLED' } },
   // Pending too: if staff never confirmed but the visit happened (or didn't), they can still mark it.
-  completed: { from: ['pending', 'scheduled', 'confirmed'], to: 'completed', lead: { type: 'COMPLETED' } },
-  no_show: { from: ['pending', 'scheduled', 'confirmed'], to: 'no_show', lead: { type: 'NO_SHOW' } },
+  completed: {
+    from: ['pending', 'scheduled', 'confirmed', 'lapsed'],
+    to: 'completed',
+    lead: { type: 'COMPLETED' },
+  },
+  no_show: {
+    from: ['pending', 'scheduled', 'confirmed', 'lapsed'],
+    to: 'no_show',
+    lead: { type: 'NO_SHOW' },
+  },
 };
 
 /** Staff (dashboard) or lead (chat / reminder buttons) moves an appointment along. */
@@ -376,7 +557,11 @@ export async function updateAppointment(
   tenantId: string,
   appointmentId: string,
   kind: 'confirmed' | 'lead_confirmed' | 'cancelled' | 'completed' | 'no_show' | 'displaced',
-  opts: { cancelReason?: string } = {},
+  opts: {
+    cancelReason?: string;
+    /** The customer asked (chat / button): the clinic's change-notice window applies. */
+    byCustomer?: boolean;
+  } = {},
 ) {
   return withTenant(deps.db, tenantId, async (tx) => {
     const [appt] = await tx
@@ -388,6 +573,10 @@ export async function updateAppointment(
     const rule = NEXT[kind];
     if (!rule || !rule.from.includes(appt.status))
       throw new BookingError('invalid_status', `Can't mark a ${appt.status} appointment as ${kind}`);
+    if (opts.byCustomer && kind === 'cancelled') {
+      const config = (await getActiveConfig(tx))?.config;
+      if (config) assertChangeAllowed(config, appt, deps.clock.now());
+    }
     const [updated] = await tx
       .update(appointments)
       .set({ status: rule.to, ...(opts.cancelReason ? { cancelReason: opts.cancelReason } : {}) })
@@ -398,10 +587,26 @@ export async function updateAppointment(
   });
 }
 
-export async function cancelLeadAppointment(deps: BookingDeps, tenantId: string, leadId: string) {
-  const current = await withTenant(deps.db, tenantId, (tx) => activeAppointment(tx, leadId));
-  if (!current) throw new BookingError('no_appointment', 'There is no upcoming appointment to cancel');
-  return updateAppointment(deps, tenantId, current.id, 'cancelled', { cancelReason: 'customer' });
+export async function cancelLeadAppointment(
+  deps: BookingDeps,
+  tenantId: string,
+  leadId: string,
+  sel: { appointmentId?: string | undefined; forName?: string | null | undefined } = {},
+) {
+  const current = await withTenant(deps.db, tenantId, async (tx) => {
+    const config = (await getActiveConfig(tx))?.config;
+    if (!config) throw new Error('tenant has no config');
+    const [lead] = await tx
+      .select({ id: leads.id, name: leads.name })
+      .from(leads)
+      .where(eq(leads.id, leadId));
+    if (!lead) throw new BookingError('no_appointment', 'Lead not found');
+    return pickAppointment(tx, config, lead, deps.clock.now(), sel);
+  });
+  return updateAppointment(deps, tenantId, current.id, 'cancelled', {
+    cancelReason: 'customer',
+    byCustomer: true,
+  });
 }
 
 /** Default availability for a new tenant: its business hours, one resource. */

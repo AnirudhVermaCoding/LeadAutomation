@@ -4,7 +4,7 @@ import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../audit.ts';
-import { activeAppointment } from '../booking.ts';
+import { upcomingAppointments } from '../booking.ts';
 import { getActiveConfig } from '../config-store.ts';
 import { withTenant } from '../db/client.ts';
 import {
@@ -64,7 +64,8 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
           .select({ key: answers.key, value: answers.value })
           .from(answers)
           .where(eq(answers.leadId, id)),
-        appointment: await activeAppointment(tx, id),
+        appointment: (await upcomingAppointments(tx, id, ctx.clock.now()))[0] ?? null,
+        appointments: await upcomingAppointments(tx, id, ctx.clock.now()),
         messages: await tx
           .select()
           .from(messages)

@@ -55,7 +55,7 @@ export async function runStaffDigest(
         .innerJoin(leads, eq(leads.id, appointments.leadId))
         .where(
           and(
-            inArray(appointments.status, ['pending', 'scheduled', 'confirmed']),
+            inArray(appointments.status, ['pending', 'scheduled', 'confirmed', 'lapsed']),
             lt(appointments.endsAt, now),
             sql`${appointments.startsAt} > ${new Date(t - 7 * 86_400_000)}`,
           ),

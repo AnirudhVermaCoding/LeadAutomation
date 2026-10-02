@@ -221,10 +221,18 @@ export function renderTemplateBody(
   );
 }
 
-/** Payload WhatsApp returns when a quick-reply button is tapped. */
-export const buttonPayload = (key: TemplateKey, buttonId: string) => `${key}:${buttonId}`;
+/**
+ * Payload WhatsApp returns when a quick-reply button is tapped: `<template>:<button>`, plus the
+ * appointment it is about (`:<appointment id>`), so a customer with several bookings acts on the right one.
+ */
+export const buttonPayload = (key: TemplateKey, buttonId: string, appointmentId?: string) =>
+  appointmentId ? `${key}:${buttonId}:${appointmentId}` : `${key}:${buttonId}`;
 
-export function parseButtonPayload(payload: string): { key: TemplateKey; buttonId: string } | null {
-  const [key, buttonId] = payload.split(':');
-  return key && buttonId && key in TEMPLATES ? { key: key as TemplateKey, buttonId } : null;
+export function parseButtonPayload(
+  payload: string,
+): { key: TemplateKey; buttonId: string; appointmentId?: string } | null {
+  const [key, buttonId, appointmentId] = payload.split(':');
+  return key && buttonId && key in TEMPLATES
+    ? { key: key as TemplateKey, buttonId, ...(appointmentId ? { appointmentId } : {}) }
+    : null;
 }

@@ -79,7 +79,7 @@ export interface SendRequest {
   leadId: string;
   /** Unique per tenant; a retry with the same key never sends twice once a send succeeded. */
   idempotencyKey: string;
-  template?: { key: TemplateKey; values?: Record<string, string> };
+  template?: { key: TemplateKey; values?: Record<string, string>; appointmentId?: string };
   freeForm?: Extract<OutboundContent, { kind: 'text' | 'buttons' }>;
   /** Only for the confirmation of the opt-out itself. Everything else is refused for an opted-out lead. */
   allowOptedOut?: boolean;
@@ -193,7 +193,7 @@ export async function sendToLead(
       // Kept so the inbox and demo sandbox can show (and tap) the quick-reply buttons.
       payload: {
         buttons: (def.buttons as readonly { id: string; text: Record<string, string> }[]).map((b) => ({
-          id: buttonPayload(key, b.id),
+          id: buttonPayload(key, b.id, choice.template.appointmentId),
           title: b.text[language] ?? b.text.en ?? b.id,
         })),
       },
@@ -213,7 +213,7 @@ export async function sendToLead(
       name: row?.providerName ?? def.providerName,
       language,
       bodyParams: values,
-      buttonPayloads: def.buttons.map((b) => buttonPayload(key, b.id)),
+      buttonPayloads: def.buttons.map((b) => buttonPayload(key, b.id, choice.template.appointmentId)),
     };
     const messageId = await record({ ...base, status: 'queued' });
     return { kind: 'send', messageId, channel, to: lead.phoneE164, content } as const;

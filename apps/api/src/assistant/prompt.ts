@@ -16,6 +16,18 @@ export function toolSchemas(config: TenantConfig, resources: readonly string[] =
             .describe('Only this doctor / agent, when the person asked for one'),
         }
       : {};
+  // Who the visit is for, only when it is not the person writing (a parent booking for a child).
+  const forName = {
+    for_name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(60)
+      .optional()
+      .describe(
+        'Name of the person the appointment is for when it is not the person writing (e.g. their child). Use "me" for their own appointment when they have several.',
+      ),
+  };
   const keys = config.qualification.questions.map((q) => q.key) as [string, ...string[]];
   const services = config.booking.services.map((x) => x.name) as [string, ...string[]];
   const date = z
@@ -52,9 +64,9 @@ export function toolSchemas(config: TenantConfig, resources: readonly string[] =
       part_of_day: z.enum(['morning', 'afternoon', 'evening']).optional(),
       ...resource,
     }),
-    book_slot: z.strictObject({ service: z.enum(services), date, time, ...resource }),
-    reschedule: z.strictObject({ date, time }),
-    cancel: z.strictObject({}),
+    book_slot: z.strictObject({ service: z.enum(services), date, time, ...resource, ...forName }),
+    reschedule: z.strictObject({ date, time, ...forName }),
+    cancel: z.strictObject({ ...forName }),
   };
 }
 export type ToolName = keyof ReturnType<typeof toolSchemas>;
@@ -71,10 +83,11 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   get_available_slots:
     'Real free appointment times for a service (next two weeks, or one date). Offer only times returned here, using their labels.',
   book_slot:
-    'Book the time the person chose, using the exact date and time from get_available_slots. A confirmation message is sent to them automatically.',
+    'Book the time the person chose, using the exact date and time from get_available_slots. A confirmation message is sent to them automatically. Pass for_name when the visit is for someone else (their child, parent…): one person can have several bookings, one per family member.',
   reschedule:
-    'Move their existing appointment to a new time (date and time from get_available_slots). A confirmation is sent automatically.',
-  cancel: 'Cancel their existing appointment, only after they clearly asked to cancel.',
+    'Move an existing appointment to a new time (date and time from get_available_slots). A confirmation is sent automatically. With several appointments, pass for_name to say whose.',
+  cancel:
+    'Cancel an existing appointment, only after they clearly asked to cancel. With several appointments, pass for_name to say whose.',
 };
 
 export function buildTools(config: TenantConfig, resources: readonly string[] = []): ToolSpec[] {
@@ -176,11 +189,11 @@ Time
 - The CRM state below tells you the local time and whether the ${clinic ? 'clinic' : 'office'} is open. Greet naturally for the time of day. Outside opening hours, a callback means "first thing when we open", not "right now".
 
 Tools
-- record_answer as soon as they answer a qualification question (one message may answer several; record each). Never re-ask something already answered.
+- record_answer as soon as they answer a qualification question (one message may answer several; record each). Never re-ask something already answered, unless the CRM state says the answer is old (then confirm it in one short question).
 - mark_disqualified only when an answer clearly matches a disqualifier and they've confirmed it.
 - Booking: once the required questions are answered, or whenever they want to book, call get_available_slots for the best-matching service and offer the times by their labels. When they choose, call book_slot with exactly that date and time. Never offer or confirm a time that did not come from get_available_slots. A confirmation message is sent automatically, so just say it's done (or that the team will confirm, if the result says pending).
 - After answering a question, if they haven't booked, gently offer the next step — but if they say no or "later", respect it.
-- To change or cancel an existing appointment use reschedule or cancel.
+- To change or cancel an existing appointment use reschedule or cancel. One person can hold several appointments (for themselves and family members, shown under "Upcoming appointments"): when it is for someone else, pass for_name; if it is unclear which one they mean, ask. To book for a second person, call book_slot with for_name.${changePolicy(config)}
 - If they ask for a specific doctor or person (see "Bookable people" in the CRM state), pass resource to get_available_slots and book_slot and only offer that person's times. Otherwise don't ask; any free one is fine.
 
 EXAMPLES (the voice to aim for; adapt, don't copy)
@@ -199,6 +212,14 @@ KNOWLEDGE
 ${knowledge}`;
 }
 
+/** Customers can only change within the clinic's notice window; later requests go to the team. */
+function changePolicy(config: TenantConfig): string {
+  const hours = config.booking.change_notice_hours ?? 2;
+  const policy = config.booking.cancellation_policy;
+  return `
+- Changes and cancellations by chat are possible until ${hours} hour${hours === 1 ? '' : 's'} before the appointment; after that the team handles them (the tool will tell you).${policy ? ` Policy to share when asked: ${policy}` : ''}`;
+}
+
 /** Per-turn facts from our database, appended as a mid-conversation system message (keeps the cache prefix intact). */
 export function stateMessage(s: {
   now: string;
@@ -208,7 +229,16 @@ export function stateMessage(s: {
   answers: Record<string, string>;
   missing: string[];
   status: string;
-  appointment: string | null;
+  /** Upcoming appointments, one line each ("Consultation, Mon 12 Oct 11:00 am (for Rhea)"). */
+  appointments: readonly string[];
+  /** Past visits, newest first ("Consultation, Mon 3 Aug (completed)"). */
+  pastVisits?: readonly string[];
+  /** Answers recorded more than 60 days ago: still shown, but worth re-confirming. */
+  staleAnswers?: readonly string[];
+  /** Days since the last message in this conversation, before the one being answered. */
+  daysSinceLastContact?: number | null;
+  /** What the customer just tapped, when it was a button on one of the appointments. */
+  buttonNote?: string | null;
   resources?: readonly string[];
 }): string {
   return [
@@ -217,10 +247,22 @@ export function stateMessage(s: {
     `- Opening hours: ${s.openNow}`,
     `- Name: ${s.name ?? 'unknown'}`,
     `- Language they last wrote in: ${s.language ?? 'unknown'}`,
+    ...((s.daysSinceLastContact ?? 0) >= 14
+      ? [
+          `- Returning customer: your last conversation with them was ${s.daysSinceLastContact} days ago. Welcome them back; what they told you then may have changed.`,
+        ]
+      : []),
     `- Answers so far: ${Object.keys(s.answers).length ? JSON.stringify(s.answers) : 'none'}`,
+    ...(s.staleAnswers?.length
+      ? [`- Answers older than 60 days (re-confirm before relying on them): ${s.staleAnswers.join(', ')}`]
+      : []),
     `- Required questions still to ask: ${s.missing.length ? s.missing.join(', ') : 'none — all answered'}`,
     `- Lead status: ${s.status}`,
-    `- Upcoming appointment: ${s.appointment ?? 'none'}`,
+    ...(s.appointments.length
+      ? ['- Upcoming appointments:', ...s.appointments.map((a, i) => `  ${i + 1}. ${a}`)]
+      : ['- Upcoming appointments: none']),
+    ...(s.pastVisits?.length ? [`- Past visits: ${s.pastVisits.join('; ')}`] : []),
+    ...(s.buttonNote ? [`- ${s.buttonNote}`] : []),
     ...((s.resources ?? []).filter((r) => r !== 'default').length > 1
       ? [`- Bookable people: ${(s.resources ?? []).filter((r) => r !== 'default').join(', ')}`]
       : []),

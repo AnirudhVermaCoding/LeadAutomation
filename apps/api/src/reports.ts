@@ -67,7 +67,7 @@ export async function computeReport(
       select count(*) filter (where status = 'completed' and starts_at >= ${start} and starts_at < ${end}) as shows,
         count(*) filter (where status = 'no_show' and starts_at >= ${start} and starts_at < ${end}) as no_shows,
         count(*) filter (where status in ('pending', 'scheduled', 'confirmed') and starts_at >= ${now}) as upcoming,
-        count(*) filter (where status in ('pending', 'scheduled', 'confirmed') and ends_at < ${now} and starts_at >= ${start} and starts_at < ${end}) as unmarked
+        count(*) filter (where status in ('pending', 'scheduled', 'confirmed', 'lapsed') and ends_at < ${now} and starts_at >= ${start} and starts_at < ${end}) as unmarked
       from appointments`,
   );
   const inbound = (

@@ -30,6 +30,9 @@ export interface InboundMessage {
 
 class DuplicateMessage extends Error {}
 
+/** A human takeover older than this (no message from the customer for this long) expires when they write again. */
+const PAUSE_EXPIRES_AFTER_DAYS = 7;
+
 export const CONVERSATION_CONSENT_TEXT =
   'The lead started this WhatsApp conversation; replies are limited to this conversation and its purpose.';
 
@@ -98,6 +101,10 @@ export async function handleInboundMessage(
         .returning({ id: messages.id });
       if (!inserted) throw new DuplicateMessage(); // concurrent delivery of the same webhook
 
+      const [previous] = await tx
+        .select({ lastInboundAt: conversations.lastInboundAt })
+        .from(conversations)
+        .where(eq(conversations.leadId, leadId));
       await tx
         .insert(conversations)
         .values({ leadId, lastInboundAt: now, windowExpiresAt: windowExpiresAt(now) })
@@ -144,8 +151,38 @@ export async function handleInboundMessage(
       if (msg.mediaType === 'reaction')
         return { leadId, messageId: inserted.id, action: 'recorded' } as const;
       const status = await transitionLead(tx, leadId, { type: 'LEAD_REPLIED' });
+      let paused = status.aiPaused;
+      if (paused) {
+        const quietDays = previous?.lastInboundAt
+          ? (now.getTime() - previous.lastInboundAt.getTime()) / 86_400_000
+          : 0;
+        if (quietDays >= PAUSE_EXPIRES_AFTER_DAYS) {
+          // A takeover from long ago must not mean silence for ever: the assistant picks the conversation back up.
+          await transitionLead(tx, leadId, { type: 'HUMAN_RESUME' });
+          paused = false;
+          await deps.enqueue(tx, QUEUES.staffAlert, {
+            tenantId,
+            leadId,
+            reason: `the customer came back after ${Math.floor(quietDays)} days; the assistant took the conversation back`,
+            at: now.toISOString(),
+          });
+        } else {
+          // The person who took over should know they wrote (at most every 6 hours per customer).
+          await deps.enqueue(
+            tx,
+            QUEUES.staffAlert,
+            {
+              tenantId,
+              leadId,
+              reason: 'the customer wrote while the assistant is paused for this conversation',
+              at: now.toISOString(),
+            },
+            { singletonKey: `paused:${leadId}`, singletonSeconds: 6 * 3600 },
+          );
+        }
+      }
       // Debounce ~3 s so a burst of messages gets one reply; skipped while a human has taken over.
-      if (!status.aiPaused)
+      if (!paused)
         await deps.enqueue(
           tx,
           QUEUES.assistantTurn,

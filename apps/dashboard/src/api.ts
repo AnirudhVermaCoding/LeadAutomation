@@ -115,7 +115,9 @@ export interface Appointment {
   resource: string;
   startsAt: string;
   endsAt: string;
-  status: 'pending' | 'scheduled' | 'confirmed' | 'completed' | 'no_show' | 'cancelled';
+  status: 'pending' | 'scheduled' | 'confirmed' | 'completed' | 'no_show' | 'cancelled' | 'lapsed';
+  /** Who the visit is for when it is not the person who booked (a child). */
+  attendeeName?: string | null;
 }
 
 export interface LeadDetail {

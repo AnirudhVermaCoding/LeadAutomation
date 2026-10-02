@@ -215,6 +215,12 @@ describe('booking lifecycle', () => {
 
 describe('booking through the assistant (mock mode)', () => {
   test('qualify -> offered slots -> pick "2" -> booked (pending), then reschedule and cancel by chat', async () => {
+    // These slots are hours away; the change-notice policy has its own tests (paths.db.test.ts).
+    const cfg = (
+      (await api('GET', '/v1/config')).json() as { config: { booking: { change_notice_hours?: number } } }
+    ).config;
+    cfg.booking.change_notice_hours = 0;
+    expect((await api('PUT', '/v1/config', cfg)).statusCode).toBe(200);
     const say = async (text: string) => {
       await api('POST', '/v1/dev/whatsapp/inbound', { from: '9811122233', text });
       await t.drainAssistant();

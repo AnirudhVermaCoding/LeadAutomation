@@ -33,10 +33,12 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
   if (!loaded) return { skipped: 'appointment gone' };
   const { appt, lead, config, calendar } = loaded;
   const tz = config.locale.timezone;
+  // A parent booking for a child: "Consultation for Rhea" everywhere the visit is named.
+  const serviceLabel = appt.attendeeName ? `${appt.service} for ${appt.attendeeName}` : appt.service;
   const values = {
     // Absent (not empty) when unknown, so the template's default greeting is used.
     ...(lead.name?.trim() ? { first_name: lead.name.trim().split(/\s+/)[0] ?? '' } : {}),
-    'appointment.service': appt.service,
+    'appointment.service': serviceLabel,
     'appointment.time': formatSlot(appt.startsAt, tz),
     'appointment.date': formatSlot(appt.startsAt, tz).split(',')[0] ?? '',
     business_name: config.brand.business_name,
@@ -45,7 +47,7 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
 
   // 1. The lead.
   const leadTemplate: TemplateKey | null =
-    kind === 'booked' && appt.status === 'pending'
+    (kind === 'booked' || kind === 'rescheduled') && appt.status === 'pending'
       ? 'booking_pending'
       : kind === 'booked' || kind === 'rescheduled' || (kind === 'confirmed' && appt.status === 'scheduled')
         ? 'booking_confirmed'
@@ -58,7 +60,7 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
     results.lead = await sendToLead(deps, tenantId, {
       leadId: lead.id,
       idempotencyKey: `appt:${appt.id}:${kind}`,
-      template: { key: leadTemplate, values },
+      template: { key: leadTemplate, values, appointmentId: appt.id },
     });
   else if (kind === 'cancelled')
     // Plain text while the chat window is open, the approved template once it has closed.
@@ -67,7 +69,7 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
       idempotencyKey: `appt:${appt.id}:cancelled`,
       freeForm: {
         kind: 'text',
-        body: `Your ${appt.service} on ${values['appointment.time']} has been cancelled. Reply here any time to book again.`,
+        body: `Your ${serviceLabel} on ${values['appointment.time']} has been cancelled. Reply here any time to book again.`,
       },
       template: { key: 'cancellation', values },
     });
@@ -78,14 +80,14 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
     results.leadFailed = await sendStaffNote(
       deps,
       tenantId,
-      `Could not message ${lead.name?.trim() || lead.phoneE164} about their ${appt.service} on ${values['appointment.time']} (${sent.reason}). Please call them`,
+      `Could not message ${lead.name?.trim() || lead.phoneE164} about their ${serviceLabel} on ${values['appointment.time']} (${sent.reason}). Please call them`,
       `appt:${appt.id}:${kind}:lead-failed`,
     ).catch((err: unknown) => ({ error: String(err) }));
 
   // 2. Staff.
   if (kind === 'booked' || kind === 'rescheduled' || kind === 'cancelled' || kind === 'lead_confirmed') {
     const notify = config.booking.staff_notify;
-    const summary = `${kind === 'lead_confirmed' ? 'Confirmed by the customer' : kind === 'cancelled' ? 'Cancelled' : kind === 'rescheduled' ? 'Rescheduled' : appt.status === 'pending' ? 'Needs confirmation' : 'New booking'}: ${lead.name ?? lead.phoneE164} — ${appt.service}${appt.resource !== 'default' ? ` with ${appt.resource}` : ''}, ${values['appointment.time']}`;
+    const summary = `${kind === 'lead_confirmed' ? 'Confirmed by the customer' : kind === 'cancelled' ? 'Cancelled' : kind === 'rescheduled' ? 'Rescheduled' : appt.status === 'pending' ? 'Needs confirmation' : 'New booking'}: ${lead.name ?? lead.phoneE164} — ${serviceLabel}${appt.resource !== 'default' ? ` with ${appt.resource}` : ''}, ${values['appointment.time']}`;
     if (notify.channel === 'email') {
       results.staff = await deps.email.send({
         to: [notify.to],
@@ -93,12 +95,15 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
         text: `${summary}\n\nOpen the InstantLead dashboard to see the conversation.`,
         idempotencyKey: `appt:${appt.id}:${kind}:staff`,
       });
-    } else {
+    } else if (kind === 'booked') {
       results.staff = await sendStaffWhatsApp(deps, tenantId, notify.to, 'staff_new_booking', [
         values.first_name ?? lead.phoneE164,
-        appt.service,
+        serviceLabel,
         values['appointment.time'],
       ]);
+    } else {
+      // Cancelled / rescheduled / confirmed: not a "new booking request", so the generic staff update.
+      results.staff = await sendStaffWhatsApp(deps, tenantId, notify.to, 'staff_update', [summary]);
     }
   }
 
@@ -140,7 +145,7 @@ async function syncCalendarEvent(
   }
   const { id } = await calendar.upsert(
     {
-      summary: `${CALENDAR_PREFIX[appt.status] ?? ''}${appt.service} — ${lead.name ?? lead.phoneE164}`,
+      summary: `${CALENDAR_PREFIX[appt.status] ?? ''}${appt.attendeeName ? `${appt.service} for ${appt.attendeeName}` : appt.service} — ${lead.name ?? lead.phoneE164}`,
       description: `Booked via InstantLead (${appt.status}). Phone: ${lead.phoneE164}`,
       start: appt.startsAt,
       end: appt.endsAt,

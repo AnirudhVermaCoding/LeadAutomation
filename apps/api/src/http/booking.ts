@@ -29,6 +29,8 @@ const STATUS_FOR_ERROR: Record<BookingError['code'], number> = {
   already_booked: 409,
   no_appointment: 404,
   invalid_status: 409,
+  ambiguous: 409,
+  too_late: 409,
 };
 async function bookingErrors<T>(reply: FastifyReply, fn: () => Promise<T>) {
   try {
@@ -75,6 +77,7 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
           endsAt: appointments.endsAt,
           status: appointments.status,
           source: appointments.source,
+          attendeeName: appointments.attendeeName,
         })
         .from(appointments)
         .innerJoin(leads, eq(leads.id, appointments.leadId))
@@ -86,7 +89,14 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
   // Staff booking (e.g. a patient who called). Always confirmed: staff are the confirmation.
   app.post('/v1/appointments', { preHandler: staff }, async (req, reply) => {
     const body = z
-      .strictObject({ lead_id: z.uuid(), service: z.string().min(1), date, time })
+      .strictObject({
+        lead_id: z.uuid(),
+        service: z.string().min(1),
+        date,
+        time,
+        /** The visit is for someone else (a child): their name. */
+        for_name: z.string().trim().min(1).max(60).optional(),
+      })
       .parse(req.body);
     return bookingErrors(reply, async () => {
       const r = await bookSlot(ctx, tenantOf(req), {
@@ -95,6 +105,7 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
         date: body.date,
         time: body.time,
         source: 'staff',
+        forName: body.for_name,
       });
       return reply.code(201).send(r);
     });
@@ -108,7 +119,12 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
         tx.select().from(appointments).where(eq(appointments.id, id)),
       );
       if (!appt) throw new BookingError('no_appointment', 'Appointment not found');
-      return rescheduleLeadAppointment(ctx, tenantOf(req), { leadId: appt.leadId, ...body, source: 'staff' });
+      return rescheduleLeadAppointment(ctx, tenantOf(req), {
+        leadId: appt.leadId,
+        ...body,
+        source: 'staff',
+        appointmentId: appt.id,
+      });
     });
   });
 

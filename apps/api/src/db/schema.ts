@@ -506,6 +506,8 @@ export const APPOINTMENT_STATUSES = [
   'completed',
   'no_show',
   'cancelled',
+  /** The visit time passed, nobody marked it, and the customer booked again: closed so it stops blocking them. Staff can still mark it. */
+  'lapsed',
 ] as const;
 export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
 /** Statuses that hold the resource (the no-double-booking constraint applies to these). */
@@ -538,10 +540,18 @@ export const appointments = pgTable(
     googleEventId: text(),
     /** The calendar `googleEventId` lives on (null = the account's primary). */
     googleCalendarId: text(),
+    /** Who the visit is for when it is not the person messaging (a parent booking for a child). null = the lead themselves. */
+    attendeeName: text(),
     notes: text(),
     ...timestamps,
   },
-  () => [tenantScoped()],
+  (t) => [
+    // One active booking per person: the lead (null) and each named family member separately.
+    uniqueIndex('appointments_one_active_per_attendee')
+      .on(t.tenantId, t.leadId, sql`lower(coalesce(${t.attendeeName}, ''))`)
+      .where(sql`${t.status} in ('pending', 'scheduled', 'confirmed')`),
+    tenantScoped(),
+  ],
 );
 
 // ---- M5: sequences (definitions live in tenant config `sequences`) ----

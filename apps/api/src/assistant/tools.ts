@@ -171,6 +171,14 @@ export async function runTool(c: ToolContext, name: string, rawInput: unknown): 
         return { content: JSON.stringify(await booking(c, name as Parameters<typeof booking>[1], input)) };
       } catch (err) {
         if (!(err instanceof BookingError)) throw err;
+        if (err.code === 'too_late') {
+          // Inside the notice window the team decides (and may charge): hand over, tell the customer kindly.
+          await escalate(c, 'customer asked to change or cancel inside the notice window');
+          return {
+            content: `${err.message} A team member has been alerted and will contact them. Say so kindly and briefly; do not argue or promise anything.`,
+            isError: true,
+          };
+        }
         const retry = err.code === 'taken' || err.code === 'unavailable';
         return {
           content: `${err.message}.${retry ? ' Call get_available_slots again and offer other times.' : ''}`,
@@ -210,6 +218,7 @@ async function booking(
         time: input.time ?? '',
         source: 'assistant',
         resource: input.resource,
+        forName: input.for_name,
       });
       return {
         booked: input.resource ? `${r.label} with ${input.resource}` : r.label,
@@ -223,11 +232,12 @@ async function booking(
         date: input.date ?? '',
         time: input.time ?? '',
         source: 'assistant',
+        forName: input.for_name,
       });
       return { rescheduled_to: r.label, note: 'Confirmation sent automatically.' };
     }
     case 'cancel':
-      await cancelLeadAppointment(deps, tenantId, leadId);
+      await cancelLeadAppointment(deps, tenantId, leadId, { forName: input.for_name });
       return {
         cancelled: true,
         note: 'A cancellation message with the details is sent automatically: do not repeat it. Add at most one warm line, e.g. offering a new time.',

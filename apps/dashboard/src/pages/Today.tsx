@@ -1,9 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, CircleSlash, Clock, UserCheck, X } from 'lucide-react';
+import { CalendarClock, Check, CircleSlash, Clock, UserCheck, X } from 'lucide-react';
 import { useState } from 'react';
 import { api, type Appointment, type Role, type TenantConfig } from '../api.ts';
 import { navigate } from '../router.ts';
-import { Badge, Button, Card, cx, Empty, ErrorState, fmt, Loading, PageHeader, Select } from '../ui.tsx';
+import {
+  Badge,
+  Button,
+  Card,
+  cx,
+  Empty,
+  ErrorState,
+  fmt,
+  Input,
+  Loading,
+  PageHeader,
+  Select,
+} from '../ui.tsx';
 
 const STATUS_TONE: Record<Appointment['status'], string> = {
   pending: 'bg-amber-50 text-amber-800 ring-amber-200',
@@ -12,6 +24,7 @@ const STATUS_TONE: Record<Appointment['status'], string> = {
   completed: 'bg-slate-100 text-slate-600 ring-slate-200',
   no_show: 'bg-orange-50 text-orange-700 ring-orange-200',
   cancelled: 'bg-slate-100 text-slate-400 ring-slate-200',
+  lapsed: 'bg-amber-50 text-amber-800 ring-amber-200',
 };
 
 export function Today({ config }: { config: TenantConfig; role: Role }) {
@@ -34,6 +47,7 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
     queryFn: () => api<{ blocked: { affected: unknown[] }[] }>('/v1/availability'),
   });
   const untold = (blocked.data?.blocked ?? []).reduce((n, b) => n + b.affected.length, 0);
+  const [moving, setMoving] = useState<Appointment | null>(null);
   const [lateBy, setLateBy] = useState(15);
   const late = useMutation({
     mutationFn: () =>
@@ -145,6 +159,7 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
                     <p className="truncate text-sm font-medium text-slate-900">{a.leadName ?? a.leadPhone}</p>
                     <p className="truncate text-xs text-slate-500">
                       {a.service}
+                      {a.attendeeName ? ` · for ${a.attendeeName}` : ''}
                       {a.resource !== 'default' ? ` · ${a.resource}` : ''}
                     </p>
                   </button>
@@ -186,6 +201,16 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
                       <Button
                         size="sm"
                         variant="ghost"
+                        aria-label="Reschedule appointment"
+                        onClick={() => setMoving(a)}
+                      >
+                        <CalendarClock className="size-3.5" aria-hidden />
+                      </Button>
+                    )}
+                    {['pending', 'scheduled', 'confirmed'].includes(a.status) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
                         aria-label="Cancel appointment"
                         onClick={() =>
                           confirm('Cancel this appointment? They will be told.') &&
@@ -202,6 +227,86 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
           </Card>
         ))}
       </div>
+      {moving && (
+        <RescheduleDialog
+          appt={moving}
+          onClose={() => setMoving(null)}
+          onDone={() => {
+            setMoving(null);
+            void qc.invalidateQueries({ queryKey: ['appointments'] });
+          }}
+        />
+      )}
     </>
+  );
+}
+
+/** Staff move a booking: pick a day, then one of the free times (the customer is told). */
+function RescheduleDialog({
+  appt,
+  onClose,
+  onDone,
+}: {
+  appt: Appointment;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [date, setDate] = useState('');
+  const slots = useQuery({
+    queryKey: ['reschedule-slots', appt.service, date],
+    queryFn: () =>
+      api<{ slots: { date: string; time: string; label: string }[] }>(
+        `/v1/slots?service=${encodeURIComponent(appt.service)}&date=${date}&limit=50`,
+      ),
+    enabled: /^\d{4}-\d{2}-\d{2}$/.test(date),
+  });
+  const move = useMutation({
+    mutationFn: (slot: { date: string; time: string }) =>
+      api(`/v1/appointments/${appt.id}/reschedule`, { body: slot }),
+    onSuccess: onDone,
+  });
+  return (
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/30 p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-lg">
+        <h2 className="text-sm font-semibold text-slate-900">
+          Reschedule {appt.leadName ?? appt.leadPhone}'s {appt.service}
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          The customer is told the new time. Nothing changes until you pick one.
+        </p>
+        <div className="mt-3">
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="New date" />
+        </div>
+        {slots.isFetching && <p className="mt-3 text-sm text-slate-500">Looking for free times…</p>}
+        {slots.data && (
+          <div className="mt-3 flex max-h-48 flex-wrap gap-1.5 overflow-y-auto">
+            {slots.data.slots.length === 0 && (
+              <p className="text-sm text-slate-500">No free times that day.</p>
+            )}
+            {slots.data.slots.map((s) => (
+              <Button
+                key={s.time}
+                size="sm"
+                variant="secondary"
+                loading={move.isPending}
+                onClick={() => move.mutate(s)}
+              >
+                {s.time}
+              </Button>
+            ))}
+          </div>
+        )}
+        {move.error && <p className="mt-3 text-sm text-red-700">{move.error.message}</p>}
+        <div className="mt-4 flex justify-end">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }

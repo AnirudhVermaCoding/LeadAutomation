@@ -67,6 +67,8 @@ export async function stopEnrollments(
   leadId: string,
   kinds: readonly SequenceKind[] | 'all',
   reason: string,
+  /** Only this appointment's enrollments (a customer can have several bookings). */
+  appointmentId?: string,
 ) {
   const stopped = await tx
     .update(enrollments)
@@ -75,6 +77,7 @@ export async function stopEnrollments(
       and(
         eq(enrollments.leadId, leadId),
         eq(enrollments.status, 'active'),
+        ...(appointmentId ? [eq(enrollments.appointmentId, appointmentId)] : []),
         ...(kinds === 'all' ? [] : [inArray(enrollments.kind, [...kinds])]),
       ),
     )
@@ -121,7 +124,7 @@ export async function enrollReminders(
   config: TenantConfig,
   appt: { id: string; leadId: string; startsAt: Date },
 ) {
-  await stopEnrollments(tx, appt.leadId, ['reminders'], 'appointment changed');
+  await stopEnrollments(tx, appt.leadId, ['reminders'], 'appointment changed', appt.id);
   const now = clock.now().getTime();
   const plan: StepPlan[] = [...config.sequences.reminders.before_hours]
     .sort((a, b) => b - a)
@@ -247,6 +250,13 @@ export async function runStep(
       return { staff: { step: { ...step, action: step.action as StaffAction }, lead, config, appt } };
     }
 
+    const [appt] = enrollment.appointmentId
+      ? await tx.select().from(appointments).where(eq(appointments.id, enrollment.appointmentId))
+      : [];
+    // A reminder is only worth sending for an appointment that is still on (not moved, cancelled or done).
+    if (enrollment.kind === 'reminders' && !(appt && ['scheduled', 'confirmed'].includes(appt.status)))
+      return close('cancelled', `appointment ${appt?.status ?? 'gone'}`);
+
     const sendAt = nextSendTime(now, config.locale.timezone, config.locale.quiet_hours);
     if (sendAt > now) {
       if (step.deadlineAt && sendAt >= step.deadlineAt)
@@ -258,9 +268,6 @@ export async function runStep(
       return { done: { status: 'deferred' as const, reason: 'quiet hours' } };
     }
 
-    const [appt] = enrollment.appointmentId
-      ? await tx.select().from(appointments).where(eq(appointments.id, enrollment.appointmentId))
-      : [];
     return { step, enrollment, lead, config, appt };
   });
   if ('done' in plan) return plan.done as StepResult;
@@ -298,7 +305,7 @@ export async function runStep(
     const r = await sendToLead(deps, tenantId, {
       leadId: lead.id,
       idempotencyKey,
-      template: { key, values },
+      template: { key, values, ...(appt ? { appointmentId: appt.id } : {}) },
     });
     status = r.status;
     reason = r.status === 'sent' ? undefined : r.reason;
@@ -317,7 +324,7 @@ export async function enrollPendingWatch(
   config: TenantConfig,
   appt: { id: string; leadId: string; startsAt: Date },
 ) {
-  await stopEnrollments(tx, appt.leadId, ['pending_watch'], 'replaced');
+  await stopEnrollments(tx, appt.leadId, ['pending_watch'], 'replaced', appt.id);
   const now = clock.now().getTime();
   const start = appt.startsAt.getTime();
   const auto = config.booking.auto_confirm_pending ?? true;
@@ -356,7 +363,7 @@ export async function enrollConfirmWatch(
   config: TenantConfig,
   appt: { id: string; leadId: string; startsAt: Date },
 ) {
-  await stopEnrollments(tx, appt.leadId, ['confirm_watch'], 'replaced');
+  await stopEnrollments(tx, appt.leadId, ['confirm_watch'], 'replaced', appt.id);
   const hasDayBefore = config.sequences.reminders.before_hours.some((h) => h >= 12);
   const reminderAt = appt.startsAt.getTime() - 24 * HOUR;
   if (!hasDayBefore || reminderAt <= clock.now().getTime()) return null;
