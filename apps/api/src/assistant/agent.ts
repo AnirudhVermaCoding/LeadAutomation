@@ -1,5 +1,12 @@
 import { fillVariables, parseButtonPayload, type TenantConfig } from '@instantlead/config';
-import { detectLanguage, displayStatus, formatSlot, matchesEmergency, scoreLead } from '@instantlead/core';
+import {
+  detectLanguage,
+  displayStatus,
+  formatSlot,
+  localParts,
+  matchesEmergency,
+  scoreLead,
+} from '@instantlead/core';
 import {
   LlmError,
   type LlmProvider,
@@ -37,7 +44,13 @@ import {
   type NotALead,
 } from './guard.ts';
 import { buildSystemPrompt, buildTools, jsonSchema, openingStatus, stateMessage } from './prompt.ts';
-import { activeAppointment, BookingError, updateAppointment } from '../booking.ts';
+import {
+  activeAppointment,
+  BookingError,
+  findSlots,
+  lastDisplacedAppointment,
+  updateAppointment,
+} from '../booking.ts';
 import { alertStaff, escalate, loadAnswers, runTool } from './tools.ts';
 
 export interface AssistantDeps extends MessagingDeps {
@@ -176,6 +189,30 @@ export async function runAssistantTurn(
       await escalate(tool, 'lead asked for a call');
       await reply('Sure — someone from our team will call you shortly.', 'button');
       return { status: 'escalated', reason: 'call requested' };
+    }
+    if (button.key === 'appointment_change' && button.buttonId === 'times') {
+      // Rebooking after the business cancelled: same service, similar time of day if possible.
+      const old = await withTenant(deps.db, tenantId, (tx) => lastDisplacedAppointment(tx, leadId));
+      const service = old?.service ?? config.booking.services[0]?.name ?? '';
+      const hour = old ? Number(localParts(old.startsAt, config.locale.timezone).time.slice(0, 2)) : 12;
+      const prefer = hour < 12 ? 'morning' : hour < 16 ? 'afternoon' : 'evening';
+      const { slots } = await findSlots(deps, tenantId, { service, prefer });
+      if (!slots.length) {
+        await escalate(tool, 'no free times to rebook after a cancellation');
+        await reply(
+          "I'm sorry, I couldn't find a free time right now. Someone from our team will call you to sort it out.",
+          'button',
+        );
+        return { status: 'escalated', reason: 'no slots to rebook' };
+      }
+      await withTenant(deps.db, tenantId, (tx) =>
+        transitionLeadIfAllowed(tx, leadId, { type: 'SLOTS_OFFERED' }),
+      );
+      await reply(
+        `Here are the next free times for your ${service}: ${slots.map((s, i) => `${i + 1}) ${s.label}`).join(', ')}. Which one suits you?`,
+        'button',
+      );
+      return { status: 'replied', reason: 'rebooking offered' };
     }
     if (aboutAppointment && (button.buttonId === 'confirm' || button.buttonId === 'cancel')) {
       if (!ctx.appointmentId) {

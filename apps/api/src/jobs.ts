@@ -1,3 +1,4 @@
+import type { AppointmentChange } from './booking.ts';
 import { sql } from 'drizzle-orm';
 import { fromDrizzle, PgBoss, type SendOptions } from 'pg-boss';
 import type { TenantTx } from './db/client.ts';
@@ -31,7 +32,7 @@ export interface JobData {
   [QUEUES.appointmentNotify]: {
     tenantId: string;
     appointmentId: string;
-    kind: 'booked' | 'confirmed' | 'lead_confirmed' | 'rescheduled' | 'cancelled' | 'completed' | 'no_show';
+    kind: AppointmentChange;
   };
 }
 export type QueueName = keyof JobData;

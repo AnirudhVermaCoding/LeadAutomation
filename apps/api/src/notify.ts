@@ -48,7 +48,9 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
       ? 'booking_pending'
       : kind === 'booked' || kind === 'rescheduled' || (kind === 'confirmed' && appt.status === 'scheduled')
         ? 'booking_confirmed'
-        : null;
+        : kind === 'displaced'
+          ? 'appointment_change'
+          : null;
   if (leadTemplate)
     results.lead = await sendToLead(deps, tenantId, {
       leadId: lead.id,
@@ -69,7 +71,7 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
   // 2. Staff.
   if (kind === 'booked' || kind === 'rescheduled' || kind === 'cancelled' || kind === 'lead_confirmed') {
     const notify = config.booking.staff_notify;
-    const summary = `${kind === 'lead_confirmed' ? 'Confirmed by the patient' : kind === 'cancelled' ? 'Cancelled' : kind === 'rescheduled' ? 'Rescheduled' : appt.status === 'pending' ? 'Needs confirmation' : 'New booking'}: ${lead.name ?? lead.phoneE164} — ${appt.service}, ${values['appointment.time']}`;
+    const summary = `${kind === 'lead_confirmed' ? 'Confirmed by the customer' : kind === 'cancelled' ? 'Cancelled' : kind === 'rescheduled' ? 'Rescheduled' : appt.status === 'pending' ? 'Needs confirmation' : 'New booking'}: ${lead.name ?? lead.phoneE164} — ${appt.service}, ${values['appointment.time']}`;
     if (notify.channel === 'email') {
       results.staff = await deps.email.send({
         to: [notify.to],

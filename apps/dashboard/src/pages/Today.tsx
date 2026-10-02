@@ -27,6 +27,12 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
     queryFn: () => api<Appointment[]>(`/v1/appointments?from=${from.toISOString()}&to=${end.toISOString()}`),
     refetchInterval: 30_000,
   });
+  // Bookings inside blocked time (leave / closure) that nobody has told yet.
+  const blocked = useQuery({
+    queryKey: ['availability'],
+    queryFn: () => api<{ blocked: { affected: unknown[] }[] }>('/v1/availability'),
+  });
+  const untold = (blocked.data?.blocked ?? []).reduce((n, b) => n + b.affected.length, 0);
   const act = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'confirm' | 'complete' | 'no-show' | 'cancel' }) =>
       api(`/v1/appointments/${id}/${action}`, { method: 'POST' }),
@@ -58,6 +64,15 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
       />
       {appts.isPending && <Loading />}
       {appts.error && <ErrorState error={appts.error} retry={() => void appts.refetch()} />}
+      {untold > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          {untold} booking{untold === 1 ? ' is' : 's are'} inside blocked time (leave or closure) and{' '}
+          {untold === 1 ? 'has' : 'have'} not been told.{' '}
+          <button className="font-medium underline" onClick={() => navigate('/settings')}>
+            Review in Settings → Booking
+          </button>
+        </div>
+      )}
       {act.error && (
         <div className="mb-4">
           <ErrorState error={act.error} />

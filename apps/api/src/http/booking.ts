@@ -10,6 +10,8 @@ import {
   findSlots,
   rescheduleLeadAppointment,
   updateAppointment,
+  appointmentsAffectedBy,
+  handleBlockedAppointments,
 } from '../booking.ts';
 import { withTenant } from '../db/client.ts';
 import { appointments, availabilityRules, blockedTimes, leads } from '../db/schema.ts';
@@ -159,11 +161,17 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
         .select()
         .from(availabilityRules)
         .orderBy(asc(availabilityRules.resource), asc(availabilityRules.weekday)),
-      blocked: await tx
-        .select()
-        .from(blockedTimes)
-        .where(gte(blockedTimes.endsAt, ctx.clock.now()))
-        .orderBy(asc(blockedTimes.startsAt)),
+      // Each upcoming block with the bookings still inside it (staff decide whether to notify).
+      blocked: await (async () => {
+        const rows = await tx
+          .select()
+          .from(blockedTimes)
+          .where(gte(blockedTimes.endsAt, ctx.clock.now()))
+          .orderBy(asc(blockedTimes.startsAt));
+        const out = [];
+        for (const b of rows) out.push({ ...b, affected: await appointmentsAffectedBy(tx, b) });
+        return out;
+      })(),
     })),
   );
 
@@ -218,7 +226,30 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
         })
         .returning(),
     );
-    return reply.code(201).send(row);
+    // Bookings already inside the new block: shown to staff, who choose to notify (nothing is sent yet).
+    const affected = await withTenant(ctx.db, tenantOf(req), (tx) => appointmentsAffectedBy(tx, row!));
+    return reply.code(201).send({ ...row, affected });
+  });
+
+  // "Tell patients & offer new times": move each booking to another free doctor at the same time, or
+  // cancel it as clinic_unavailable and send the appointment_change template. Idempotent.
+  app.post('/v1/blocked-times/:id/notify', { preHandler: admins }, async (req, reply) => {
+    const { id } = z.object({ id: z.uuid() }).parse(req.params);
+    return bookingErrors(reply, async () => {
+      const results = await handleBlockedAppointments(ctx, tenantOf(req), id);
+      await withTenant(ctx.db, tenantOf(req), (tx) =>
+        audit(tx, ctx.clock, actor(req.principal), {
+          action: 'blocked_time.notified',
+          entityType: 'blocked_time',
+          entityId: id,
+          details: {
+            moved: results.filter((r) => r.action === 'moved').length,
+            notified: results.filter((r) => r.action === 'notified').length,
+          },
+        }),
+      );
+      return { results };
+    });
   });
 
   app.delete('/v1/blocked-times/:id', { preHandler: admins }, async (req, reply) => {

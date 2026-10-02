@@ -10,11 +10,22 @@ interface Rule {
   end_time: string;
   resource: string;
 }
+interface Affected {
+  id: string;
+  leadName: string | null;
+  leadPhone: string;
+  service: string;
+  resource: string;
+  startsAt: string;
+}
 interface Blocked {
   id: string;
   startsAt: string;
   endsAt: string;
+  resource: string | null;
   reason: string | null;
+  /** Bookings still inside this block: they haven't been told yet. */
+  affected: Affected[];
 }
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
@@ -45,7 +56,7 @@ export function Availability({ canEdit }: { canEdit: boolean }) {
     mutationFn: () => api('/v1/availability', { method: 'PUT', body: rules }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['availability'] }),
   });
-  const [block, setBlock] = useState({ start: '', end: '', reason: '' });
+  const [block, setBlock] = useState({ start: '', end: '', reason: '', resource: '' });
   const addBlock = useMutation({
     mutationFn: () =>
       api('/v1/blocked-times', {
@@ -53,12 +64,24 @@ export function Availability({ canEdit }: { canEdit: boolean }) {
           starts_at: new Date(block.start).toISOString(),
           ends_at: new Date(block.end).toISOString(),
           reason: block.reason || undefined,
+          resource: block.resource || undefined,
         },
       }),
     onSuccess: () => {
-      setBlock({ start: '', end: '', reason: '' });
+      setBlock({ start: '', end: '', reason: '', resource: '' });
       return qc.invalidateQueries({ queryKey: ['availability'] });
     },
+  });
+  const notify = useMutation({
+    mutationFn: (id: string) =>
+      api<{ results: { action: 'moved' | 'notified'; to?: string }[] }>(`/v1/blocked-times/${id}/notify`, {
+        method: 'POST',
+      }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['availability'] }),
+        qc.invalidateQueries({ queryKey: ['appointments'] }),
+      ]),
   });
   const removeBlock = useMutation({
     mutationFn: (id: string) => api(`/v1/blocked-times/${id}`, { method: 'DELETE' }),
@@ -156,19 +179,51 @@ export function Availability({ canEdit }: { canEdit: boolean }) {
         <ul className="mb-3 space-y-1.5 text-sm">
           {q.data.blocked.length === 0 && <li className="text-slate-500">Nothing blocked.</li>}
           {q.data.blocked.map((b) => (
-            <li key={b.id} className="flex items-center justify-between gap-2">
-              <span>
-                {fmt.dateTime(b.startsAt)} – {fmt.dateTime(b.endsAt)} {b.reason && <Badge>{b.reason}</Badge>}
-              </span>
-              {canEdit && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Remove blocked time"
-                  onClick={() => removeBlock.mutate(b.id)}
-                >
-                  <Trash2 className="size-3.5" aria-hidden />
-                </Button>
+            <li key={b.id} className="rounded-lg border border-slate-100 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <span>
+                  {fmt.dateTime(b.startsAt)} – {fmt.dateTime(b.endsAt)} · {b.resource ?? 'everyone'}{' '}
+                  {b.reason && <Badge>{b.reason}</Badge>}
+                </span>
+                {canEdit && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Remove blocked time"
+                    onClick={() => removeBlock.mutate(b.id)}
+                  >
+                    <Trash2 className="size-3.5" aria-hidden />
+                  </Button>
+                )}
+              </div>
+              {b.affected.length > 0 && (
+                <div className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+                  <p className="font-medium">
+                    {b.affected.length} booking{b.affected.length === 1 ? '' : 's'} inside this time — not
+                    told yet:
+                  </p>
+                  <ul className="my-1 list-inside list-disc">
+                    {b.affected.map((a) => (
+                      <li key={a.id}>
+                        {a.leadName ?? a.leadPhone}: {a.service}, {fmt.dateTime(a.startsAt)}
+                        {a.resource !== 'default' ? ` (${a.resource})` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                  {canEdit && (
+                    <Button
+                      size="sm"
+                      loading={notify.isPending && notify.variables === b.id}
+                      onClick={() =>
+                        confirm(
+                          'Move each booking to another free doctor at the same time where possible; otherwise cancel it and message them with new times to choose from?',
+                        ) && notify.mutate(b.id)
+                      }
+                    >
+                      Tell them & offer new times
+                    </Button>
+                  )}
+                </div>
               )}
             </li>
           ))}
@@ -189,6 +244,19 @@ export function Availability({ canEdit }: { canEdit: boolean }) {
                 onChange={(e) => setBlock({ ...block, end: e.target.value })}
               />
             </Field>
+            <Field label="Who">
+              <Select
+                value={block.resource}
+                onChange={(e) => setBlock({ ...block, resource: e.target.value })}
+              >
+                <option value="">Everyone (closed)</option>
+                {[...new Set(rules.map((r) => r.resource))].map((r) => (
+                  <option key={r} value={r}>
+                    {r === 'default' ? 'Main calendar' : r}
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <Field label="Reason">
               <Input value={block.reason} onChange={(e) => setBlock({ ...block, reason: e.target.value })} />
             </Field>
@@ -202,6 +270,14 @@ export function Availability({ canEdit }: { canEdit: boolean }) {
             </Button>
           </div>
         )}
+        {notify.data && (
+          <p className="mt-2 text-sm text-slate-600">
+            Done: {notify.data.results.filter((r) => r.action === 'moved').length} moved to another free
+            doctor, {notify.data.results.filter((r) => r.action === 'notified').length} messaged with new
+            times.
+          </p>
+        )}
+        {notify.error && <ErrorState error={notify.error} />}
         {addBlock.error && (
           <div className="mt-2">
             <ErrorState error={addBlock.error} />

@@ -11,14 +11,16 @@ import {
   type PartOfDay,
   type Slot,
 } from '@instantlead/core';
-import { and, eq, gt, inArray, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt } from 'drizzle-orm';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type TenantTx, type Tx } from './db/client.ts';
 import {
   ACTIVE_APPOINTMENT_STATUSES,
+  answers,
   appointments,
   availabilityRules,
   blockedTimes,
+  leads,
   type AppointmentStatus,
 } from './db/schema.ts';
 import { QUEUES } from './jobs.ts';
@@ -34,7 +36,18 @@ import type { Db } from './db/client.ts';
 
 export type BookingDeps = LeadDeps & { db: Db };
 export type AppointmentChange =
-  'booked' | 'confirmed' | 'lead_confirmed' | 'rescheduled' | 'cancelled' | 'completed' | 'no_show';
+  | 'booked'
+  | 'confirmed'
+  | 'lead_confirmed'
+  | 'rescheduled'
+  | 'cancelled'
+  | 'completed'
+  | 'no_show'
+  /** Cancelled by the business (doctor / agent unavailable, closure): the person is offered new times. */
+  | 'displaced';
+
+/** Answer key holding the doctor / agent a lead asked for (set by book_slot with a resource). */
+export const PREFERRED_RESOURCE = 'preferred_resource';
 
 const MIN_NOTICE_MIN = 60;
 const SEARCH_DAYS = 14;
@@ -296,6 +309,7 @@ const NEXT: Partial<
   confirmed: { from: ['pending'], to: 'scheduled', lead: null }, // staff approved a pending booking
   lead_confirmed: { from: ['scheduled'], to: 'confirmed', lead: { type: 'CONFIRMED' } }, // reminder button
   cancelled: { from: ['pending', 'scheduled', 'confirmed'], to: 'cancelled', lead: { type: 'CANCELLED' } },
+  displaced: { from: ['pending', 'scheduled', 'confirmed'], to: 'cancelled', lead: { type: 'CANCELLED' } },
   completed: { from: ['scheduled', 'confirmed'], to: 'completed', lead: { type: 'COMPLETED' } },
   no_show: { from: ['scheduled', 'confirmed'], to: 'no_show', lead: { type: 'NO_SHOW' } },
 };
@@ -305,7 +319,8 @@ export async function updateAppointment(
   deps: BookingDeps,
   tenantId: string,
   appointmentId: string,
-  kind: 'confirmed' | 'lead_confirmed' | 'cancelled' | 'completed' | 'no_show',
+  kind: 'confirmed' | 'lead_confirmed' | 'cancelled' | 'completed' | 'no_show' | 'displaced',
+  opts: { cancelReason?: string } = {},
 ) {
   return withTenant(deps.db, tenantId, async (tx) => {
     const [appt] = await tx
@@ -319,7 +334,7 @@ export async function updateAppointment(
       throw new BookingError('invalid_status', `Can't mark a ${appt.status} appointment as ${kind}`);
     const [updated] = await tx
       .update(appointments)
-      .set({ status: rule.to })
+      .set({ status: rule.to, ...(opts.cancelReason ? { cancelReason: opts.cancelReason } : {}) })
       .where(eq(appointments.id, appointmentId))
       .returning();
     await change(tx, deps, tenantId, appointmentId, appt.leadId, kind, rule.lead);
@@ -338,4 +353,92 @@ export function rulesFromBusinessHours(config: TenantConfig) {
   return config.locale.business_hours.flatMap((h) =>
     h.days.map((weekday) => ({ weekday, startTime: h.open, endTime: h.close, resource: 'default' })),
   );
+}
+
+// ---- Doctor / agent unavailable, clinic closed: bookings inside a blocked period ----
+
+/** Active appointments overlapping a blocked period: on its resource, or every resource when it has none. */
+export function appointmentsAffectedBy(
+  tx: Tx,
+  block: { startsAt: Date; endsAt: Date; resource: string | null },
+) {
+  return tx
+    .select({
+      id: appointments.id,
+      leadId: appointments.leadId,
+      leadName: leads.name,
+      leadPhone: leads.phoneE164,
+      service: appointments.service,
+      resource: appointments.resource,
+      startsAt: appointments.startsAt,
+      status: appointments.status,
+    })
+    .from(appointments)
+    .innerJoin(leads, eq(leads.id, appointments.leadId))
+    .where(
+      and(
+        inArray(appointments.status, [...ACTIVE_APPOINTMENT_STATUSES]),
+        lt(appointments.startsAt, block.endsAt),
+        gt(appointments.endsAt, block.startsAt),
+        block.resource ? eq(appointments.resource, block.resource) : undefined,
+      ),
+    )
+    .orderBy(asc(appointments.startsAt));
+}
+
+/**
+ * Staff tapped "Tell patients & offer new times". Per affected booking: if another doctor /
+ * agent is free at the same time (and the person didn't ask for this one), it moves there and
+ * keeps its time; otherwise it's cancelled as `clinic_unavailable` and the person gets the
+ * appointment_change template with a [Show new times] button. Safe to run twice.
+ */
+export async function handleBlockedAppointments(deps: BookingDeps, tenantId: string, blockId: string) {
+  const loaded = await withTenant(deps.db, tenantId, async (tx) => {
+    const [block] = await tx.select().from(blockedTimes).where(eq(blockedTimes.id, blockId));
+    const config = (await getActiveConfig(tx))?.config;
+    return block && config ? { block, config, affected: await appointmentsAffectedBy(tx, block) } : null;
+  });
+  if (!loaded) throw new BookingError('no_appointment', 'Blocked time not found');
+  const { config, affected } = loaded;
+  const tz = config.locale.timezone;
+  const results: { appointmentId: string; action: 'moved' | 'notified'; to?: string }[] = [];
+  for (const a of affected) {
+    const movedTo = await withTenant(deps.db, tenantId, async (tx) => {
+      const [pref] = await tx
+        .select({ value: answers.value })
+        .from(answers)
+        .where(and(eq(answers.leadId, a.leadId), eq(answers.key, PREFERRED_RESOURCE)));
+      if (pref?.value === a.resource) return null; // they asked for this doctor: offer new times instead
+      const slots = await slotsFor(tx, deps, config, a.service, localParts(a.startsAt, tz).date, 1, a.id);
+      const other = slots
+        .find((s) => s.start.getTime() === a.startsAt.getTime())
+        ?.resources.find((r) => r !== a.resource);
+      if (!other) return null;
+      await tx.update(appointments).set({ resource: other }).where(eq(appointments.id, a.id));
+      await emit(tx, deps.clock, 'appointment.reassigned', {
+        appointmentId: a.id,
+        from: a.resource,
+        to: other,
+      });
+      return other;
+    });
+    if (movedTo) {
+      results.push({ appointmentId: a.id, action: 'moved', to: movedTo });
+      continue;
+    }
+    await updateAppointment(deps, tenantId, a.id, 'displaced', { cancelReason: 'clinic_unavailable' });
+    results.push({ appointmentId: a.id, action: 'notified' });
+  }
+  return results;
+}
+
+/** The person's last appointment that the business cancelled (for "Show new times"). */
+export async function lastDisplacedAppointment(tx: Tx, leadId: string) {
+  const [row] = await tx
+    .select()
+    .from(appointments)
+    .where(and(eq(appointments.leadId, leadId), eq(appointments.cancelReason, 'clinic_unavailable')))
+    .orderBy(desc(appointments.updatedAt))
+    .limit(1);
+  return row ?? null;
 }
