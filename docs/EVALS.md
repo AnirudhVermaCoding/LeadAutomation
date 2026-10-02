@@ -10,10 +10,10 @@ Note: the judge shares a provider with fake · clinic_dental, fake · real_estat
 
 Total spend: $0.00 of the $8 cap.
 
-| Model | Hard checks passed | Rubric (1-5) | Turn latency p50 / p95 | Cost per conversation |
-|---|---|---|---|---|
-| fake · real_estate | 80% | 3.00 | 0.0 s / 0.1 s | $0.0000 |
-| fake · clinic_dental | 78% | 3.00 | 0.0 s / 0.1 s | $0.0000 |
+| Model                | Hard checks passed | Rubric (1-5) | Turn latency p50 / p95 | Cost per conversation |
+| -------------------- | ------------------ | ------------ | ---------------------- | --------------------- |
+| fake · real_estate   | 80%                | 3.00         | 0.0 s / 0.1 s          | $0.0000               |
+| fake · clinic_dental | 78%                | 3.00         | 0.0 s / 0.1 s          | $0.0000               |
 
 ## Recommendation
 

@@ -159,12 +159,12 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
                     <span className="text-xs text-amber-700">auto-confirms if not confirmed in time</span>
                   )}
                   <div className="flex gap-1.5">
-                    {a.status === 'pending' && (
+                    {a.status === 'pending' && !unmarked(a) && (
                       <Button size="sm" onClick={() => act.mutate({ id: a.id, action: 'confirm' })}>
                         <Check className="size-3.5" aria-hidden /> Confirm
                       </Button>
                     )}
-                    {(a.status === 'scheduled' || a.status === 'confirmed') && (
+                    {(a.status === 'scheduled' || a.status === 'confirmed' || unmarked(a)) && (
                       <>
                         <Button
                           size="sm"

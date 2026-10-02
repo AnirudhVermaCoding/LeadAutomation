@@ -351,8 +351,9 @@ const NEXT: Partial<
   lead_confirmed: { from: ['scheduled'], to: 'confirmed', lead: { type: 'CONFIRMED' } }, // reminder button
   cancelled: { from: ['pending', 'scheduled', 'confirmed'], to: 'cancelled', lead: { type: 'CANCELLED' } },
   displaced: { from: ['pending', 'scheduled', 'confirmed'], to: 'cancelled', lead: { type: 'CANCELLED' } },
-  completed: { from: ['scheduled', 'confirmed'], to: 'completed', lead: { type: 'COMPLETED' } },
-  no_show: { from: ['scheduled', 'confirmed'], to: 'no_show', lead: { type: 'NO_SHOW' } },
+  // Pending too: if staff never confirmed but the visit happened (or didn't), they can still mark it.
+  completed: { from: ['pending', 'scheduled', 'confirmed'], to: 'completed', lead: { type: 'COMPLETED' } },
+  no_show: { from: ['pending', 'scheduled', 'confirmed'], to: 'no_show', lead: { type: 'NO_SHOW' } },
 };
 
 /** Staff (dashboard) or lead (chat / reminder buttons) moves an appointment along. */

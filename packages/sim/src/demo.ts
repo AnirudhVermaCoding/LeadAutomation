@@ -18,14 +18,18 @@ function check(ok: boolean, what: string) {
   console.log(`  ✓ ${what}`);
 }
 
-async function newClinic(agency: Client, label: string) {
+async function newClinic(
+  agency: Client,
+  label: string,
+  preset: 'clinic_dental' | 'real_estate' = 'clinic_dental',
+) {
   const slug = `demo-${label}-${run}`;
   const password = `demo-${randomBytes(9).toString('hex')}`;
   const email = `admin@${slug}.test`;
   await agency.post('/v1/admin/tenants', {
     slug,
-    name: `Smile Dental (${label})`,
-    preset: 'clinic_dental',
+    name: preset === 'real_estate' ? `Skyline Realty (${label})` : `Smile Dental (${label})`,
+    preset,
     admin: { email, name: 'Clinic Admin', password },
   });
   const c = client(base);
@@ -92,7 +96,8 @@ async function appointmentOf(c: Client, leadId: string) {
   const from = new Date((await now(c)).getTime() - 30 * 24 * HOUR).toISOString();
   const to = new Date((await now(c)).getTime() + 60 * 24 * HOUR).toISOString();
   const list = await c.get<Appointment[]>(`/v1/appointments?from=${from}&to=${to}`);
-  return list.find((a) => a.leadId === leadId);
+  const mine = list.filter((a) => a.leadId === leadId);
+  return mine.find((a) => a.status !== 'cancelled') ?? mine[0];
 }
 async function staffBook(c: Client, leadId: string, date: string, after = '12:00') {
   const { slots } = await c.get<{ slots: { date: string; time: string }[] }>(
@@ -232,7 +237,51 @@ async function weeklyReport(agency: Client) {
   check(reports[0]!.sentAt !== null, `report for ${d.period.label} emailed to the owner`);
 }
 
-const SCENARIOS = { happyPath, silentLead, noShow, weeklyReport };
+async function realEstateAgentAway(agency: Client) {
+  const c = await newClinic(agency, 'realty', 'real_estate');
+  await advanceTo(c, 'tue', '10:00');
+  step('a property enquiry from a website form');
+  const { leadId, phone, firstReplyMs } = await newLead(c, 'Rohit Mehra');
+  check(firstReplyMs < 60_000, `first WhatsApp reply in ${(firstReplyMs / 1000).toFixed(1)} s (< 60 s)`);
+  for (const text of ['Hi, looking for a 3BHK', 'budget around 1 crore', 'Baner or Aundh', 'immediately'])
+    await say(c, leadId, phone, text);
+  const t = await say(c, leadId, phone, '1');
+  check(['booked', 'confirmed'].includes(t.lead.state), `site visit booked (${t.lead.state}/${t.lead.tier})`);
+  const first = (await appointmentOf(c, leadId))!;
+  check(first.status === 'scheduled', 'confirmed instantly (real estate auto-confirms)');
+
+  step('the agent is called away that day; the office blocks the time');
+  const start = new Date(first.startsAt).getTime();
+  const block = await c.post<{ id: string; affected: { id: string }[] }>('/v1/blocked-times', {
+    starts_at: new Date(start - HOUR).toISOString(),
+    ends_at: new Date(start + 2 * HOUR).toISOString(),
+    reason: 'Agent at another site',
+  });
+  check(block.affected.length === 1, '1 booking affected; nothing sent until the office decides');
+  await c.post(`/v1/blocked-times/${block.id}/notify`);
+  await waitForOut(c, leadId, 'the change notice', (k) => k.includes('appointment_change'));
+  check(true, 'customer told, with a [Show new times] button');
+
+  const before = outKeys(await thread(c, leadId)).length;
+  await c.post('/v1/dev/whatsapp/inbound', {
+    from: phone,
+    button_payload: 'appointment_change:times',
+    text: 'Show new times',
+  });
+  const offer = await waitForOut(c, leadId, 'new times', (k) => k.length > before);
+  console.log(`      bot  < ${offer.messages.filter((m) => m.direction === 'out').at(-1)!.body}`);
+  await say(c, leadId, phone, '1');
+  const second = (await waitFor('the new booking', async () => {
+    const a = await appointmentOf(c, leadId);
+    return a && a.id !== first.id && a.status !== 'cancelled' && a;
+  }))!;
+  check(
+    new Date(second.startsAt).getTime() !== start,
+    `rebooked for ${localParts(new Date(second.startsAt), TZ).date} ${localParts(new Date(second.startsAt), TZ).time}`,
+  );
+}
+
+const SCENARIOS = { happyPath, silentLead, noShow, weeklyReport, realEstateAgentAway };
 
 const agency = client(base);
 const email = process.env.AGENCY_ADMIN_EMAIL;

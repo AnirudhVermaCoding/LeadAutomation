@@ -97,3 +97,13 @@
 - **Evals**: `pnpm evals` (41 conversations, hard checks + fixed-judge rubric, $8 cap) and gated live contract tests per provider.
 - Verified: lint, typecheck, 246 tests (+61: adapters and normalization, router failover / allowed providers / budget, 24 guard units, 14 guardrail DB tests, 7 conversation tests, config disclosure rule). Live on Node 24: `pnpm sim --persona all` 14/14 (new: symptom, bot question, vendor, auto-reply), `pnpm demo` 4/4, `pnpm e2e`. Eval dry run (mock model) 80% of hard checks: the gaps are the mock's own limits (no Hindi or Hinglish writing, no anger detection), and that run found 3 real issues, all fixed (opening hours missing from the prompt, toothache sent to 112, a tool note that could leak).
 - Not verified: any real model. No provider key is in `.env` yet, so `pnpm evals` and the live contract tests haven't run against Claude, OpenAI, Gemini or Grok.
+
+## Appointment lifecycle + real-estate hardening
+
+- Pending bookings: staff nudges at +30 min / +2 h (opening hours), auto-confirm at the deadline with confirmation + reminders to the customer.
+- Unconfirmed 24 h reminder → staff alert ~4 h before; end-of-day unmarked-visits digest; Today highlights; report counts unmarked visits.
+- Leave / closure: blocked time lists affected bookings; one tap moves them to another free doctor or sends `appointment_change` with [Show new times] → rebooking; Today banner; blocks per doctor.
+- Running late button (Today). Booking a specific doctor / agent.
+- Real estate: wording sweep, property report topics, 7 sim personas, lifecycle test, real-estate eval cases, `pnpm demo` scenario 5 (agent away → customer told → rebooked).
+- Verified: lint, typecheck, 264 tests (+16: 7 lifecycle, 5 leave / running late / specific doctor, 2 real estate, templates). Live on Node 24: `pnpm demo` 5/5, `pnpm sim` dental 14/14 and real estate 7/7, `pnpm loadtest` p95 0.49 s, `pnpm e2e` 2/2; browser: Today (running late, needs-marking, auto-confirm notes), Settings → Blocked times (affected list → notify → "1 messaged with new times"). Eval dry run: dental 78%, real estate 80% (mock limits).
+- Not verified: real WhatsApp / AI (no credentials yet); the 3 new templates still need Meta approval.

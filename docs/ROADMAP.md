@@ -39,3 +39,6 @@ Deferred during the build:
 - Native Gemini / xAI SDK adapters if the OpenAI-compatible endpoints fall short in contract tests.
 - Emergency reply in the lead's language (v0: the configured text, usually English).
 - Per-tenant `ai.*` settings in the Settings UI (v0: edit via config JSON import/export).
+- "Doctor running late" detected automatically from the queue (v0: a staff button).
+- Patient-chosen alternative doctor during a leave rebooking (v0: same-time reassignment, or new times).
+- Calendar sync of blocked times from Google Calendar (v0: blocked in the dashboard).

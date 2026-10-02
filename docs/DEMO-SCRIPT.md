@@ -32,6 +32,13 @@ Optional safety beat: type _"I have severe chest pain"_. It gives the emergency 
    _(Or press **Completed**: three hours later the Google review request goes out.)_
 3. _"Every one of these is automatic and stops itself the moment the patient replies, books or opts out."_
 
+## 3b. When plans change (1 min) — Settings → Booking, Today
+
+- Block "Dr Mehta, Thursday" in Blocked times: the bookings already inside it are listed, and nothing has been sent
+  yet. Tap **Tell them & offer new times**. Back in the Sandbox, the patient gets a polite apology with a
+  [Show new times] button; tapping it offers new free times.
+- On Today, tap **Running late** (30 min): everyone still booked today gets a heads-up.
+
 ## 4. The silent lead (1 min)
 
 New form lead, don't reply. **+2 days**: friendly follow-up. **+3 days**: last follow-up. Two days later the lead
