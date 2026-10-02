@@ -71,6 +71,13 @@
       "when": 1790919617435,
       "tag": "0009_guardrails",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790933432238,
+      "tag": "0010_appointment_lifecycle",
+      "breakpoints": true
     }
   ]
 }

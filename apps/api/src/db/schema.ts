@@ -463,6 +463,10 @@ export const appointments = pgTable(
     busyUntil: ts().notNull(),
     status: text({ enum: APPOINTMENT_STATUSES }).notNull(),
     source: text({ enum: ['assistant', 'staff'] }).notNull(),
+    /** Why it was cancelled when the business cancelled it (e.g. clinic_unavailable). */
+    cancelReason: text(),
+    /** Running-late notice already sent today (minutes). */
+    lateNoticeMinutes: integer(),
     googleEventId: text(),
     notes: text(),
     ...timestamps,
@@ -472,7 +476,16 @@ export const appointments = pgTable(
 
 // ---- M5: sequences (definitions live in tenant config `sequences`) ----
 
-export const SEQUENCE_KINDS = ['followup', 'reminders', 'no_show_recovery', 'review_request'] as const;
+export const SEQUENCE_KINDS = [
+  'followup',
+  'reminders',
+  'no_show_recovery',
+  'review_request',
+  /** Staff-confirm bookings: nudge staff, then auto-confirm at the deadline. */
+  'pending_watch',
+  /** Reminder sent but not confirmed: tell staff before the visit. */
+  'confirm_watch',
+] as const;
 export type SequenceKind = (typeof SEQUENCE_KINDS)[number];
 
 /** A lead (optionally an appointment) going through one sequence. */
@@ -509,7 +522,9 @@ export const enrollmentSteps = pgTable(
       .notNull()
       .references(() => enrollments.id, { onDelete: 'cascade' }),
     step: integer().notNull(),
-    action: text({ enum: ['message', 'mark_unresponsive'] }).notNull(),
+    action: text({
+      enum: ['message', 'mark_unresponsive', 'nudge_pending', 'auto_confirm', 'nudge_unconfirmed'],
+    }).notNull(),
     templateKey: text(),
     channel: text({ enum: ['whatsapp', 'email', 'email_or_whatsapp'] }),
     dueAt: ts().notNull(),
@@ -541,6 +556,8 @@ export interface ReportData {
   showRate: number | null;
   revenueRecoveredInr: number;
   upcomingBookings: number;
+  /** Past appointments nobody marked Completed / No-show (optional: reports stored before it existed). */
+  unmarkedVisits?: number;
   topTopics: { topic: string; count: number }[];
   costs: { monthStart: string; whatsappInr: number; llmUsd: number };
 }

@@ -23,6 +23,9 @@ Use the exact **name**, **category** and **language**; body variables are positi
 | `il_review_request` | marketing | Sent after staff mark a visit completed. |
 | `il_staff_new_booking` | utility | To clinic staff: a new booking or booking request needs attention. |
 | `il_staff_handover` | utility | To clinic staff: a conversation needs a person (handover, emergency, photo or voice note received). |
+| `il_appointment_change` | utility | The booked time can no longer go ahead (doctor / agent unavailable, closure); offers new times. |
+| `il_running_late` | utility | Sent by staff from Today when the doctor / agent is running late. |
+| `il_staff_update` | utility | To staff: something needs a look (unconfirmed booking or reminder, auto-confirmed booking, unmarked visits). |
 
 ## `il_first_reply`
 
@@ -259,4 +262,65 @@ New booking request: {{1}} for {{2}} on {{3}}. Open the InstantLead dashboard to
 
 ```text
 {{1}} को टीम से WhatsApp पर जवाब चाहिए। बातचीत देखने के लिए InstantLead इनबॉक्स खोलें।
+```
+
+## `il_appointment_change`
+
+- **Category:** utility
+- **Purpose:** The booked time can no longer go ahead (doctor / agent unavailable, closure); offers new times.
+- **Variables:** `{{1}}` = first_name, `{{2}}` = appointment.service, `{{3}}` = appointment.time, `{{4}}` = business_name
+- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = consultation, `{{3}}` = 6 Oct, 11:30 AM, `{{4}}` = Smile Dental
+
+**English (`en`)**
+
+```text
+Hi {{1}}, we are sorry: your {{2}} on {{3}} at {{4}} cannot go ahead as planned because of an unexpected change on our side. Tap below and we will find you a new time straight away.
+```
+
+Quick-reply buttons: `Show new times` · `Call me`
+
+**Hindi (`hi`)**
+
+```text
+नमस्ते {{1}}, हमें खेद है: {{4}} में {{3}} को आपकी {{2}} हमारी ओर से अचानक बदलाव के कारण तय समय पर नहीं हो पाएगी। नीचे टैप करें, हम तुरंत नया समय ढूंढ देंगे।
+```
+
+Quick-reply buttons: `नए समय दिखाएँ` · `मुझे कॉल करें`
+
+## `il_running_late`
+
+- **Category:** utility
+- **Purpose:** Sent by staff from Today when the doctor / agent is running late.
+- **Variables:** `{{1}}` = first_name, `{{2}}` = business_name, `{{3}}` = delay_minutes, `{{4}}` = appointment.time
+- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = Smile Dental, `{{3}}` = undefined, `{{4}}` = 6 Oct, 11:30 AM
+
+**English (`en`)**
+
+```text
+Hi {{1}}, a quick heads-up from {{2}}: we are running about {{3}} minutes late today, so your {{4}} appointment may start a little later. Reply here if you would like to change it.
+```
+
+**Hindi (`hi`)**
+
+```text
+नमस्ते {{1}}, {{2}} की ओर से सूचना: आज हम लगभग {{3}} मिनट देरी से चल रहे हैं, इसलिए आपकी {{4}} की अपॉइंटमेंट थोड़ी देर से शुरू हो सकती है। बदलना हो तो यहाँ जवाब दें।
+```
+
+## `il_staff_update`
+
+- **Category:** utility
+- **Purpose:** To staff: something needs a look (unconfirmed booking or reminder, auto-confirmed booking, unmarked visits).
+- **Variables:** `{{1}}` = note
+- **Sample values (for Meta review):** `{{1}}` = undefined
+
+**English (`en`)**
+
+```text
+Update from your WhatsApp assistant: {{1}}. Open the InstantLead dashboard for details.
+```
+
+**Hindi (`hi`)**
+
+```text
+आपके WhatsApp असिस्टेंट से अपडेट: {{1}}। विवरण के लिए InstantLead डैशबोर्ड खोलें।
 ```

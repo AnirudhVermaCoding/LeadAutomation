@@ -26,6 +26,8 @@ const CONFIRM = { id: 'confirm', text: { en: 'Confirm', hi: 'कन्फ़र�
 const RESCHEDULE = { id: 'reschedule', text: { en: 'Reschedule', hi: 'समय बदलें' } };
 const CANCEL = { id: 'cancel', text: { en: 'Cancel', hi: 'रद्द करें' } };
 const YES = { id: 'yes', text: { en: 'Yes, please', hi: 'हाँ, ज़रूर' } };
+const SHOW_TIMES = { id: 'times', text: { en: 'Show new times', hi: 'नए समय दिखाएँ' } };
+const CALL_ME = { id: 'call', text: { en: 'Call me', hi: 'मुझे कॉल करें' } };
 
 export const TEMPLATES = {
   first_reply: {
@@ -151,6 +153,41 @@ export const TEMPLATES = {
     body: {
       en: '{{1}} needs a reply from the team on WhatsApp. Open the InstantLead inbox to see the conversation.',
       hi: '{{1}} को टीम से WhatsApp पर जवाब चाहिए। बातचीत देखने के लिए InstantLead इनबॉक्स खोलें।',
+    },
+    buttons: [],
+  },
+  appointment_change: {
+    providerName: 'il_appointment_change',
+    category: 'utility',
+    purpose:
+      'The booked time can no longer go ahead (doctor / agent unavailable, closure); offers new times.',
+    variables: ['first_name', 'appointment.service', 'appointment.time', 'business_name'],
+    body: {
+      en: 'Hi {{1}}, we are sorry: your {{2}} on {{3}} at {{4}} cannot go ahead as planned because of an unexpected change on our side. Tap below and we will find you a new time straight away.',
+      hi: 'नमस्ते {{1}}, हमें खेद है: {{4}} में {{3}} को आपकी {{2}} हमारी ओर से अचानक बदलाव के कारण तय समय पर नहीं हो पाएगी। नीचे टैप करें, हम तुरंत नया समय ढूंढ देंगे।',
+    },
+    buttons: [SHOW_TIMES, CALL_ME],
+  },
+  running_late: {
+    providerName: 'il_running_late',
+    category: 'utility',
+    purpose: 'Sent by staff from Today when the doctor / agent is running late.',
+    variables: ['first_name', 'business_name', 'delay_minutes', 'appointment.time'],
+    body: {
+      en: 'Hi {{1}}, a quick heads-up from {{2}}: we are running about {{3}} minutes late today, so your {{4}} appointment may start a little later. Reply here if you would like to change it.',
+      hi: 'नमस्ते {{1}}, {{2}} की ओर से सूचना: आज हम लगभग {{3}} मिनट देरी से चल रहे हैं, इसलिए आपकी {{4}} की अपॉइंटमेंट थोड़ी देर से शुरू हो सकती है। बदलना हो तो यहाँ जवाब दें।',
+    },
+    buttons: [],
+  },
+  staff_update: {
+    providerName: 'il_staff_update',
+    category: 'utility',
+    purpose:
+      'To staff: something needs a look (unconfirmed booking or reminder, auto-confirmed booking, unmarked visits).',
+    variables: ['note'],
+    body: {
+      en: 'Update from your WhatsApp assistant: {{1}}. Open the InstantLead dashboard for details.',
+      hi: 'आपके WhatsApp असिस्टेंट से अपडेट: {{1}}। विवरण के लिए InstantLead डैशबोर्ड खोलें।',
     },
     buttons: [],
   },

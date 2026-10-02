@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { handleInboundMessage, handleStatusUpdate } from '../inbound.ts';
 import { QUEUES } from '../jobs.ts';
 import { runScheduledReports } from '../reports.ts';
+import { runStaffDigest } from '../staff-digest.ts';
 import { sweepDueSteps } from '../sequences.ts';
 import type { AppContext } from '../system/context.ts';
 import { guard } from './auth.ts';
@@ -137,6 +138,7 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
       clock.advance(hours * 3_600_000);
       const queued = await sweepDueSteps(ctx);
       const reports = await runScheduledReports(ctx);
+      await runStaffDigest(ctx);
       return { now: ctx.clock.now().toISOString(), steps_queued: queued, reports_sent: reports.length };
     },
   );

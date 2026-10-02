@@ -23,7 +23,13 @@ import {
 } from './db/schema.ts';
 import { QUEUES } from './jobs.ts';
 import { emit, transitionLeadIfAllowed, type LeadDeps } from './leads.ts';
-import { enrollAfterVisit, enrollReminders, stopEnrollments } from './sequences.ts';
+import {
+  enrollAfterVisit,
+  enrollConfirmWatch,
+  enrollPendingWatch,
+  enrollReminders,
+  stopEnrollments,
+} from './sequences.ts';
 import type { Db } from './db/client.ts';
 
 export type BookingDeps = LeadDeps & { db: Db };
@@ -170,10 +176,22 @@ async function change(
   const [appt] = await tx.select().from(appointments).where(eq(appointments.id, appointmentId));
   const config = (await getActiveConfig(tx))?.config;
   if (appt && config) {
-    if (appt.status === 'scheduled' || appt.status === 'confirmed') {
-      if (kind !== 'lead_confirmed') await enrollReminders(tx, deps.clock, config, appt);
+    if (appt.status === 'pending') {
+      await enrollPendingWatch(tx, deps.clock, config, appt);
+    } else if (appt.status === 'scheduled' || appt.status === 'confirmed') {
+      await stopEnrollments(tx, leadId, ['pending_watch'], 'confirmed');
+      if (kind === 'lead_confirmed') await stopEnrollments(tx, leadId, ['confirm_watch'], 'lead confirmed');
+      else {
+        await enrollReminders(tx, deps.clock, config, appt);
+        await enrollConfirmWatch(tx, deps.clock, config, appt);
+      }
     } else {
-      await stopEnrollments(tx, leadId, ['reminders'], `appointment ${appt.status}`);
+      await stopEnrollments(
+        tx,
+        leadId,
+        ['reminders', 'pending_watch', 'confirm_watch'],
+        `appointment ${appt.status}`,
+      );
       if (kind === 'completed') await enrollAfterVisit(tx, deps.clock, config, appt, 'review_request');
       if (kind === 'no_show') await enrollAfterVisit(tx, deps.clock, config, appt, 'no_show_recovery');
     }

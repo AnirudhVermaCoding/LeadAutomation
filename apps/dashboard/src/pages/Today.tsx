@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, CircleSlash, UserCheck, X } from 'lucide-react';
 import { api, type Appointment, type Role, type TenantConfig } from '../api.ts';
 import { navigate } from '../router.ts';
-import { Badge, Button, Card, Empty, ErrorState, fmt, Loading, PageHeader } from '../ui.tsx';
+import { Badge, Button, Card, cx, Empty, ErrorState, fmt, Loading, PageHeader } from '../ui.tsx';
 
 const STATUS_TONE: Record<Appointment['status'], string> = {
   pending: 'bg-amber-50 text-amber-800 ring-amber-200',
@@ -19,10 +19,12 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
   const end = new Date(start.getTime() + 3 * 86_400_000);
+  // A week back too: earlier visits nobody marked Completed / No-show stay here until they are.
+  const from = new Date(start.getTime() - 7 * 86_400_000);
   const key = ['appointments', start.toISOString()];
   const appts = useQuery({
     queryKey: key,
-    queryFn: () => api<Appointment[]>(`/v1/appointments?from=${start.toISOString()}&to=${end.toISOString()}`),
+    queryFn: () => api<Appointment[]>(`/v1/appointments?from=${from.toISOString()}&to=${end.toISOString()}`),
     refetchInterval: 30_000,
   });
   const act = useMutation({
@@ -31,9 +33,18 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
     onSettled: () => qc.invalidateQueries({ queryKey: ['appointments'] }),
   });
 
-  const visible = (appts.data ?? []).filter((a) => a.status !== 'cancelled');
+  const now = Date.now();
+  const active = (a: Appointment) => ['pending', 'scheduled', 'confirmed'].includes(a.status);
+  /** The visit is over but nobody marked it: no review request or rebooking message can go out. */
+  const unmarked = (a: Appointment) => active(a) && new Date(a.endsAt).getTime() < now;
+  const visible = (appts.data ?? []).filter(
+    (a) => a.status !== 'cancelled' && (new Date(a.startsAt) >= start || unmarked(a)),
+  );
   const byDay = Map.groupBy(visible, (a) => fmt.day(a.startsAt, tz));
   const pending = visible.filter((a) => a.status === 'pending').length;
+  const toMark = visible.filter(unmarked).length;
+  const autoConfirm =
+    config.booking.mode === 'staff_confirm' && (config.booking.auto_confirm_pending ?? true);
 
   return (
     <>
@@ -41,7 +52,7 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
         title="Today"
         subtitle={
           appts.data
-            ? `${visible.length} appointments in the next 3 days${pending ? ` · ${pending} waiting for your confirmation` : ''}`
+            ? `${visible.length} appointments${pending ? ` · ${pending} waiting for your confirmation` : ''}${toMark ? ` · ${toMark} to mark Completed / No-show` : ''}`
             : undefined
         }
       />
@@ -62,7 +73,13 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
           <Card key={day} title={day}>
             <ul className="divide-y divide-slate-100">
               {list.map((a) => (
-                <li key={a.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
+                <li
+                  key={a.id}
+                  className={cx(
+                    'flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0',
+                    unmarked(a) && '-mx-2 rounded-lg bg-amber-50 px-2',
+                  )}
+                >
                   <div className="w-20 shrink-0 text-sm font-semibold tabular-nums text-slate-900">
                     {fmt.time(a.startsAt, tz)}
                   </div>
@@ -77,8 +94,15 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
                     </p>
                   </button>
                   <Badge tone={STATUS_TONE[a.status]}>
-                    {a.status === 'scheduled' ? 'booked' : a.status.replace('_', '-')}
+                    {unmarked(a)
+                      ? 'needs marking'
+                      : a.status === 'scheduled'
+                        ? 'booked'
+                        : a.status.replace('_', '-')}
                   </Badge>
+                  {a.status === 'pending' && autoConfirm && !unmarked(a) && (
+                    <span className="text-xs text-amber-700">auto-confirms if not confirmed in time</span>
+                  )}
                   <div className="flex gap-1.5">
                     {a.status === 'pending' && (
                       <Button size="sm" onClick={() => act.mutate({ id: a.id, action: 'confirm' })}>
@@ -109,7 +133,7 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
                         variant="ghost"
                         aria-label="Cancel appointment"
                         onClick={() =>
-                          confirm('Cancel this appointment? The patient will be told.') &&
+                          confirm('Cancel this appointment? They will be told.') &&
                           act.mutate({ id: a.id, action: 'cancel' })
                         }
                       >

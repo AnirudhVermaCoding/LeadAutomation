@@ -1,11 +1,22 @@
 import { renderTemplateBody, TEMPLATES, type TemplateKey, type TenantConfig } from '@instantlead/config';
-import { formatSlot, HOUR, nextSendTime, type Clock, type LeadEventType } from '@instantlead/core';
+import {
+  formatSlot,
+  HOUR,
+  localParts,
+  MINUTE,
+  nextSendTime,
+  zonedTimeToUtc,
+  type Clock,
+  type LeadEventType,
+} from '@instantlead/core';
+import { updateAppointment } from './booking.ts';
+import { addOpenMinutes, isOpen, lastOpenBefore } from './hours.ts';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type Tx } from './db/client.ts';
 import { appointments, enrollments, enrollmentSteps, leads, type SequenceKind } from './db/schema.ts';
 import { emit, transitionLeadIfAllowed } from './leads.ts';
-import type { NotifyDeps } from './notify.ts';
+import { sendStaffNote, type NotifyDeps } from './notify.ts';
 import { QUEUES, type Enqueue } from './jobs.ts';
 import { sendToLead } from './outbound.ts';
 
@@ -13,7 +24,7 @@ import { sendToLead } from './outbound.ts';
 const UNRESPONSIVE_AFTER_LAST_FOLLOWUP = 48 * HOUR;
 
 interface StepPlan {
-  action: 'message' | 'mark_unresponsive';
+  action: 'message' | 'mark_unresponsive' | 'nudge_pending' | 'auto_confirm' | 'nudge_unconfirmed';
   templateKey?: TemplateKey;
   channel?: 'whatsapp' | 'email' | 'email_or_whatsapp';
   dueAt: Date;
@@ -229,6 +240,13 @@ export async function runStep(
       return { done: { status: 'sent' as const } };
     }
 
+    if ((STAFF_ACTIONS as readonly string[]).includes(step.action)) {
+      const [appt] = enrollment.appointmentId
+        ? await tx.select().from(appointments).where(eq(appointments.id, enrollment.appointmentId))
+        : [];
+      return { staff: { step: { ...step, action: step.action as StaffAction }, lead, config, appt } };
+    }
+
     const sendAt = nextSendTime(now, config.locale.timezone, config.locale.quiet_hours);
     if (sendAt > now) {
       if (step.deadlineAt && sendAt >= step.deadlineAt)
@@ -246,6 +264,10 @@ export async function runStep(
     return { step, enrollment, lead, config, appt };
   });
   if ('done' in plan) return plan.done as StepResult;
+  if ('staff' in plan && plan.staff) {
+    const p = plan.staff;
+    return runStaffStep(deps, tenantId, p.step, p.lead, p.config, p.appt);
+  }
 
   const { step, enrollment, lead, config, appt } = plan;
   const key = step.templateKey as TemplateKey;
@@ -284,6 +306,125 @@ export async function runStep(
 
   await withTenant(deps.db, tenantId, (tx) => finish(tx, clock, step.id, enrollment.id, status, reason));
   return { status, reason };
+}
+
+// ---- Staff-side watches (opening hours, not patient quiet hours) ----
+
+/** Pending (staff-confirm) bookings: nudge staff at +30 min and +2 h of opening time, then auto-confirm. */
+export async function enrollPendingWatch(
+  tx: Tx,
+  clock: Clock,
+  config: TenantConfig,
+  appt: { id: string; leadId: string; startsAt: Date },
+) {
+  await stopEnrollments(tx, appt.leadId, ['pending_watch'], 'replaced');
+  const now = clock.now().getTime();
+  const start = appt.startsAt.getTime();
+  const auto = config.booking.auto_confirm_pending ?? true;
+  const steps: StepPlan[] = [];
+  if (start - now < 3 * HOUR) {
+    // Short notice: tell staff now; confirm in 20 minutes if nobody does.
+    steps.push({ action: 'nudge_pending', dueAt: new Date(now), deadlineAt: appt.startsAt });
+    if (auto)
+      steps.push({ action: 'auto_confirm', dueAt: new Date(now + 20 * MINUTE), deadlineAt: appt.startsAt });
+  } else {
+    // Deadline: 4 h before, or the last open moment before the appointment's day, whichever is earlier.
+    const dayStart = zonedTimeToUtc(
+      localParts(appt.startsAt, config.locale.timezone).date,
+      '00:00',
+      config.locale.timezone,
+    );
+    const eveningBefore = lastOpenBefore(config, dayStart);
+    let deadline = start - 4 * HOUR;
+    if (eveningBefore && eveningBefore.getTime() > now)
+      deadline = Math.min(deadline, eveningBefore.getTime());
+    deadline = Math.max(deadline, now + 30 * MINUTE);
+    for (const minutes of [30, 120]) {
+      const at = addOpenMinutes(config, new Date(now), minutes);
+      if (at && at.getTime() < deadline)
+        steps.push({ action: 'nudge_pending', dueAt: at, deadlineAt: appt.startsAt });
+    }
+    if (auto) steps.push({ action: 'auto_confirm', dueAt: new Date(deadline), deadlineAt: appt.startsAt });
+  }
+  return enroll(tx, clock, { leadId: appt.leadId, kind: 'pending_watch', appointmentId: appt.id, steps });
+}
+
+/** After a 24 h reminder: if the patient hasn't tapped Confirm by ~4 h before, tell staff (while open). */
+export async function enrollConfirmWatch(
+  tx: Tx,
+  clock: Clock,
+  config: TenantConfig,
+  appt: { id: string; leadId: string; startsAt: Date },
+) {
+  await stopEnrollments(tx, appt.leadId, ['confirm_watch'], 'replaced');
+  const hasDayBefore = config.sequences.reminders.before_hours.some((h) => h >= 12);
+  const reminderAt = appt.startsAt.getTime() - 24 * HOUR;
+  if (!hasDayBefore || reminderAt <= clock.now().getTime()) return null;
+  const target = new Date(appt.startsAt.getTime() - 4 * HOUR);
+  const at = isOpen(config, target) ? target : lastOpenBefore(config, target);
+  // Must leave the patient time to answer the reminder first (at least 2 h after it).
+  if (!at || at.getTime() < reminderAt + 2 * HOUR) return null;
+  return enroll(tx, clock, {
+    leadId: appt.leadId,
+    kind: 'confirm_watch',
+    appointmentId: appt.id,
+    steps: [{ action: 'nudge_unconfirmed', dueAt: at, deadlineAt: appt.startsAt }],
+  });
+}
+
+const STAFF_ACTIONS = ['nudge_pending', 'auto_confirm', 'nudge_unconfirmed'] as const;
+type StaffAction = (typeof STAFF_ACTIONS)[number];
+
+/** Staff nudges and auto-confirm: run outside the patient-message path. */
+async function runStaffStep(
+  deps: NotifyDeps,
+  tenantId: string,
+  step: { id: string; enrollmentId: string; step: number; action: StaffAction },
+  lead: { name: string | null; phoneE164: string },
+  config: TenantConfig,
+  appt: { id: string; status: string; service: string; startsAt: Date; resource: string } | undefined,
+): Promise<StepResult> {
+  const close = (status: 'sent' | 'cancelled', reason?: string) =>
+    withTenant(deps.db, tenantId, (tx) =>
+      finish(tx, deps.clock, step.id, step.enrollmentId, status, reason),
+    ).then(() => ({ status, reason }));
+  if (!appt) return close('cancelled', 'appointment gone');
+  const who = lead.name?.trim() || lead.phoneE164;
+  const when = formatSlot(appt.startsAt, config.locale.timezone);
+  const key = `enrollment:${step.enrollmentId}:step:${step.step}`;
+
+  if (step.action === 'nudge_unconfirmed') {
+    if (appt.status !== 'scheduled') return close('cancelled', `appointment ${appt.status}`);
+    await sendStaffNote(
+      deps,
+      tenantId,
+      `${who} has not confirmed their ${appt.service} on ${when}; a quick call may help`,
+      key,
+    );
+    return close('sent');
+  }
+  if (appt.status !== 'pending') return close('cancelled', `appointment ${appt.status}`);
+  if (step.action === 'nudge_pending') {
+    await sendStaffNote(
+      deps,
+      tenantId,
+      `${who}'s booking for ${appt.service} on ${when} is waiting for your confirmation`,
+      key,
+    );
+    return close('sent');
+  }
+  // auto_confirm: the patient gets the confirmation and normal reminders through the usual path.
+  await updateAppointment(deps, tenantId, appt.id, 'confirmed');
+  await withTenant(deps.db, tenantId, (tx) =>
+    emit(tx, deps.clock, 'appointment.auto_confirmed', { appointmentId: appt.id }),
+  );
+  await sendStaffNote(
+    deps,
+    tenantId,
+    `${who}'s ${appt.service} on ${when} was confirmed automatically because nobody confirmed it in time; cancel it from Today if that is wrong`,
+    key,
+  );
+  return close('sent');
 }
 
 /** Positional values for an email rendering of a WhatsApp template. */

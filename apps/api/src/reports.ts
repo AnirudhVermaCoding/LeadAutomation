@@ -51,12 +51,13 @@ export async function computeReport(
     tx,
     sql`select count(*) as c from events where type = 'appointment.booked' and occurred_at >= ${start} and occurred_at < ${end}`,
   );
-  const visits = await one<{ shows: string; no_shows: string; upcoming: string }>(
+  const visits = await one<{ shows: string; no_shows: string; upcoming: string; unmarked: string }>(
     tx,
     sql`
       select count(*) filter (where status = 'completed' and starts_at >= ${start} and starts_at < ${end}) as shows,
         count(*) filter (where status = 'no_show' and starts_at >= ${start} and starts_at < ${end}) as no_shows,
-        count(*) filter (where status in ('pending', 'scheduled', 'confirmed') and starts_at >= ${now}) as upcoming
+        count(*) filter (where status in ('pending', 'scheduled', 'confirmed') and starts_at >= ${now}) as upcoming,
+        count(*) filter (where status in ('pending', 'scheduled', 'confirmed') and ends_at < ${now} and starts_at >= ${start} and starts_at < ${end}) as unmarked
       from appointments`,
   );
   const inbound = (
@@ -98,6 +99,7 @@ export async function computeReport(
     showRate: shows + noShows ? shows / (shows + noShows) : null,
     revenueRecoveredInr: shows * config.reports.avg_transaction_value,
     upcomingBookings: n(visits.upcoming),
+    unmarkedVisits: n(visits.unmarked),
     topTopics: [...counts.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
@@ -121,6 +123,12 @@ export function renderReportEmail(businessName: string, r: ReportData) {
     ['Visits completed / no-shows', `${r.shows} / ${r.noShows} (show rate ${pct(r.showRate)})`],
     ['Estimated revenue from completed visits', inr(r.revenueRecoveredInr)],
     ['Upcoming booked appointments', String(r.upcomingBookings)],
+    ...(r.unmarkedVisits
+      ? ([['Visits not marked Completed / No-show (numbers may be low)', String(r.unmarkedVisits)]] as [
+          string,
+          string,
+        ][])
+      : []),
     [
       'Running cost this month (WhatsApp + AI)',
       `${inr(r.costs.whatsappInr)} + $${r.costs.llmUsd.toFixed(2)}`,

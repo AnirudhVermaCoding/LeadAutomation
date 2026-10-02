@@ -139,6 +139,26 @@ export async function notifyStaffAlert(deps: NotifyDeps, job: JobData['staff-ale
   ]);
 }
 
+/** A short note to the clinic's staff channel (email, or the staff_update WhatsApp template). */
+export async function sendStaffNote(
+  deps: NotifyDeps,
+  tenantId: string,
+  note: string,
+  idempotencyKey: string,
+) {
+  const config = await withTenant(deps.db, tenantId, async (tx) => (await getActiveConfig(tx))?.config);
+  if (!config) return null;
+  const notify = config.booking.staff_notify;
+  if (notify.channel === 'email')
+    return deps.email.send({
+      to: [notify.to],
+      subject: `${config.brand.business_name}: ${note.slice(0, 80)}`,
+      text: `${note}.\n\nOpen the InstantLead dashboard for details.`,
+      idempotencyKey,
+    });
+  return sendStaffWhatsApp(deps, tenantId, notify.to, 'staff_update', [note]);
+}
+
 /** Staff alerts go out as an approved template (staff aren't in a conversation window). */
 async function sendStaffWhatsApp(
   deps: MessagingDeps,

@@ -15,6 +15,10 @@ export const TEMPLATE_VARIABLES = [
   'appointment.date',
   'appointment.service',
   'review_link',
+  /** Staff messages: a short free-text note ("Priya hasn't confirmed…"). */
+  'note',
+  /** Running-late notices. */
+  'delay_minutes',
 ] as const;
 
 const VARIABLE = /\{\{\s*([^{}]*?)\s*\}\}/g;

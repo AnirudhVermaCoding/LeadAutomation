@@ -5,6 +5,7 @@ import { runMonitor } from './monitoring.ts';
 import { runRetention } from './privacy.ts';
 import { deliverWebhook, dispatchWebhookEvents } from './webhooks-out.ts';
 import { runScheduledReports } from './reports.ts';
+import { runStaffDigest } from './staff-digest.ts';
 import { enrollFollowups, runStep, sweepDueSteps } from './sequences.ts';
 import { ChannelError, fetchMetaLead } from '@instantlead/integrations';
 import type { FastifyBaseLogger } from 'fastify';
@@ -133,7 +134,10 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   });
   await ctx.boss.schedule(QUEUES.sequenceSweep, '* * * * *');
   await ctx.boss.work(QUEUES.reportsCron, async () => {
-    await runJob(log, QUEUES.reportsCron, () => runScheduledReports(ctx));
+    await runJob(log, QUEUES.reportsCron, async () => ({
+      reports: await runScheduledReports(ctx),
+      unmarkedDigests: await runStaffDigest(ctx),
+    }));
   });
   await ctx.boss.schedule(QUEUES.reportsCron, '5 * * * *'); // hourly; each tenant's report day/time is checked inside
   await ctx.boss.work(QUEUES.monitorCron, async () => {
