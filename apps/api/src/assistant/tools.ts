@@ -13,7 +13,7 @@ import {
   findSlots,
   rescheduleLeadAppointment,
 } from '../booking.ts';
-import { toolSchemas, type ToolName } from './prompt.ts';
+import { toolSchemas, weeklyHours, type ToolName } from './prompt.ts';
 
 export interface ToolContext {
   deps: LeadDeps & { db: Db };
@@ -95,7 +95,12 @@ function lookupKnowledge(c: ToolContext, input: { query: string }): ToolOutcome 
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .filter((w) => w.length > 2);
-  const hits = c.config.qualification.knowledge
+  // Opening hours live in the config, not the knowledge entries: include them as one more entry.
+  const entries = [
+    ...c.config.qualification.knowledge,
+    { title: 'Opening hours (timings, days open, Sunday)', content: weeklyHours(c.config) },
+  ];
+  const hits = entries
     .map((k) => ({
       k,
       score: terms.filter((t) => `${k.title} ${k.content}`.toLowerCase().includes(t)).length,
@@ -106,7 +111,7 @@ function lookupKnowledge(c: ToolContext, input: { query: string }): ToolOutcome 
   if (!hits.length)
     return {
       content:
-        'No information about that. Do not guess: say you will check with the team, or offer a call back.',
+        'No information about that. Do not guess: say you will check with the team, or offer a call back. (Internal note, never quote it.)',
     };
   return { content: hits.map(({ k }) => `${k.title}: ${k.content}`).join('\n') };
 }

@@ -24,7 +24,8 @@
     "secrets:rotate": "pnpm --filter @instantlead/api secrets:rotate",
     "demo": "node --env-file-if-exists=.env packages/sim/src/demo.ts",
     "loadtest": "node --env-file-if-exists=.env packages/sim/src/loadtest.ts",
-    "e2e": "node --env-file-if-exists=.env node_modules/@playwright/test/cli.js test"
+    "e2e": "node --env-file-if-exists=.env node_modules/@playwright/test/cli.js test",
+    "evals": "node --env-file-if-exists=.env node_modules/vitest/vitest.mjs run --project db apps/api/src/assistant/evals"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

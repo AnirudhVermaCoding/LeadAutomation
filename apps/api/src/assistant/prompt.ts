@@ -176,6 +176,9 @@ ${examples(config)}
 QUALIFICATION QUESTIONS
 ${questions}
 
+OPENING HOURS (${config.locale.timezone})
+${weeklyHours(config)}
+
 SERVICES (for booking)
 ${services}
 
@@ -205,6 +208,25 @@ export function stateMessage(s: {
     `- Lead status: ${s.status}`,
     `- Upcoming appointment: ${s.appointment ?? 'none'}`,
   ].join('\n');
+}
+
+const DAY_NAMES: Record<string, string> = {
+  mon: 'Mon',
+  tue: 'Tue',
+  wed: 'Wed',
+  thu: 'Thu',
+  fri: 'Fri',
+  sat: 'Sat',
+  sun: 'Sun',
+};
+/** "Mon, Tue, Wed, Thu, Fri, Sat 10:00–20:00; Sun 10:00–14:00" (closed days are simply absent). */
+export function weeklyHours(config: TenantConfig): string {
+  const hours = config.locale.business_hours;
+  if (!hours.length) return 'not set';
+  return (
+    hours.map((h) => `${h.days.map((d) => DAY_NAMES[d] ?? d).join(', ')} ${h.open}–${h.close}`).join('; ') +
+    '; closed on other days'
+  );
 }
 
 /** "Open now (until 19:00)" / "Closed now; opens Mon 10:00", from the configured business hours. */

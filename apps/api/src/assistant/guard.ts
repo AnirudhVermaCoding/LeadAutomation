@@ -207,7 +207,7 @@ export function cleanReply(text: string): string {
 }
 
 const LEAK =
-  /\b(record_answer|lookup_knowledge|escalate_to_human|mark_disqualified|get_available_slots|book_slot|tool_use|CRM state|QUALIFICATION QUESTIONS|system prompt|my instructions)\b|\bKNOWLEDGE\b/;
+  /\b(record_answer|lookup_knowledge|escalate_to_human|mark_disqualified|get_available_slots|book_slot|tool_use|CRM state|QUALIFICATION QUESTIONS|system prompt|my instructions|Do not guess|Internal note)\b|\bKNOWLEDGE\b/;
 const MEDICINE =
   /\b(paracetamol|ibuprofen|crocin|combiflam|dolo|calpol|aspirin|diclofenac|nimesulide|amoxicillin|azithromycin|metronidazole|cetirizine|antibiotics?|painkillers?|\d+\s?mg)\b/i;
 const DEVANAGARI = /[ऀ-ॿ]/gu;

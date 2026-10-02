@@ -84,10 +84,10 @@ function ask(config: TenantConfig, key: string) {
 }
 
 const BOT =
-  /\b(are you (a |an )?(bot|robot|ai|machine|real( person)?|human)|is this (a )?(bot|automated)|kya (aap|tum) (bot|insaan))\b/i;
+  /\b(are you (a |an )?(bot|robot|ai|machine|real( person)?|human)|(talking|chatting) (to|with) a (bot|robot|machine|real person|human)|is this (a )?(bot|automated)|kya (aap|tum) (bot|insaan))\b/i;
 const YES = /^(yes|yeah|yep|sure|ok(ay)?|please|haan|han|ji|ha|theek hai|thik hai|chalega)\b/i;
 const SYMPTOM =
-  /\b(pain|paining|hurts?|ache|aching|bleed(s|ing)?|swollen|swelling|sensitiv\w*|broken|chipped|cavity|loose|bad breath|yellow|stain\w*|crooked|gap|acne|pimples?|scars?|spots|pigment\w*|rash\w*|itch\w*|dark circles|hair ?fall|thinning|dandruff|bald\w*|grey|gray|dard|khoon|daant)\b/i;
+  /\b(pain|paining|hurts?|hurting|ache|aching|decay|bleed(s|ing)?|swollen|swelling|sensitiv\w*|broken|chipped|cavity|loose|bad breath|yellow|stain\w*|crooked|gap|acne|pimples?|scars?|spots?|black spot|pigment\w*|rash\w*|itch\w*|dark circles|hair ?fall|thinning|dandruff|bald\w*|grey|gray|dard|khoon|daant)\b/i;
 
 /** The service whose suitable_for best matches what they wrote (word overlap), if any. */
 function serviceForConcern(config: TenantConfig, text: string): string | null {
@@ -241,7 +241,13 @@ export function createFakeLlm(): LlmProvider {
           );
         }
 
-        const info = names.includes('lookup_knowledge') ? `${results.join(' ')} ` : '';
+        // Never echo the tool's internal "no information" note to the customer.
+        const found = results.filter((r) => !r.startsWith('No information'));
+        const info = names.includes('lookup_knowledge')
+          ? found.length
+            ? `${found.join(' ')} `
+            : "I'll check that with the team and get back to you. "
+          : '';
         const state = results
           .map((r) => parse<{ still_missing?: string[]; status?: string }>(r) ?? {})
           .find((r) => r.status);

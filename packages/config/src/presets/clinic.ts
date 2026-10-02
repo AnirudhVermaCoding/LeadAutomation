@@ -217,7 +217,6 @@ export function clinicPreset(variant: ClinicVariant, businessName = 'Demo Clinic
       safety: {
         emergency_keywords: [
           'emergency',
-          'severe pain',
           // Specific phrasings: bleeding gums or mild swelling are common reasons to book, not emergencies.
           'bleeding a lot',
           'heavy bleeding',
@@ -234,10 +233,8 @@ export function clinicPreset(variant: ClinicVariant, businessName = 'Demo Clinic
           'chest pain',
           'can’t breathe',
           "can't breathe",
-          'bahut dard',
           'khoon',
           'saans nahi',
-          'बहुत दर्द',
           'खून',
           'सांस',
         ],
