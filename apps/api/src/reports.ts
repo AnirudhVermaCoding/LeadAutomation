@@ -7,14 +7,24 @@ import { withTenant, type Db, type Tx } from './db/client.ts';
 import { reports, type ReportData } from './db/schema.ts';
 import type { LeadDeps } from './leads.ts';
 
-/** What leads ask about, by keyword group (deterministic, no LLM). */
-const TOPICS: [string, RegExp][] = [
+/** What leads ask about, by keyword group (deterministic, no LLM): clinics. */
+const CLINIC_TOPICS: [string, RegExp][] = [
   ['Prices', /\b(price|cost|fee|charges?|how much|kitna|kitne|rate)\b|₹/i],
   ['Availability / timings', /\b(timing|open|close|hours|today|tomorrow|slot|available|kab)\b/i],
   ['Location / parking', /\b(address|where|location|kahan|parking|map|directions)\b/i],
   ['Doctors', /\b(doctor|dr|dentist|specialist|surgeon)\b/i],
   ['Pain / urgent', /\b(pain|dard|urgent|emergency|swelling|bleeding)\b/i],
   ['Insurance / payment', /\b(insurance|emi|card|upi|cash|payment)\b/i],
+];
+/** Property businesses. */
+const PROPERTY_TOPICS: [string, RegExp][] = [
+  ['Prices / budget', /\b(price|cost|rate|budget|how much|kitna|lakh|crore|cr|per sq ?ft)\b|₹/i],
+  ['Location', /\b(location|where|area|locality|kahan|near|distance|map)\b/i],
+  ['Configuration (BHK / plot)', /\b(\d ?bhk|bhk|plot|villa|carpet|sq ?ft|size)\b/i],
+  ['Possession / ready to move', /\b(possession|ready to move|ready|handover|completion|rera)\b/i],
+  ['Loan / EMI', /\b(loan|emi|bank|finance|down ?payment)\b/i],
+  ['Site visit', /\b(site visit|visit|see the (flat|property)|show me|walkthrough)\b/i],
+  ['Amenities / parking', /\b(amenit\w*|parking|gym|pool|club ?house|security|lift)\b/i],
 ];
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -80,7 +90,8 @@ export async function computeReport(
   const noShows = n(visits.no_shows);
   const counts = new Map<string, number>();
   for (const { body } of inbound)
-    for (const [topic, re] of TOPICS) if (re.test(body)) counts.set(topic, (counts.get(topic) ?? 0) + 1);
+    for (const [topic, re] of config.qualification.safety.no_medical_advice ? CLINIC_TOPICS : PROPERTY_TOPICS)
+      if (re.test(body)) counts.set(topic, (counts.get(topic) ?? 0) + 1);
 
   return {
     period: {

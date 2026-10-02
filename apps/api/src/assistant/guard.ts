@@ -243,7 +243,7 @@ export function checkReply(text: string, c: ReplyContext): string[] {
   for (const m of text.matchAll(/(?:₹|rs\.?|inr)\s?(\d[\d,]*)|(\d[\d,]*)\s?(?:rupees|rs\b|\/-)/gi)) {
     const amount = (m[1] ?? m[2] ?? '').replace(/,/g, '');
     if (amount && !known.has(amount))
-      problems.push(`states a price (₹${amount}) that is not in the clinic's information`);
+      problems.push(`states a price (₹${amount}) that is not in the business's information`);
   }
 
   if (c.noMedicalAdvice && MEDICINE.test(text))
@@ -258,13 +258,13 @@ export function checkReply(text: string, c: ReplyContext): string[] {
         (a) => u.toLowerCase().startsWith(a) || a.startsWith(u.replace(/[).,]+$/, '').toLowerCase()),
       )
     )
-      problems.push(`contains a link that is not the clinic's (${u})`);
+      problems.push(`contains a link that is not the business's own (${u})`);
 
   const sourceDigits = c.sources.replace(/\D/g, '');
   for (const p of text.match(/\+?\d[\d\s-]{8,}\d/g) ?? []) {
     const digits = p.replace(/\D/g, '');
     if (digits.length >= 10 && !sourceDigits.includes(digits.slice(-10)))
-      problems.push('contains a phone number that is not the clinic’s');
+      problems.push('contains a phone number that is not the business’s own');
   }
 
   const letters = text.match(LETTERS)?.length ?? 0;

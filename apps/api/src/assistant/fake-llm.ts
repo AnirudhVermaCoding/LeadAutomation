@@ -22,7 +22,7 @@ const SYNONYMS: Record<string, string[]> = {
   this_week: ['this week', 'tomorrow', 'kal', 'hafte', 'week'],
   this_month: ['this month', 'month', 'mahine'],
   just_exploring: ['exploring', 'just looking', 'later', 'baad mein', 'dekh'],
-  immediately: ['immediately', 'asap', 'abhi', 'right now'],
+  immediately: ['immediately', 'asap', 'abhi', 'right now', 'now', 'ready to buy', 'urgent', 'turant'],
   tooth_pain: ['pain', 'dard', 'ache', 'hurts'],
   checkup_cleaning: ['cleaning', 'checkup', 'check up', 'saaf'],
   root_canal: ['root canal', 'rct'],
@@ -71,7 +71,8 @@ const SYNONYMS: Record<string, string[]> = {
   yes: ['yes', 'haan', 'han', 'yeah', 'yep', 'first time', 'pehli baar'],
   no: ['no', 'nahi', 'nope', 'been before', 'pehle aaya'],
 };
-const HUMAN = /\b(human|person|someone|staff|call me|phone me|real person|insaan|baat karni|baat karo)\b/i;
+const HUMAN =
+  /\b(human|person|someone|staff|agent|broker|manager|owner|call me|phone me|real person|insaan|baat karni|baat karo)\b/i;
 const FACTS: [RegExp, string][] = [
   [/(price|cost|fee|charge|how much|kitna|kitne|rate|₹)/i, 'price'],
   [/(address|where|location|kahan|parking|map)/i, 'address'],
@@ -325,7 +326,7 @@ export function createFakeLlm(): LlmProvider {
         const next = (state?.still_missing ?? h.missing)[0];
         if (next)
           return reply(
-            `${info}${info ? '' : SYMPTOM.test(inbound) ? 'Sorry to hear that — our doctor can take a proper look. ' : 'Thanks! '}${ask(h.config, next)}`,
+            `${info}${info ? '' : SYMPTOM.test(inbound) && h.config.qualification.safety.no_medical_advice ? 'Sorry to hear that — our doctor can take a proper look. ' : 'Thanks! '}${ask(h.config, next)}`,
           );
         if (state?.status === 'qualified' && !h.appointment)
           return call('get_available_slots', { service: serviceFor(h), ...withResource(h, request) });
@@ -340,7 +341,7 @@ export function createFakeLlm(): LlmProvider {
       const { assistant_name: me, business_name: biz } = h.config.brand;
       if (BOT.test(inbound))
         return reply(
-          `I'm ${me}, ${biz}'s virtual assistant — I can answer most questions and book appointments, and someone from our team can step in anytime. How can I help?`,
+          `I'm ${me}, ${biz}'s virtual assistant — I can answer most questions and book ${h.config.qualification.safety.no_medical_advice ? 'appointments' : 'visits'}, and someone from our team can step in anytime. How can I help?`,
         );
       if (HUMAN.test(inbound)) return call('escalate_to_human', { reason: 'Lead asked for a person' });
       // "Yes" to "shall I find you a <service> slot?": go find times for that service.
@@ -352,6 +353,16 @@ export function createFakeLlm(): LlmProvider {
           ...withResource(h, request),
         });
       }
+      // Property buyers far away: offer the video walkthrough service if the business has one.
+      const video = h.config.booking.services.find((s) => /video|virtual/i.test(s.name));
+      if (
+        video &&
+        !h.appointment &&
+        /\b(video|virtual|abroad|another city|outside india|nri|dubai|usa|uk|canada)\b/i.test(inbound)
+      )
+        return reply(
+          `Of course! We can do a ${video.name.toLowerCase()} so you can see the property from wherever you are. Would you like me to find you a slot?`,
+        );
       // A problem in their own words: empathy, no diagnosis, the right service, an offer to book.
       // Older configs have no suitable_for: the first service (usually the general consultation) is the safe default.
       const concernService = SYMPTOM.test(inbound)

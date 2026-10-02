@@ -7,7 +7,7 @@
  */
 import { parseArgs } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { PERSONAS, type Outcome } from './personas.ts';
+import { PERSONAS as CLINIC_PERSONAS, REAL_ESTATE_PERSONAS, type Outcome } from './personas.ts';
 
 const { values } = parseArgs({
   options: {
@@ -18,6 +18,8 @@ const { values } = parseArgs({
   },
 });
 const base = values.base;
+// Personas match the business type: a real-estate tenant gets the property buyers.
+const PERSONAS = /real/i.test(values.tenant) ? REAL_ESTATE_PERSONAS : CLINIC_PERSONAS;
 
 async function signIn(): Promise<string> {
   const res = await fetch(`${base}/api/auth/sign-in/email`, {

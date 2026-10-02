@@ -107,3 +107,47 @@ export const PERSONAS: Record<string, Persona> = {
     check: (o) => (o.replies.length >= 1 ? null : 'expected a reply'),
   },
 };
+
+/** Real-estate personas (run with --tenant demo-realestate). */
+export const REAL_ESTATE_PERSONAS: Record<string, Persona> = {
+  buyer_books_visit: {
+    description: 'Ready buyer: 3BHK, 1 crore, two localities, immediately, picks a slot',
+    messages: ['Hi, looking for a 3BHK', 'budget around 1 crore', 'Baner or Aundh', 'immediately', '1'],
+    check: (o) =>
+      ['booked', 'confirmed'].includes(o.lead.state) && o.lead.tier === 'hot'
+        ? null
+        : `expected booked/hot, got ${o.lead.state}/${o.lead.tier}`,
+  },
+  investor: {
+    description: 'Investor, mid budget, a few months out',
+    messages: ['2bhk for investment', 'around 60 lakh', 'Hinjewadi', 'within 3 months'],
+    check: (o) => (o.lead.tier ? null : `expected a scored lead, got ${o.lead.state}`),
+  },
+  hinglish_buyer: {
+    description: 'Writes in Hinglish',
+    messages: ['Baner mein 2 bhk chahiye, budget 50 lakh tak'],
+    check: (o) => (o.lead.language === 'hinglish' ? null : `expected hinglish, got ${o.lead.language}`),
+  },
+  out_of_town: {
+    description: 'Lives abroad, wants a video call',
+    messages: ['I live in Dubai, can I see the flat on a video call?'],
+    check: (o) =>
+      o.replies.length && !/patient|doctor|clinic/i.test(all(o)) ? null : 'expected a property reply',
+  },
+  reschedules_visit: {
+    description: 'Books a site visit, then moves it',
+    messages: ['need a 3bhk', '1 crore', 'Baner', 'immediately', '1', 'can I reschedule?', '2'],
+    check: (o) => (o.replies.some((r) => /moved to/.test(r)) ? null : 'expected a reschedule'),
+  },
+  wants_agent: {
+    description: 'Asks for the agent directly',
+    messages: ['can I talk to the agent directly please'],
+    check: (o) => (o.lead.aiPaused ? null : 'expected a hand-over'),
+  },
+  builder_vendor: {
+    description: 'Sells lead generation to the agent',
+    messages: ['Hello sir we provide digital marketing and lead generation services for builders'],
+    check: (o) =>
+      o.lead.notALead === 'vendor' && !/patient/i.test(all(o)) ? null : 'expected a polite vendor close',
+  },
+};
