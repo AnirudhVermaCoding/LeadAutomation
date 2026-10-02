@@ -45,7 +45,7 @@ export async function computeReport(
         select min(m.occurred_at) as first_out from messages m
         where m.lead_id = l.id and m.direction = 'out' and m.status in ('sent', 'delivered', 'read')
       ) fr on true
-      where l.received_at >= ${start} and l.received_at < ${end}`,
+      where l.received_at >= ${start} and l.received_at < ${end} and l.not_a_lead is null`,
   );
   const booked = await one<{ c: string }>(
     tx,

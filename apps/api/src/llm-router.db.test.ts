@@ -29,7 +29,7 @@ function stub(model: string, provider: LlmProvider['provider']) {
     provider,
     model,
     calls: 0,
-    behave: (): Promise<LlmResponse> => Promise.resolve(res(`Hello from ${model}`)),
+    behave: (): Promise<LlmResponse> => Promise.resolve(res(`Hello from ${model.split('-')[1]}`)),
     complete() {
       s.calls++;
       return s.behave();
@@ -66,7 +66,7 @@ afterAll(() => t.close());
 beforeEach(() => {
   for (const s of [sonnet, haiku, gpt]) {
     s.calls = 0;
-    s.behave = () => Promise.resolve(res(`Hello from ${s.model}`));
+    s.behave = () => Promise.resolve(res(`Hello from ${s.model.split('-')[1]}`));
   }
 });
 
@@ -111,7 +111,7 @@ describe('failover', () => {
     sonnet.behave = outage;
     const leadId = await inbound();
     expect(await runAssistantTurn(t.ctx, A, leadId)).toMatchObject({ status: 'replied' });
-    expect(await outbound(leadId)).toEqual(['Hello from claude-haiku-4-5-20251001']);
+    expect(await outbound(leadId)).toEqual(['Hello from haiku']);
     expect(await runs(leadId)).toEqual([
       expect.objectContaining({ model: 'claude-sonnet-5-5', fallbackUsed: false, error: 'overloaded' }),
       expect.objectContaining({
@@ -162,7 +162,7 @@ describe('allowed providers', () => {
     const leadId = await inbound();
     await runAssistantTurn(t.ctx, A, leadId);
     expect(gpt.calls).toBe(0);
-    expect(await outbound(leadId)).toEqual(['Hello from claude-sonnet-5-5']);
+    expect(await outbound(leadId)).toEqual(['Hello from sonnet']);
   });
 
   test('allowing it routes to it; no eligible model at all hands over to staff', async () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { TenantConfig } from '@instantlead/config';
 import type { LlmProvider, LlmRequest, LlmResponse, ToolCall } from '@instantlead/integrations';
+import { ruleBasedIntent } from './guard.ts';
 
 /** What the agent passes the fake provider instead of making it parse prompts. */
 export interface TurnHints {
@@ -127,6 +128,25 @@ export function createFakeLlm(): LlmProvider {
     provider: 'fake',
     model: 'fake',
     complete(request: LlmRequest, rawHints?: unknown) {
+      // Single-call tasks: rule-based stand-ins so mock mode exercises the same code paths.
+      const lastUser = request.turns.filter((t) => t.role === 'user').at(-1);
+      const userText = lastUser?.role === 'user' ? lastUser.text : '';
+      if (request.task === 'intent_classify')
+        return Promise.resolve(message(JSON.stringify(ruleBasedIntent(userText))));
+      if (request.task === 'memory_summarize')
+        return Promise.resolve(
+          message(
+            JSON.stringify({
+              summary: `Earlier the customer said: ${userText
+                .split('\n')
+                .filter((l) => l.startsWith('Customer:'))
+                .map((l) => l.slice(10))
+                .slice(-5)
+                .join(' / ')
+                .slice(0, 600)}`,
+            }),
+          ),
+        );
       const h = rawHints as TurnHints;
       const inbound = h.lastInbound;
       const choice = choiceIndex(inbound);

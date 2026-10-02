@@ -1,7 +1,8 @@
 import type { TenantConfig } from '@instantlead/config';
 import { scoreLead } from '@instantlead/core';
 import { eq } from 'drizzle-orm';
-import { withTenant, type Tx } from '../db/client.ts';
+import { withTenant, type TenantTx, type Tx } from '../db/client.ts';
+import { QUEUES } from '../jobs.ts';
 import { answers, leads } from '../db/schema.ts';
 import { emit, transitionLead, transitionLeadIfAllowed, type LeadDeps } from '../leads.ts';
 import type { Db } from '../db/client.ts';
@@ -110,10 +111,22 @@ function lookupKnowledge(c: ToolContext, input: { query: string }): ToolOutcome 
   return { content: hits.map(({ k }) => `${k.title}: ${k.content}`).join('\n') };
 }
 
+/** Hand the conversation to a person: pause the AI, record why, and alert staff. */
 export async function escalate(c: Omit<ToolContext, 'config'>, reason: string) {
   await withTenant(c.deps.db, c.tenantId, async (tx) => {
     await transitionLead(tx, c.leadId, { type: 'HUMAN_TAKEOVER' });
     await emit(tx, c.deps.clock, 'lead.escalated', { leadId: c.leadId, reason });
+    await alertStaff(tx, c.deps, c.tenantId, c.leadId, reason);
+  });
+}
+
+/** Tell staff without pausing the AI (e.g. a photo arrived). Enqueued with the caller's transaction. */
+export function alertStaff(tx: TenantTx, deps: LeadDeps, tenantId: string, leadId: string, reason: string) {
+  return deps.enqueue(tx, QUEUES.staffAlert, {
+    tenantId,
+    leadId,
+    reason,
+    at: deps.clock.now().toISOString(),
   });
 }
 

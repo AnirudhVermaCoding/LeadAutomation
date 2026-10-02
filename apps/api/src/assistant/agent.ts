@@ -1,22 +1,44 @@
-import { fillVariables, parseButtonPayload } from '@instantlead/config';
+import { fillVariables, parseButtonPayload, type TenantConfig } from '@instantlead/config';
 import { detectLanguage, displayStatus, formatSlot, matchesEmergency, scoreLead } from '@instantlead/core';
-import { LlmError, type LlmProvider, type LlmRequest, type Turn } from '@instantlead/integrations';
-import { asc, eq, sum } from 'drizzle-orm';
+import {
+  LlmError,
+  type LlmProvider,
+  type LlmRequest,
+  type MediaType,
+  type Turn,
+} from '@instantlead/integrations';
+import { and, asc, eq, gte, sum } from 'drizzle-orm';
+import { z } from 'zod';
 import { getActiveConfig } from '../config-store.ts';
 import { withTenant } from '../db/client.ts';
-import { leads, llmRuns, messages } from '../db/schema.ts';
+import { conversations, leads, llmRuns, messages } from '../db/schema.ts';
+import { emit, transitionLeadIfAllowed } from '../leads.ts';
 import {
   aiSettings,
   loggedCall,
   monthSpendUsd,
   NoModelAvailableError,
+  runStructured,
   type LlmRouter,
 } from '../llm-router.ts';
 import { sendToLead, type MessagingDeps } from '../outbound.ts';
 import type { TurnHints } from './fake-llm.ts';
-import { buildSystemPrompt, buildTools, stateMessage } from './prompt.ts';
+import {
+  checkReply,
+  cleanReply,
+  hasCustomerSignal,
+  isEmojiOnly,
+  mediaResponse,
+  NOT_A_LEAD,
+  notALeadReply,
+  redact,
+  ruleBasedIntent,
+  sameReply,
+  type NotALead,
+} from './guard.ts';
+import { buildSystemPrompt, buildTools, jsonSchema, stateMessage } from './prompt.ts';
 import { activeAppointment, BookingError, updateAppointment } from '../booking.ts';
-import { escalate, loadAnswers, runTool } from './tools.ts';
+import { alertStaff, escalate, loadAnswers, runTool } from './tools.ts';
 
 export interface AssistantDeps extends MessagingDeps {
   router: LlmRouter;
@@ -26,6 +48,8 @@ export interface AssistantDeps extends MessagingDeps {
 
 const MAX_STEPS = 6; // model calls per turn
 const HISTORY = 40; // messages of context
+/** More inbound messages than this in 10 minutes = a flood (or another bot): hand over once. */
+const FLOOD_LIMIT = 15;
 /** Logged on every model call, so evals and incidents can be tied to the prompt that produced them. */
 export const PROMPT_VERSION = 'agent-v1';
 
@@ -55,13 +79,13 @@ export async function runAssistantTurn(
     const [lead] = await tx.select().from(leads).where(eq(leads.id, leadId));
     const active = await getActiveConfig(tx);
     if (!lead || !active) return null;
-    const history = (
-      await tx
-        .select()
-        .from(messages)
-        .where(eq(messages.leadId, leadId))
-        .orderBy(asc(messages.occurredAt), asc(messages.createdAt))
-    ).slice(-HISTORY);
+    const all = await tx
+      .select()
+      .from(messages)
+      .where(eq(messages.leadId, leadId))
+      .orderBy(asc(messages.occurredAt), asc(messages.createdAt));
+    const history = all.slice(-HISTORY);
+    const [conversation] = await tx.select().from(conversations).where(eq(conversations.leadId, leadId));
     const [spend] = await tx
       .select({ total: sum(llmRuns.costUsd) })
       .from(llmRuns)
@@ -75,19 +99,39 @@ export async function runAssistantTurn(
     };
 
     // Only reply to messages that haven't been answered yet (debounced bursts become one turn).
-    const lastOut = history.findLastIndex((m) => m.direction === 'out');
-    const unanswered = history.slice(lastOut + 1).filter((m) => m.direction === 'in');
-    const inboundText = unanswered.map((m) => m.body).join('\n');
+    const lastOut = all.findLastIndex((m) => m.direction === 'out');
+    const unanswered = all.slice(lastOut + 1).filter((m) => m.direction === 'in');
+    // What the AI reads: text, and captions of media (photos and voice notes themselves are never sent to a model).
+    const inboundText = unanswered
+      .map((m) => {
+        const media = mediaOf(m);
+        if (!media) return m.body;
+        return m.body.startsWith('[') ? '' : `(sent a ${media === 'image' ? 'photo' : media}) ${m.body}`;
+      })
+      .filter(Boolean)
+      .join('\n');
     const language = detectLanguage(inboundText) ?? lead.language;
     if (language && language !== lead.language)
       await tx.update(leads).set({ language }).where(eq(leads.id, leadId));
 
+    // Flood / bot-loop signals.
+    const inbound = all.filter((m) => m.direction === 'in');
+    const tenMinutesAgo = deps.clock.now().getTime() - 10 * 60_000;
+    const lastThree = inbound.slice(-3).map((m) => m.body.trim().toLowerCase());
+    const flooding =
+      inbound.filter((m) => m.occurredAt.getTime() >= tenMinutesAgo).length > FLOOD_LIMIT ||
+      (lastThree.length === 3 && lastThree[0] !== '' && lastThree.every((b) => b === lastThree[0]));
+
     return {
       lead: { ...lead, language },
       config: active.config,
+      all,
       history,
+      conversation: conversation ?? null,
       unanswered,
       inboundText,
+      firstContact: inbound.length === unanswered.length,
+      flooding,
       answers,
       spentUsd: Number(spend?.total ?? 0),
       tenantSpendUsd,
@@ -173,6 +217,46 @@ export async function runAssistantTurn(
   const cap = aiSettings(config).monthly_cost_cap_usd;
   if (cap > 0 && ctx.tenantSpendUsd >= cap) return handover('monthly AI budget reached');
 
+  // Not a real enquiry (tagged earlier): stay quiet; staff still see it in the inbox.
+  if (lead.notALead) return { status: 'skipped', reason: `not a lead (${lead.notALead})` };
+
+  // Floods and other bots' auto-replies: hand over once instead of replying to every message.
+  if (ctx.flooding) {
+    await escalate(tool, 'flood of messages or the same message repeated');
+    await reply(holding, 'holding');
+    return { status: 'escalated', reason: 'flood' };
+  }
+
+  // Media without text: a warm fixed reply (and a heads-up to staff), no AI.
+  const textless = unanswered.every((m) => mediaOf(m) && m.body.startsWith('['));
+  if (textless) {
+    const media = mediaOf(lastInbound)!;
+    const r = mediaResponse(media, lead.language);
+    if (r.alertStaff)
+      await withTenant(deps.db, tenantId, (tx) =>
+        alertStaff(tx, deps, tenantId, leadId, media === 'audio' ? 'sent a voice note' : `sent a ${media}`),
+      );
+    if (!r.reply) return { status: 'skipped', reason: `${media} needs no reply` };
+    await reply(r.reply, 'media');
+    return { status: 'replied', reason: `media: ${media}` };
+  }
+  if (unanswered.every((m) => isEmojiOnly(m.body) || mediaOf(m) === 'sticker'))
+    return { status: 'skipped', reason: 'emoji only' };
+
+  // Is this a real enquiry? Obvious junk on any message; the classifier on a WhatsApp-first contact.
+  const junk = await screenForJunk(deps, tenantId, leadId, ctx);
+  if (junk) {
+    await withTenant(deps.db, tenantId, async (tx) => {
+      await tx.update(leads).set({ notALead: junk }).where(eq(leads.id, leadId));
+      await transitionLeadIfAllowed(tx, leadId, { type: 'DISQUALIFIED' });
+      await emit(tx, deps.clock, 'lead.not_a_lead', { leadId, category: junk });
+    });
+    const line = notALeadReply(junk, config.brand.business_name, lead.language);
+    if (!line) return { status: 'skipped', reason: `not a lead (${junk})` };
+    await reply(line, 'not-a-lead');
+    return { status: 'replied', reason: `not a lead (${junk})` };
+  }
+
   let chain: LlmProvider[];
   try {
     chain = deps.router.chain('agent_reply', config);
@@ -180,6 +264,10 @@ export async function runAssistantTurn(
     if (err instanceof NoModelAvailableError) return handover('no AI model available');
     throw err;
   }
+
+  const memory = await conversationMemory(deps, tenantId, leadId, config, ctx.all, ctx.conversation);
+  const knowledgeText = config.qualification.knowledge.map((k) => `${k.title}: ${k.content}`).join('\n');
+  const allowedUrls = [config.sequences.review_request.google_review_link ?? ''].filter(Boolean);
 
   const scored = scoreLead(config.qualification, ctx.answers);
   const system = buildSystemPrompt(config);
@@ -203,12 +291,19 @@ export async function runAssistantTurn(
       task: 'agent_reply',
       system,
       tools,
-      turns: [...toConversation(ctx.history), state],
+      turns: [
+        ...(memory.summary
+          ? [{ role: 'system' as const, text: `Summary of the earlier conversation: ${memory.summary}` }]
+          : []),
+        ...toConversation(memory.recent),
+        state,
+      ],
       maxTokens: 1024,
       effort: 'low', // short, fast WhatsApp replies
     };
     let answers = ctx.answers;
     let invalidCalls = 0;
+    let repaired = false;
     for (let step = 0; step < MAX_STEPS; step++) {
       const sc = scoreLead(config.qualification, answers);
       const hints: TurnHints = {
@@ -232,12 +327,60 @@ export async function runAssistantTurn(
 
       if (response.stop !== 'tool_use' || !response.toolCalls.length) {
         if (!response.text) throw new LlmError('invalid_output', `${llm.model} returned no text`);
-        const fresh = await withTenant(deps.db, tenantId, (tx) =>
-          tx.select().from(leads).where(eq(leads.id, leadId)),
-        );
-        const sent = await reply(response.text);
+        const text = cleanReply(response.text);
+
+        // Hard rules on every reply. One repair attempt, then a safe hand-over: nothing unchecked is sent.
+        const sources = [
+          knowledgeText,
+          ...request.turns.flatMap((t) => (t.role === 'tool_results' ? t.results.map((r) => r.content) : [])),
+        ].join('\n');
+        const problems = checkReply(text, {
+          sources,
+          allowedUrls,
+          noMedicalAdvice: config.qualification.safety.no_medical_advice,
+          language: lead.language,
+        });
+        if (problems.length) {
+          await recordViolations(deps, tenantId, response.runId, problems);
+          if (repaired) return handover(`reply failed safety checks: ${problems.join('; ')}`);
+          repaired = true;
+          request.turns.push(
+            { role: 'assistant', text: response.text, toolCalls: [], raw: response.raw },
+            {
+              role: 'system',
+              text: `Your last reply was NOT sent: it ${problems.join('; ')}. Write a new reply to the customer that follows the rules (only facts from KNOWLEDGE or tool results; no medicines; reply in the customer's language). Reply with the message only.`,
+            },
+          );
+          continue;
+        }
+
+        // A newer message arrived while we were thinking: the queued turn answers everything together.
+        const fresh = await withTenant(deps.db, tenantId, async (tx) => ({
+          lead: (await tx.select().from(leads).where(eq(leads.id, leadId)))[0],
+          newer: (
+            await tx
+              .select({ id: messages.id })
+              .from(messages)
+              .where(
+                and(
+                  eq(messages.leadId, leadId),
+                  eq(messages.direction, 'in'),
+                  gte(messages.occurredAt, lastInbound.occurredAt),
+                ),
+              )
+          ).filter((m) => !ctx.all.some((seenMsg) => seenMsg.id === m.id)), // arrived after this turn loaded
+        }));
+        if (fresh.newer.length)
+          return { status: 'skipped', reason: 'newer message arrived; the next turn answers it' };
+
+        // Saying the same thing again means we're stuck: bring in a person instead.
+        const recentOut = ctx.all.filter((m) => m.direction === 'out').slice(-2);
+        if (recentOut.some((m) => sameReply(m.body, text)))
+          return handover('conversation stuck (same reply again)');
+
+        const sent = await reply(text);
         return {
-          status: fresh[0]?.aiPaused ? 'escalated' : 'replied',
+          status: fresh.lead?.aiPaused ? 'escalated' : 'replied',
           messageId: 'messageId' in sent ? sent.messageId : undefined,
         };
       }
@@ -281,18 +424,141 @@ export async function runAssistantTurn(
   return handover(`all AI models failed (${why})`);
 }
 
-/** Stored messages -> alternating user/assistant turns (providers need a user turn first). */
-function toConversation(history: { direction: 'in' | 'out'; body: string }[]): Turn[] {
+type StoredMessage = { direction: 'in' | 'out'; body: string; payload: Record<string, unknown> | null };
+
+const mediaOf = (m: { payload: Record<string, unknown> | null }) =>
+  (m.payload?.mediaType as MediaType | undefined) ?? null;
+
+/** Stored messages -> alternating user/assistant turns (providers need a user turn first). Customer text is redacted. */
+function toConversation(history: StoredMessage[]): Turn[] {
   const turns: Turn[] = [];
   for (const m of history) {
     const prev = turns.at(-1);
     if (m.direction === 'in') {
-      if (prev?.role === 'user') prev.text += `\n${m.body}`;
-      else turns.push({ role: 'user', text: m.body });
+      const media = mediaOf(m);
+      const body = redact(
+        media ? (m.body.startsWith('[') ? `(sent a ${media})` : `(sent a ${media}) ${m.body}`) : m.body,
+      );
+      if (prev?.role === 'user') prev.text += `\n${body}`;
+      else turns.push({ role: 'user', text: body });
     } else if (prev?.role === 'assistant') prev.text += `\n${m.body}`;
     else turns.push({ role: 'assistant', text: m.body, toolCalls: [] });
   }
   if (turns[0]?.role === 'assistant')
     turns.unshift({ role: 'user', text: '(The customer submitted an enquiry form.)' });
   return turns;
+}
+
+const IntentSchema = z.strictObject({
+  category: z.enum(['genuine', ...NOT_A_LEAD]),
+  confidence: z.number().min(0).max(1),
+});
+
+/**
+ * Not a real enquiry? Obvious cases (auto-replies, link spam) on any message; the
+ * intent_classify model only on the first messages of a WhatsApp-first contact. Anything that
+ * sounds like a customer, or a classifier that isn't sure (< 0.8), counts as genuine.
+ */
+async function screenForJunk(
+  deps: AssistantDeps,
+  tenantId: string,
+  leadId: string,
+  ctx: { lead: { source: string }; config: TenantConfig; inboundText: string; firstContact: boolean },
+): Promise<NotALead | null> {
+  const text = ctx.inboundText;
+  const serviceWords = ctx.config.booking.services.map((s) => s.name);
+  const obvious = ruleBasedIntent(text);
+  if (obvious.category !== 'genuine' && obvious.confidence >= 0.95 && !hasCustomerSignal(text, serviceWords))
+    return obvious.category;
+  if (!ctx.firstContact || !['whatsapp', 'click_to_whatsapp'].includes(ctx.lead.source)) return null;
+  if (hasCustomerSignal(text, serviceWords)) return null;
+  // "hi", "hello?", "ok": too little to judge, and a greeting is how most real enquiries start.
+  if (text.split(/\s+/).filter(Boolean).length < 4) return null;
+  try {
+    const out = await runStructured(
+      deps,
+      ctx.config,
+      {
+        task: 'intent_classify',
+        system: `You screen the first WhatsApp message(s) sent to ${ctx.config.brand.business_name}, which offers: ${serviceWords.join(', ')}. Classify the sender:
+- genuine: a possible customer (any question about services, prices, timings, location, booking, a problem or symptom, a greeting, or anything unclear)
+- wrong_number: says they reached the wrong number or didn't mean to message
+- vendor: selling services or products to the business (marketing, SEO, software, supplies, partnerships)
+- job_seeker: asking for a job or internship
+- spam: scams, links, money offers, unrelated promotions
+- auto_reply: an automated message from another business's system
+When in doubt, choose genuine. Confidence is your probability (0-1) that the category is right.`,
+        turns: [{ role: 'user', text: redact(text) }],
+        maxTokens: 200,
+        output: { name: 'intent', schema: jsonSchema(IntentSchema) },
+      },
+      IntentSchema,
+      { tenantId, leadId, promptVersion: 'intent-v1' },
+    );
+    return out.category !== 'genuine' && out.confidence >= 0.8 ? out.category : null;
+  } catch {
+    return null; // the classifier is a filter, never a gate: on any failure, treat as genuine
+  }
+}
+
+const SummarySchema = z.strictObject({ summary: z.string().max(2000) });
+const SUMMARIZE_AFTER = 40; // messages
+const KEEP_RECENT = 30;
+const RESUMMARIZE_EVERY = 20;
+
+/**
+ * Long conversations: older messages are folded into a short summary (memory_summarize task),
+ * refreshed every 20 messages; the model then sees the summary plus the last 30 messages.
+ */
+async function conversationMemory(
+  deps: AssistantDeps,
+  tenantId: string,
+  leadId: string,
+  config: TenantConfig,
+  all: (StoredMessage & { occurredAt: Date })[],
+  conversation: { summary: string | null; summaryUpTo: Date | null } | null,
+): Promise<{ summary: string | null; recent: StoredMessage[] }> {
+  if (all.length <= SUMMARIZE_AFTER) return { summary: null, recent: all };
+  const older = all.slice(0, -KEEP_RECENT);
+  const recent = all.slice(-KEEP_RECENT);
+  const upTo = older.at(-1)!.occurredAt;
+  const unsummarized = conversation?.summaryUpTo
+    ? older.filter((m) => m.occurredAt > conversation.summaryUpTo!).length
+    : older.length;
+  if (conversation?.summary && unsummarized < RESUMMARIZE_EVERY)
+    return { summary: conversation.summary, recent };
+  try {
+    const transcript = older
+      .map(
+        (m) =>
+          `${m.direction === 'in' ? 'Customer' : 'Assistant'}: ${m.direction === 'in' ? redact(m.body) : m.body}`,
+      )
+      .join('\n');
+    const { summary } = await runStructured(
+      deps,
+      config,
+      {
+        task: 'memory_summarize',
+        system:
+          'Summarise this WhatsApp conversation between a customer and a business assistant in under 120 words: what the customer wants, facts they gave (no phone numbers or emails), what was offered or agreed, and anything still open.',
+        turns: [{ role: 'user', text: transcript }],
+        maxTokens: 400,
+        output: { name: 'summary', schema: jsonSchema(SummarySchema) },
+      },
+      SummarySchema,
+      { tenantId, leadId, promptVersion: 'summary-v1' },
+    );
+    await withTenant(deps.db, tenantId, (tx) =>
+      tx.update(conversations).set({ summary, summaryUpTo: upTo }).where(eq(conversations.leadId, leadId)),
+    );
+    return { summary, recent };
+  } catch {
+    return { summary: conversation?.summary ?? null, recent }; // fall back to the last known summary
+  }
+}
+
+async function recordViolations(deps: AssistantDeps, tenantId: string, runId: string, problems: string[]) {
+  await withTenant(deps.db, tenantId, (tx) =>
+    tx.update(llmRuns).set({ guardViolations: problems }).where(eq(llmRuns.id, runId)),
+  );
 }

@@ -142,6 +142,18 @@ export const TEMPLATES = {
     },
     buttons: [],
   },
+  staff_handover: {
+    providerName: 'il_staff_handover',
+    category: 'utility',
+    purpose:
+      'To clinic staff: a conversation needs a person (handover, emergency, photo or voice note received).',
+    variables: ['first_name'],
+    body: {
+      en: '{{1}} needs a reply from the team on WhatsApp. Open the InstantLead inbox to see the conversation.',
+      hi: '{{1}} को टीम से WhatsApp पर जवाब चाहिए। बातचीत देखने के लिए InstantLead इनबॉक्स खोलें।',
+    },
+    buttons: [],
+  },
 } as const satisfies Record<string, TemplateDef>;
 
 export type TemplateKey = keyof typeof TEMPLATES;

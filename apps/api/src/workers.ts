@@ -1,6 +1,6 @@
 import { fillVariables } from '@instantlead/config';
 import { runAssistantTurn } from './assistant/agent.ts';
-import { notifyAppointmentChange } from './notify.ts';
+import { notifyAppointmentChange, notifyStaffAlert } from './notify.ts';
 import { runMonitor } from './monitoring.ts';
 import { runRetention } from './privacy.ts';
 import { deliverWebhook, dispatchWebhookEvents } from './webhooks-out.ts';
@@ -121,6 +121,7 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   await workBatched(ctx, log, QUEUES.sequenceStep, (d) => runStep(ctx, d));
   await workBatched(ctx, log, QUEUES.appointmentNotify, (d) => notifyAppointmentChange(ctx, d));
   await workBatched(ctx, log, QUEUES.webhookDeliver, (d) => deliverWebhook(ctx, d));
+  await workBatched(ctx, log, QUEUES.staffAlert, (d) => notifyStaffAlert(ctx, d));
   await ctx.boss.work<JobData['meta-leadgen']>(QUEUES.metaLeadgen, async (jobs) => {
     for (const job of jobs) await runJob(log, QUEUES.metaLeadgen, () => importMetaLead(ctx, job.data));
   });

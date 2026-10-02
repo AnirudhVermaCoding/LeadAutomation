@@ -22,13 +22,18 @@ import { Thread } from './Thread.tsx';
 const FILTERS = [
   { key: 'all', label: 'All', test: () => true },
   { key: 'hot', label: 'Hot', test: (l: InboxRow) => l.tier === 'hot' },
-  { key: 'takeover', label: 'Needs a person', test: (l: InboxRow) => l.aiPaused && l.state !== 'opted_out' },
+  {
+    key: 'takeover',
+    label: 'Needs a person',
+    test: (l: InboxRow) => l.aiPaused && l.state !== 'opted_out' && !l.notALead,
+  },
   { key: 'booked', label: 'Booked', test: (l: InboxRow) => ['booked', 'confirmed'].includes(l.state) },
   {
     key: 'open',
     label: 'In progress',
     test: (l: InboxRow) => ['contacted', 'qualifying', 'qualified', 'booking_offered'].includes(l.state),
   },
+  { key: 'junk', label: 'Not a lead', test: (l: InboxRow) => l.notALead !== null },
 ] as const;
 
 export function InboxPage({ config, role }: { config: TenantConfig; role: Role }) {
@@ -142,6 +147,10 @@ function Conversation({
       navigate('/inbox');
     },
   });
+  const realLead = useMutation({
+    mutationFn: () => api(`/v1/leads/${leadId}/real-lead`, { method: 'POST' }),
+    onSettled: refresh,
+  });
   const [text, setText] = useState('');
   const send = useMutation({
     mutationFn: () => api(`/v1/leads/${leadId}/messages`, { body: { text } }),
@@ -177,30 +186,42 @@ function Conversation({
         </span>
       }
       actions={
-        lead.state !== 'opted_out' &&
-        (lead.aiPaused ? (
+        lead.notALead ? (
           <Button
             size="sm"
             variant="secondary"
-            loading={toggle.isPending}
-            onClick={() => toggle.mutate('resume')}
+            loading={realLead.isPending}
+            onClick={() => realLead.mutate()}
           >
-            <Bot className="size-3.5" aria-hidden /> Hand back to AI
+            Mark as real lead
           </Button>
         ) : (
-          <Button
-            size="sm"
-            variant="secondary"
-            loading={toggle.isPending}
-            onClick={() => toggle.mutate('takeover')}
-          >
-            <Hand className="size-3.5" aria-hidden /> Take over
-          </Button>
-        ))
+          lead.state !== 'opted_out' &&
+          (lead.aiPaused ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={toggle.isPending}
+              onClick={() => toggle.mutate('resume')}
+            >
+              <Bot className="size-3.5" aria-hidden /> Hand back to AI
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={toggle.isPending}
+              onClick={() => toggle.mutate('takeover')}
+            >
+              <Hand className="size-3.5" aria-hidden /> Take over
+            </Button>
+          ))
+        )
       }
     >
       <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <StateBadge state={lead.state} aiPaused={lead.aiPaused} />
+        {lead.notALead && <Badge>not a lead: {lead.notALead.replaceAll('_', ' ')}</Badge>}
         <TierBadge tier={lead.tier} />
         {lead.score !== null && <Badge>score {lead.score}</Badge>}
         <span>{lead.phoneE164}</span>

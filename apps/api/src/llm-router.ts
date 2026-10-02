@@ -98,25 +98,28 @@ export async function loggedCall(
   req: LlmRequest,
   meta: RunMeta,
   hints?: unknown,
-): Promise<LlmResponse> {
+): Promise<LlmResponse & { runId: string }> {
   const started = performance.now();
   const record = (fields: Partial<typeof llmRuns.$inferInsert>) =>
     withTenant(deps.db, meta.tenantId, (tx) =>
-      tx.insert(llmRuns).values({
-        leadId: meta.leadId,
-        provider: llm.provider,
-        model: llm.model,
-        task: meta.task,
-        promptVersion: meta.promptVersion ?? null,
-        fallbackUsed: meta.fallbackUsed,
-        latencyMs: Math.round(performance.now() - started),
-        occurredAt: deps.clock.now(),
-        ...fields,
-      }),
+      tx
+        .insert(llmRuns)
+        .values({
+          leadId: meta.leadId,
+          provider: llm.provider,
+          model: llm.model,
+          task: meta.task,
+          promptVersion: meta.promptVersion ?? null,
+          fallbackUsed: meta.fallbackUsed,
+          latencyMs: Math.round(performance.now() - started),
+          occurredAt: deps.clock.now(),
+          ...fields,
+        })
+        .returning({ id: llmRuns.id }),
     );
   try {
     const res = await llm.complete(req, hints);
-    await record({
+    const [run] = await record({
       inputTokens: res.usage.inputTokens,
       outputTokens: res.usage.outputTokens,
       cacheReadTokens: res.usage.cacheReadTokens,
@@ -125,7 +128,7 @@ export async function loggedCall(
       stopReason: res.stop,
       providerRequestId: res.requestId ?? null,
     });
-    return res;
+    return { ...res, runId: run!.id };
   } catch (err) {
     await record({ error: err instanceof Error ? err.message.slice(0, 500) : String(err) });
     throw err;

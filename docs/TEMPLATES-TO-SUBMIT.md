@@ -22,6 +22,7 @@ Use the exact **name**, **category** and **language**; body variables are positi
 | `il_no_show_recovery` | utility | Sent after staff mark a missed appointment. |
 | `il_review_request` | marketing | Sent after staff mark a visit completed. |
 | `il_staff_new_booking` | utility | To clinic staff: a new booking or booking request needs attention. |
+| `il_staff_handover` | utility | To clinic staff: a conversation needs a person (handover, emergency, photo or voice note received). |
 
 ## `il_first_reply`
 
@@ -239,4 +240,23 @@ New booking request: {{1}} for {{2}} on {{3}}. Open the InstantLead dashboard to
 
 ```text
 नई बुकिंग: {{1}}, {{2}}, {{3}}। कन्फ़र्म करने के लिए InstantLead डैशबोर्ड खोलें।
+```
+
+## `il_staff_handover`
+
+- **Category:** utility
+- **Purpose:** To clinic staff: a conversation needs a person (handover, emergency, photo or voice note received).
+- **Variables:** `{{1}}` = first_name
+- **Sample values (for Meta review):** `{{1}}` = Priya
+
+**English (`en`)**
+
+```text
+{{1}} needs a reply from the team on WhatsApp. Open the InstantLead inbox to see the conversation.
+```
+
+**Hindi (`hi`)**
+
+```text
+{{1}} को टीम से WhatsApp पर जवाब चाहिए। बातचीत देखने के लिए InstantLead इनबॉक्स खोलें।
 ```

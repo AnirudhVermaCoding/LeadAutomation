@@ -36,8 +36,10 @@ export type MetaEvent =
       providerMessageId: string;
       timestamp: Date;
       profileName?: string;
-      /** Text body, or a placeholder like "[image]" for unsupported types. */
+      /** Text body, a media caption, or a placeholder like "[image]". */
       text: string;
+      /** Set for non-text messages (photo, voice note, sticker…). Captions arrive in text. */
+      mediaType?: MediaType;
       /** Quick-reply payload (template button) or interactive reply id. */
       buttonPayload?: string;
       referral?: Referral;
@@ -54,6 +56,21 @@ export type MetaEvent =
     }
   | { type: 'leadgen'; pageId: string; leadgenId: string; formId?: string };
 
+/** WhatsApp message types we answer specially (voice notes arrive as audio). */
+export const MEDIA_TYPES = [
+  'image',
+  'video',
+  'document',
+  'audio',
+  'sticker',
+  'location',
+  'contacts',
+  'reaction',
+] as const;
+export type MediaType = (typeof MEDIA_TYPES)[number];
+
+const Caption = z.looseObject({ caption: z.string().optional() }).optional();
+
 // Lenient schemas: only what we use, unknown fields ignored.
 const Message = z.looseObject({
   from: z.string(),
@@ -61,6 +78,10 @@ const Message = z.looseObject({
   timestamp: z.string(),
   type: z.string(),
   text: z.looseObject({ body: z.string() }).optional(),
+  image: Caption,
+  video: Caption,
+  document: Caption,
+  reaction: z.looseObject({ emoji: z.string().optional() }).optional(),
   button: z.looseObject({ payload: z.string(), text: z.string() }).optional(),
   interactive: z
     .looseObject({
@@ -130,7 +151,16 @@ function messageEvent(
     providerMessageId: m.id,
     timestamp: toDate(m.timestamp),
     profileName,
-    text: m.text?.body ?? m.button?.text ?? reply?.title ?? `[${m.type}]`,
+    text:
+      m.text?.body ??
+      m.button?.text ??
+      reply?.title ??
+      m.image?.caption ??
+      m.video?.caption ??
+      m.document?.caption ??
+      m.reaction?.emoji ??
+      `[${m.type}]`,
+    mediaType: (MEDIA_TYPES as readonly string[]).includes(m.type) ? (m.type as MediaType) : undefined,
     buttonPayload: m.button?.payload ?? reply?.id,
     referral: r && {
       sourceType: r.source_type,

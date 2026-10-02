@@ -113,6 +113,32 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
   return results;
 }
 
+/**
+ * A conversation needs a person (handover, emergency, a photo or voice note the AI doesn't read).
+ * Goes to the clinic's staff alert channel; the reason is in the email and the inbox.
+ */
+export async function notifyStaffAlert(deps: NotifyDeps, job: JobData['staff-alert']) {
+  const loaded = await withTenant(deps.db, job.tenantId, async (tx) => {
+    const [lead] = await tx.select().from(leads).where(eq(leads.id, job.leadId));
+    const config = (await getActiveConfig(tx))?.config;
+    return lead && config ? { lead, config } : null;
+  });
+  if (!loaded) return { skipped: 'lead gone' };
+  const { lead, config } = loaded;
+  const who = lead.name?.trim() || lead.phoneE164;
+  const notify = config.booking.staff_notify;
+  if (notify.channel === 'email')
+    return deps.email.send({
+      to: [notify.to],
+      subject: `${config.brand.business_name}: ${who} needs a reply`,
+      text: `${who} needs a reply from the team on WhatsApp.\nReason: ${job.reason}\n\nOpen the InstantLead inbox to see the conversation.`,
+      idempotencyKey: `staff-alert:${job.leadId}:${job.at}`,
+    });
+  return sendStaffWhatsApp(deps, job.tenantId, notify.to, 'staff_handover', [
+    lead.name?.trim().split(/\s+/)[0] || lead.phoneE164,
+  ]);
+}
+
 /** Staff alerts go out as an approved template (staff aren't in a conversation window). */
 async function sendStaffWhatsApp(
   deps: MessagingDeps,

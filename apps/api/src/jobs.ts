@@ -13,6 +13,7 @@ export const QUEUES = {
   monitorCron: 'monitor-cron',
   maintenanceCron: 'maintenance-cron',
   webhookDeliver: 'webhook-deliver',
+  staffAlert: 'staff-alert',
   deadLetter: 'dead-letter',
 } as const;
 
@@ -26,6 +27,7 @@ export interface JobData {
   [QUEUES.monitorCron]: Record<string, never>;
   [QUEUES.maintenanceCron]: Record<string, never>;
   [QUEUES.webhookDeliver]: { tenantId: string; eventId: string; endpointId: string };
+  [QUEUES.staffAlert]: { tenantId: string; leadId: string; reason: string; at: string };
   [QUEUES.appointmentNotify]: {
     tenantId: string;
     appointmentId: string;
@@ -60,6 +62,7 @@ export async function ensureQueues(boss: PgBoss) {
     QUEUES.appointmentNotify,
     QUEUES.sequenceStep,
     QUEUES.webhookDeliver,
+    QUEUES.staffAlert,
   ])
     await boss.createQueue(name, RETRY);
   // stately + singletonKey(leadId): at most one queued and one running turn per lead, so a burst

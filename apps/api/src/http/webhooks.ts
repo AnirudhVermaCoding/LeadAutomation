@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { toE164 } from '@instantlead/core';
-import { metaVerificationChallenge, parseMetaWebhook, verifyMetaSignature } from '@instantlead/integrations';
+import {
+  MEDIA_TYPES,
+  metaVerificationChallenge,
+  parseMetaWebhook,
+  verifyMetaSignature,
+} from '@instantlead/integrations';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { handleInboundMessage, handleStatusUpdate } from '../inbound.ts';
@@ -53,6 +58,7 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
             providerMessageId: e.providerMessageId,
             from: e.from,
             text: e.text,
+            mediaType: e.mediaType,
             buttonPayload: e.buttonPayload,
             referral: e.referral,
             profileName: e.profileName,
@@ -73,6 +79,8 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
     button_payload: z.string().optional(),
     profile_name: z.string().optional(),
     referral: z.strictObject({ source_type: z.string(), headline: z.string().optional() }).optional(),
+    /** Simulate a photo, voice note, sticker…; text is then the caption (if any). */
+    media_type: z.enum(MEDIA_TYPES).optional(),
   });
   app.post(
     '/v1/dev/whatsapp/inbound',
@@ -86,7 +94,8 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
         provider: 'fake',
         providerMessageId: `fake.in.${randomUUID()}`,
         from,
-        text: body.text ?? body.button_payload ?? '',
+        text: body.text ?? body.button_payload ?? (body.media_type ? `[${body.media_type}]` : ''),
+        mediaType: body.media_type,
         buttonPayload: body.button_payload,
         profileName: body.profile_name,
         referral: body.referral && {

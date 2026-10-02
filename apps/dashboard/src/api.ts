@@ -87,6 +87,8 @@ export interface InboxRow {
   tier: 'hot' | 'warm' | 'cold' | null;
   score: number | null;
   aiPaused: boolean;
+  /** Tagged as not a real enquiry (spam, vendor, wrong number…). */
+  notALead: 'wrong_number' | 'vendor' | 'job_seeker' | 'spam' | 'auto_reply' | null;
   receivedAt: string;
   lastInboundAt: string | null;
 }

@@ -59,6 +59,8 @@ const FUNNEL = {
   COMPLETED: { from: ['booked', 'confirmed'], to: 'completed' },
   NO_SHOW: { from: ['booked', 'confirmed'], to: 'no_show' },
   NURTURE: { from: ['qualifying', 'qualified', 'booking_offered'], to: 'nurturing' },
+  // Staff: a lead tagged as junk (or disqualified) was a real enquiry after all.
+  REQUALIFY: { from: ['disqualified'], to: 'qualifying' },
   MARK_UNRESPONSIVE: {
     from: ['contacted', 'qualifying', 'qualified', 'booking_offered', 'nurturing'],
     to: 'unresponsive',

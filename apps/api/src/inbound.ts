@@ -1,6 +1,7 @@
 import { parseButtonPayload } from '@instantlead/config';
 import { isOptOutMessage, windowExpiresAt } from '@instantlead/core';
-import type { Referral } from '@instantlead/integrations';
+import type { MediaType, Referral } from '@instantlead/integrations';
+import { normalizeInbound } from './assistant/guard.ts';
 import { eq } from 'drizzle-orm';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type Db } from './db/client.ts';
@@ -14,6 +15,7 @@ export interface InboundMessage {
   from: string; // E.164
   text: string;
   buttonPayload?: string | undefined;
+  mediaType?: MediaType | undefined;
   referral?: Referral | undefined;
   profileName?: string | undefined;
 }
@@ -43,6 +45,7 @@ export async function handleInboundMessage(
       const active = await getActiveConfig(tx);
       if (!active) throw new Error('tenant has no config');
       const now = deps.clock.now();
+      const text = normalizeInbound(msg.text);
 
       // A lead who messages first needs no template: their message opens the service window
       // and counts as consent for this conversation.
@@ -66,11 +69,17 @@ export async function handleInboundMessage(
         .values({
           leadId,
           direction: 'in',
-          kind: msg.buttonPayload ? 'button_reply' : msg.text.startsWith('[') ? 'unsupported' : 'text',
-          body: msg.text,
+          kind: msg.buttonPayload
+            ? 'button_reply'
+            : msg.mediaType
+              ? 'media'
+              : text.startsWith('[')
+                ? 'unsupported'
+                : 'text',
+          body: text,
           payload:
-            msg.buttonPayload || msg.referral
-              ? { buttonPayload: msg.buttonPayload, referral: msg.referral }
+            msg.buttonPayload || msg.referral || msg.mediaType
+              ? { buttonPayload: msg.buttonPayload, referral: msg.referral, mediaType: msg.mediaType }
               : null,
           provider: msg.provider,
           providerMessageId: msg.providerMessageId,
@@ -91,7 +100,7 @@ export async function handleInboundMessage(
 
       const button = msg.buttonPayload ? parseButtonPayload(msg.buttonPayload) : null;
       const optingOut =
-        button?.buttonId === 'stop' || isOptOutMessage(msg.text, active.config.intake.opt_out_keywords);
+        button?.buttonId === 'stop' || isOptOutMessage(text, active.config.intake.opt_out_keywords);
 
       if (lead.state === 'opted_out')
         return { leadId, messageId: inserted.id, action: 'ignored_opted_out' } as const;
@@ -99,6 +108,9 @@ export async function handleInboundMessage(
         await optOut(tx, deps, tenantId, lead, button ? 'button' : 'keyword');
         return { leadId, messageId: inserted.id, action: 'opted_out' } as const;
       }
+      // A reaction (👍 on our message) is not a reply to answer.
+      if (msg.mediaType === 'reaction')
+        return { leadId, messageId: inserted.id, action: 'recorded' } as const;
       const status = await transitionLead(tx, leadId, { type: 'LEAD_REPLIED' });
       // Debounce ~3 s so a burst of messages gets one reply; skipped while a human has taken over.
       if (!status.aiPaused)

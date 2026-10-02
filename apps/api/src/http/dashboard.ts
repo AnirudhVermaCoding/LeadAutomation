@@ -88,6 +88,24 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
     });
   }
 
+  // The junk filter got it wrong: a real enquiry after all. Clears the tag and turns the AI back on.
+  app.post('/v1/leads/:id/real-lead', { preHandler: staff }, async (req, reply) => {
+    const id = leadParam(req);
+    const status = await withTenant(ctx.db, tenantOf(req), async (tx) => {
+      const [lead] = await tx.update(leads).set({ notALead: null }).where(eq(leads.id, id)).returning();
+      if (!lead) return null;
+      if (lead.state === 'disqualified') await transitionLead(tx, id, { type: 'REQUALIFY' });
+      const s = await transitionLead(tx, id, { type: 'HUMAN_RESUME' });
+      await audit(tx, ctx.clock, actor(req.principal), {
+        action: 'lead.marked_real',
+        entityType: 'lead',
+        entityId: id,
+      });
+      return s;
+    });
+    return status ?? reply.code(404).send({ error: 'not_found' });
+  });
+
   // Staff typing in the inbox: free-form, so only inside the 24 h window.
   app.post('/v1/leads/:id/messages', { preHandler: staff }, async (req, reply) => {
     const id = leadParam(req);
@@ -317,6 +335,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
           tier: leads.tier,
           score: leads.score,
           aiPaused: leads.aiPaused,
+          notALead: leads.notALead,
           receivedAt: leads.receivedAt,
           lastInboundAt: conversations.lastInboundAt,
         })

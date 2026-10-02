@@ -215,6 +215,8 @@ export const leads = pgTable(
     /** Deterministic score from answers (packages/core scoring), null until computed. */
     score: numeric({ precision: 6, scale: 2, mode: 'number' }),
     aiPaused: boolean().notNull().default(false),
+    /** Set when the first messages show this isn't a real enquiry (spam, vendor, wrong number…). Excluded from reports. */
+    notALead: text({ enum: ['wrong_number', 'vendor', 'job_seeker', 'spam', 'auto_reply'] }),
     receivedAt: ts().notNull(),
     ...timestamps,
   },
@@ -270,6 +272,10 @@ export const conversations = pgTable(
     lastInboundAt: ts(),
     /** 24 h after the last inbound message; free-form sends are allowed only before this. */
     windowExpiresAt: ts(),
+    /** Rolling summary of the older part of a long conversation (memory_summarize task). */
+    summary: text(),
+    /** occurred_at of the last message the summary covers. */
+    summaryUpTo: ts(),
     ...timestamps,
   },
   () => [tenantScoped()],
@@ -287,7 +293,7 @@ export const messages = pgTable(
       .notNull()
       .references(() => leads.id, { onDelete: 'cascade' }),
     direction: text({ enum: ['in', 'out'] }).notNull(),
-    kind: text({ enum: ['text', 'buttons', 'template', 'button_reply', 'unsupported'] }).notNull(),
+    kind: text({ enum: ['text', 'buttons', 'template', 'button_reply', 'media', 'unsupported'] }).notNull(),
     body: text().notNull(),
     templateKey: text(),
     templateCategory: text({ enum: ['utility', 'marketing'] }),
@@ -374,6 +380,8 @@ export const llmRuns = pgTable(
     promptVersion: text(),
     /** True when an earlier model in the task's chain failed and this one stood in. */
     fallbackUsed: boolean().notNull().default(false),
+    /** Output-guard problems found in this call's reply (it was repaired or replaced). */
+    guardViolations: jsonb().$type<string[]>(),
     inputTokens: integer().notNull().default(0),
     outputTokens: integer().notNull().default(0),
     cacheReadTokens: integer().notNull().default(0),
