@@ -83,6 +83,8 @@ export function createAppContext(
     hashKey: Buffer.from(env.HASH_KEY ?? env.SECRETS_KEY, 'base64'),
     fakeChannel: createFakeChannel(),
     allowFakeChannel: mockMode,
+    /** Outside production, webhooks may target localhost / private hosts (testing receivers). */
+    allowPrivateWebhooks: env.NODE_ENV !== 'production',
     llm:
       overrides.llm ??
       (env.ANTHROPIC_API_KEY ? createAnthropicProvider({ apiKey: env.ANTHROPIC_API_KEY }) : createFakeLlm()),

@@ -71,7 +71,10 @@ const newLead = async (phone: string, name = 'Priya Sharma') =>
 test('security headers; the public form may be framed, nothing else', async () => {
   const health = await t.app.inject({ url: '/healthz' });
   expect(health.headers).toMatchObject({ 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY' });
-  expect((await t.app.inject({ url: '/f/nope' })).headers['x-frame-options']).toBeUndefined();
+  expect(health.headers['content-security-policy']).toMatch(/default-src 'self'.*frame-ancestors 'none'/);
+  const form = await t.app.inject({ url: '/f/nope' });
+  expect(form.headers['x-frame-options']).toBeUndefined();
+  expect(form.headers['content-security-policy']).toMatch(/frame-ancestors */);
 });
 
 describe('outbound webhooks', () => {

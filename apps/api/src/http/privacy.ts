@@ -7,7 +7,7 @@ import { tenantSecrets, webhookEndpoints, WEBHOOK_EVENTS } from '../db/schema.ts
 import { eraseLead, exportTenantData } from '../privacy.ts';
 import { setTenantSecret } from '../secrets.ts';
 import type { AppContext } from '../system/context.ts';
-import { newWebhookSecret, webhookSecretName } from '../webhooks-out.ts';
+import { assertPublicUrl, newWebhookSecret, webhookSecretName } from '../webhooks-out.ts';
 import { guard, type Principal } from './auth.ts';
 
 const actor = (p: Principal | null) =>
@@ -74,6 +74,14 @@ export function registerPrivacyRoutes(app: FastifyInstance, ctx: AppContext) {
           .default([...WEBHOOK_EVENTS]),
       })
       .parse(req.body);
+    if (!ctx.allowPrivateWebhooks)
+      try {
+        await assertPublicUrl(body.url);
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_request', message: err instanceof Error ? err.message : String(err) });
+      }
     const secret = newWebhookSecret();
     const tenantId = tenantOf(req);
     const endpoint = await withTenant(ctx.db, tenantId, async (tx) => {

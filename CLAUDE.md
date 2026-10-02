@@ -6,7 +6,7 @@ out-of-scope items in `docs/ROADMAP.md`.
 
 ## Commands
 
-pnpm is pinned to 12.x via `packageManager`.
+pnpm is pinned to 12.x via `packageManager`. Node 24 LTS (`.nvmrc`); on this machine it is installed with fnm: `fnm use 24` (or `fnm exec --using=24 <cmd>`).
 
 ```bash
 cp .env.example .env

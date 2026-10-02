@@ -29,8 +29,7 @@ Deferred during the build:
 - Resource preferences (book a specific doctor) — v0 picks the first free resource.
 - Weekly report and agency alerts over WhatsApp (v0: email).
 - Retry / discard actions for dead-lettered jobs in the Agency view (v0: list only).
-- Webhook endpoint SSRF guard (block private/link-local addresses; v0 requires https in production only) and a "resend" / delivery log per webhook.
-- Content-Security-Policy header for the dashboard.
 - pg-boss LISTEN/NOTIFY for live queues once its wake-up behaviour under load is understood (v0 polls fast).
 - Automated off-site backups (v0: documented cron + `pg_dump`).
 - Data principal self-service (patients request access/erasure themselves; v0 goes through the clinic).
+- Pin the resolved IP for webhook delivery (closes the DNS-rebinding window left by resolve-then-fetch) and a per-webhook delivery log / resend.

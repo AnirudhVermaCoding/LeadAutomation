@@ -49,7 +49,19 @@ export function buildApp(deps: AppDeps) {
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-content-type-options', 'nosniff');
     reply.header('referrer-policy', 'strict-origin-when-cross-origin');
-    if (!req.url.startsWith('/f/')) reply.header('x-frame-options', 'DENY');
+    if (req.url.startsWith('/f/')) {
+      // Hosted lead form: no scripts, inline styles only, embeddable anywhere, posts to itself.
+      reply.header(
+        'content-security-policy',
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors *",
+      );
+    } else {
+      reply.header('x-frame-options', 'DENY');
+      reply.header(
+        'content-security-policy',
+        "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+      );
+    }
   });
 
   app.get('/healthz', () => ({ ok: true }));

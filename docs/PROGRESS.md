@@ -83,3 +83,8 @@
 - Docs: README (architecture diagram), ONBOARDING, DEMO-SCRIPT, PRIVACY, OPERATIONS (deploy, backups, monitoring, rotation, webhooks, incidents).
 - Verified: lint, typecheck, 183 tests (10 new: headers, webhooks create/deliver/sign/4xx/delete, erasure, export, retention, breach register, key rotation). Live against the running app: `pnpm demo` 4/4 (happy path with 2 h reminder + review request; silent lead day 0→2→5→unresponsive; no-show recovery; weekly report leads 3 / replied 1 / booked 2 / shows 1 / no-shows 1 / ₹4,000); `pnpm loadtest` 100 leads in 20 s → first reply p50 0.27 s, p95 0.50 s (was p95 172 s before the worker change); `pnpm e2e` 2/2.
 - Not verified: Docker images and the Caddy overlay (Docker Desktop is broken on the dev machine), real Meta / Anthropic / Resend / Google credentials, real-model evals (`RUN_LLM_EVALS=1`).
+
+## Post-M8 hardening
+
+- Node 24.21 LTS installed per-user via fnm (no admin needed); the full suite, `pnpm demo` 4/4, `pnpm loadtest` (p95 0.50 s) and `pnpm e2e` 2/2 pass with the server running on Node 24, the Docker image's runtime.
+- Webhook SSRF guard (production) and Content-Security-Policy headers; verified the dashboard and hosted form render with no CSP violations. 185 tests.
