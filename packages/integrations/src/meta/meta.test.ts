@@ -77,6 +77,43 @@ describe('webhook parsing', () => {
     });
   });
 
+  test('media: photo caption becomes the text; voice notes and stickers keep their type', () => {
+    const events = parseMetaWebhook(
+      envelope({
+        metadata,
+        contacts,
+        messages: [
+          {
+            from: '919876543210',
+            id: 'wamid.P',
+            timestamp: '1750275992',
+            type: 'image',
+            image: { id: 'media1', mime_type: 'image/jpeg', caption: 'is this decay?' },
+          },
+          {
+            from: '919876543210',
+            id: 'wamid.V',
+            timestamp: '1750275993',
+            type: 'audio',
+            audio: { id: 'media2', voice: true },
+          },
+          {
+            from: '919876543210',
+            id: 'wamid.S',
+            timestamp: '1750275994',
+            type: 'sticker',
+            sticker: { id: 'm3' },
+          },
+        ],
+      }),
+    );
+    expect(events.map((e) => (e.type === 'message' ? [e.mediaType, e.text] : null))).toEqual([
+      ['image', 'is this decay?'],
+      ['audio', '[audio]'],
+      ['sticker', '[sticker]'],
+    ]);
+  });
+
   test('template quick-reply and interactive button replies carry their payload', () => {
     const events = parseMetaWebhook(
       envelope({

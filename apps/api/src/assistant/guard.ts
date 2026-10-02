@@ -43,18 +43,27 @@ export function normalizeInbound(text: string): string {
 export function mediaResponse(
   type: MediaType,
   lang: string | null,
+  /** Clinics: "the doctor will look at it"; others: "the team will take a look". */
+  clinic = true,
 ): { reply: string | null; alertStaff: boolean } {
   switch (type) {
     case 'image':
     case 'video':
     case 'document':
       return {
-        reply: pick(lang, {
-          en: 'Thanks for sharing that — our doctor will look at it properly at your visit. Would you like me to find you a time to come in?',
-          hi: 'भेजने के लिए धन्यवाद — डॉक्टर इसे आपकी विज़िट पर ठीक से देखेंगे। क्या मैं आपके लिए अपॉइंटमेंट का समय ढूंढूं?',
-          hinglish:
-            'Bhejne ke liye thanks — doctor ise aapki visit par achhe se dekhenge. Kya main aapke liye appointment ka time dhoondh doon?',
-        }),
+        reply: !clinic
+          ? pick(lang, {
+              en: 'Thanks for sending that — I have passed it to the team and they will take a look. Is there anything I can help you with meanwhile?',
+              hi: 'भेजने के लिए धन्यवाद — मैंने इसे टीम को भेज दिया है, वे इसे देखेंगे। तब तक क्या मैं आपकी कोई मदद कर सकती हूँ?',
+              hinglish:
+                'Bhejne ke liye thanks — maine team ko forward kar diya hai, woh dekh lenge. Tab tak main aapki kya madad kar sakti hoon?',
+            })
+          : pick(lang, {
+              en: 'Thanks for sharing that — our doctor will look at it properly at your visit. Would you like me to find you a time to come in?',
+              hi: 'भेजने के लिए धन्यवाद — डॉक्टर इसे आपकी विज़िट पर ठीक से देखेंगे। क्या मैं आपके लिए अपॉइंटमेंट का समय ढूंढूं?',
+              hinglish:
+                'Bhejne ke liye thanks — doctor ise aapki visit par achhe se dekhenge. Kya main aapke liye appointment ka time dhoondh doon?',
+            }),
         alertStaff: true,
       };
     case 'audio':
@@ -152,15 +161,15 @@ export function notALeadReply(category: NotALead, businessName: string, lang: st
       });
     case 'vendor':
       return pick(lang, {
-        en: `Thanks for reaching out. This number is for patient enquiries; for business proposals please email ${businessName} directly.`,
-        hi: `संपर्क करने के लिए धन्यवाद। यह नंबर मरीज़ों की पूछताछ के लिए है; व्यावसायिक प्रस्ताव कृपया ${businessName} को ईमेल करें।`,
-        hinglish: `Contact karne ke liye thanks. Yeh number patients ki enquiries ke liye hai; business proposals ke liye please ${businessName} ko email karein.`,
+        en: `Thanks for reaching out. This number is for customer enquiries; for business proposals please email ${businessName} directly.`,
+        hi: `संपर्क करने के लिए धन्यवाद। यह नंबर ग्राहकों की पूछताछ के लिए है; व्यावसायिक प्रस्ताव कृपया ${businessName} को ईमेल करें।`,
+        hinglish: `Contact karne ke liye thanks. Yeh number customers ki enquiries ke liye hai; business proposals ke liye please ${businessName} ko email karein.`,
       });
     case 'job_seeker':
       return pick(lang, {
-        en: `Thanks for your interest in working with ${businessName}! This number is for patient enquiries, so please email your CV to the clinic directly.`,
-        hi: `${businessName} में काम करने में रुचि के लिए धन्यवाद! यह नंबर मरीज़ों के लिए है, कृपया अपना CV क्लिनिक को सीधे ईमेल करें।`,
-        hinglish: `${businessName} ke saath kaam karne mein interest ke liye thanks! Yeh number patients ke liye hai, please apna CV clinic ko seedha email karein.`,
+        en: `Thanks for your interest in working with ${businessName}! This number is for customer enquiries, so please email your CV to the office directly.`,
+        hi: `${businessName} में काम करने में रुचि के लिए धन्यवाद! यह नंबर ग्राहकों के लिए है, कृपया अपना CV ऑफ़िस को सीधे ईमेल करें।`,
+        hinglish: `${businessName} ke saath kaam karne mein interest ke liye thanks! Yeh number customers ke liye hai, please apna CV office ko seedha email karein.`,
       });
     case 'spam':
     case 'auto_reply':

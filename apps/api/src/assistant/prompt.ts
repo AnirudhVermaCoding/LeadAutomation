@@ -223,10 +223,12 @@ const DAY_NAMES: Record<string, string> = {
 export function weeklyHours(config: TenantConfig): string {
   const hours = config.locale.business_hours;
   if (!hours.length) return 'not set';
-  return (
-    hours.map((h) => `${h.days.map((d) => DAY_NAMES[d] ?? d).join(', ')} ${h.open}–${h.close}`).join('; ') +
-    '; closed on other days'
-  );
+  const covered = new Set(hours.flatMap((h) => h.days));
+  if (hours.length === 1 && covered.size === 7) return `open every day ${hours[0]!.open}–${hours[0]!.close}`;
+  const list = hours
+    .map((h) => `${h.days.map((d) => DAY_NAMES[d] ?? d).join(', ')} ${h.open}–${h.close}`)
+    .join('; ');
+  return covered.size === 7 ? list : `${list}; closed on other days`;
 }
 
 /** "Open now (until 19:00)" / "Closed now; opens Mon 10:00", from the configured business hours. */

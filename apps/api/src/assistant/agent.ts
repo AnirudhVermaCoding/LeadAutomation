@@ -231,7 +231,7 @@ export async function runAssistantTurn(
   const textless = unanswered.every((m) => mediaOf(m) && m.body.startsWith('['));
   if (textless) {
     const media = mediaOf(lastInbound)!;
-    const r = mediaResponse(media, lead.language);
+    const r = mediaResponse(media, lead.language, config.qualification.safety.no_medical_advice);
     if (r.alertStaff)
       await withTenant(deps.db, tenantId, (tx) =>
         alertStaff(tx, deps, tenantId, leadId, media === 'audio' ? 'sent a voice note' : `sent a ${media}`),

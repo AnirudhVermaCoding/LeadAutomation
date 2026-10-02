@@ -30,6 +30,42 @@ const SYNONYMS: Record<string, string[]> = {
   morning: ['morning', 'subah'],
   afternoon: ['afternoon', 'dopahar'],
   evening: ['evening', 'shaam'],
+  // Real estate
+  under_40l: ['under 40', 'below 40', '30 lakh', '35 lakh', '25 lakh', '30l', '35l'],
+  '40l_75l': [
+    '40 lakh',
+    '45 lakh',
+    '50 lakh',
+    '55 lakh',
+    '60 lakh',
+    '65 lakh',
+    '70 lakh',
+    '50l',
+    '60l',
+    '70l',
+  ],
+  '75l_1_5cr': [
+    '75 lakh',
+    '80 lakh',
+    '90 lakh',
+    '1 crore',
+    '1 cr',
+    'one crore',
+    '1.2 cr',
+    '1.25 cr',
+    '1.5 cr',
+    '1 karod',
+    'ek crore',
+  ],
+  above_1_5cr: ['2 crore', '2 cr', '3 crore', 'above 1.5', 'more than 1.5', '2 karod'],
+  '1bhk': ['1bhk', '1 bhk', 'one bhk'],
+  '2bhk': ['2bhk', '2 bhk', 'two bhk'],
+  '3bhk': ['3bhk', '3 bhk', 'three bhk'],
+  '4bhk_plus': ['4bhk', '4 bhk', '5bhk', 'villa', 'penthouse'],
+  within_3_months: ['3 months', 'three months', 'next month', 'soon', 'jaldi'],
+  within_6_months: ['6 months', 'six months', 'this year'],
+  self_use: ['self', 'own use', 'to live', 'family', 'rehne', 'khud'],
+  investment: ['invest', 'investment', 'rental', 'returns'],
   yes: ['yes', 'haan', 'han', 'yeah', 'yep', 'first time', 'pehli baar'],
   no: ['no', 'nahi', 'nope', 'been before', 'pehle aaya'],
 };
@@ -68,13 +104,16 @@ function mapAnswer(q: TenantConfig['qualification']['questions'][number], text: 
 /** How a receptionist would ask, for the common preset questions; a gentle generic fallback otherwise. */
 const PHRASES: Record<string, string> = {
   urgency: 'How soon would you like to come in — today, sometime this week, or later on?',
-  timeline: 'When are you hoping to move — in the next few months, or still exploring?',
+  timeline: 'When are you planning to buy — right away, in the next few months, or still exploring?',
   treatment_interest: 'What would you like help with?',
   concern: 'What would you like help with?',
   first_visit: 'Will this be your first visit with us?',
   preferred_time: 'Do mornings, afternoons or evenings suit you better?',
   budget: 'Roughly what budget do you have in mind?',
-  location: 'Which area are you looking in?',
+  budget_range: 'Roughly what budget do you have in mind?',
+  purpose: 'Is this for your own use or as an investment?',
+  loan_needed: 'Will you need a home loan? We can help with that too.',
+  location: 'Which areas are you looking at?',
   bhk: 'How many bedrooms are you looking for?',
 };
 function ask(config: TenantConfig, key: string) {
@@ -245,7 +284,10 @@ export function createFakeLlm(): LlmProvider {
         const found = results.filter((r) => !r.startsWith('No information'));
         const info = names.includes('lookup_knowledge')
           ? found.length
-            ? `${found.join(' ')} `
+            ? `${found
+                .flatMap((r) => r.split(/\r?\n/))
+                .map((l) => l.replace(/^[^:]{1,60}: /, '')) // drop the entry titles
+                .join(' ')} `
             : "I'll check that with the team and get back to you. "
           : '';
         const state = results

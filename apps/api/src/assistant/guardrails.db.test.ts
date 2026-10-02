@@ -131,7 +131,7 @@ describe('not a real enquiry', () => {
     expect(await t.drainAssistant()).toMatchObject([{ status: 'replied', reason: 'not a lead (vendor)' }]);
     const lead = await leadOf(from);
     expect(lead).toMatchObject({ notALead: 'vendor', state: 'disqualified' });
-    expect(await outbound(lead.id)).toEqual([expect.stringMatching(/patient enquiries/)]);
+    expect(await outbound(lead.id)).toEqual([expect.stringMatching(/customer enquiries/)]);
     await say(from, { text: 'sir please reply, very good offer for you' });
     expect(await t.drainAssistant()).toMatchObject([{ status: 'skipped' }]);
     expect(await outbound(lead.id)).toHaveLength(1);

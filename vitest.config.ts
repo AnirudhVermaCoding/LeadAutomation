@@ -9,6 +9,8 @@ export default defineConfig({
           name: 'api',
           include: ['apps/api/src/**/*.test.ts'],
           exclude: ['**/*.db.test.ts', '**/node_modules/**'],
+          // In-memory, but they share the CPU with database test files starting Postgres in parallel.
+          testTimeout: 30_000,
         },
       },
       {
