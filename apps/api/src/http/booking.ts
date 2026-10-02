@@ -12,6 +12,7 @@ import {
   updateAppointment,
   appointmentsAffectedBy,
   handleBlockedAppointments,
+  notifyRunningLate,
 } from '../booking.ts';
 import { withTenant } from '../db/client.ts';
 import { appointments, availabilityRules, blockedTimes, leads } from '../db/schema.ts';
@@ -128,6 +129,25 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
       if (!appt) throw new BookingError('no_appointment', 'Appointment not found');
       return rescheduleLeadAppointment(ctx, tenantOf(req), { leadId: appt.leadId, ...body, source: 'staff' });
     });
+  });
+
+  // Today -> Running late: today's remaining booked people get the running_late template (once per delay).
+  app.post('/v1/appointments/running-late', { preHandler: staff }, async (req) => {
+    const body = z
+      .strictObject({
+        minutes: z.union([z.literal(15), z.literal(30), z.literal(45), z.literal(60)]),
+        resource: z.string().min(1).optional(),
+      })
+      .parse(req.body);
+    const sent = await notifyRunningLate(ctx, tenantOf(req), body);
+    await withTenant(ctx.db, tenantOf(req), (tx) =>
+      audit(tx, ctx.clock, actor(req.principal), {
+        action: 'appointments.running_late',
+        entityType: 'appointment',
+        details: { minutes: body.minutes, resource: body.resource ?? null, notified: sent.length },
+      }),
+    );
+    return { notified: sent.filter((s) => s.status === 'sent').length, results: sent };
   });
 
   // One-tap actions from the dashboard's Today view.

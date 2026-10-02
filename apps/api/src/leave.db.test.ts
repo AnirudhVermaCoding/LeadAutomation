@@ -173,3 +173,32 @@ describe('two doctors', () => {
     expect(closure.affected.map((x) => x.id).sort()).toEqual([f1.appt.id, f2.appt.id].sort());
   });
 });
+
+describe('running late', () => {
+  test("today's remaining booked people get one notice per delay; a bigger delay sends again", async () => {
+    t.clock.set('2026-10-12T04:30:00Z'); // Mon 10:00 IST
+    const morning = await booked('2026-10-12', '11:00');
+    const evening = await booked('2026-10-12', '17:00');
+    const tomorrow = await booked('2026-10-13', '11:00');
+    t.clock.set('2026-10-12T07:30:00Z'); // 13:00: the 11:00 visit is over
+    const r1 = (await call('POST', '/v1/appointments/running-late', { minutes: 30 })).json() as {
+      notified: number;
+    };
+    expect(r1.notified).toBe(1);
+    const last = async (id: string) => (await out(id)).at(-1);
+    expect(await last(evening.leadId)).toMatchObject({ templateKey: 'running_late' });
+    expect((await last(evening.leadId))?.body).toMatch(
+      /about 30 minutes late today, so your 5:00 pm appointment/,
+    );
+    expect((await last(morning.leadId))?.templateKey).not.toBe('running_late');
+    expect((await last(tomorrow.leadId))?.templateKey).not.toBe('running_late');
+    expect(
+      ((await call('POST', '/v1/appointments/running-late', { minutes: 30 })).json() as { notified: number })
+        .notified,
+    ).toBe(0);
+    expect(
+      ((await call('POST', '/v1/appointments/running-late', { minutes: 45 })).json() as { notified: number })
+        .notified,
+    ).toBe(1);
+  });
+});

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, CircleSlash, UserCheck, X } from 'lucide-react';
+import { Check, CircleSlash, Clock, UserCheck, X } from 'lucide-react';
+import { useState } from 'react';
 import { api, type Appointment, type Role, type TenantConfig } from '../api.ts';
 import { navigate } from '../router.ts';
-import { Badge, Button, Card, cx, Empty, ErrorState, fmt, Loading, PageHeader } from '../ui.tsx';
+import { Badge, Button, Card, cx, Empty, ErrorState, fmt, Loading, PageHeader, Select } from '../ui.tsx';
 
 const STATUS_TONE: Record<Appointment['status'], string> = {
   pending: 'bg-amber-50 text-amber-800 ring-amber-200',
@@ -33,6 +34,11 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
     queryFn: () => api<{ blocked: { affected: unknown[] }[] }>('/v1/availability'),
   });
   const untold = (blocked.data?.blocked ?? []).reduce((n, b) => n + b.affected.length, 0);
+  const [lateBy, setLateBy] = useState(15);
+  const late = useMutation({
+    mutationFn: () =>
+      api<{ notified: number }>('/v1/appointments/running-late', { body: { minutes: lateBy } }),
+  });
   const act = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'confirm' | 'complete' | 'no-show' | 'cancel' }) =>
       api(`/v1/appointments/${id}/${action}`, { method: 'POST' }),
@@ -61,7 +67,41 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
             ? `${visible.length} appointments${pending ? ` · ${pending} waiting for your confirmation` : ''}${toMark ? ` · ${toMark} to mark Completed / No-show` : ''}`
             : undefined
         }
+        actions={
+          <span className="flex items-center gap-1.5">
+            <Select
+              aria-label="How late"
+              value={lateBy}
+              onChange={(e) => setLateBy(Number(e.target.value))}
+              className="w-28"
+            >
+              {[15, 30, 45, 60].map((m) => (
+                <option key={m} value={m}>
+                  {m} min
+                </option>
+              ))}
+            </Select>
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={late.isPending}
+              onClick={() =>
+                confirm(
+                  `Message everyone still booked today that you are running about ${lateBy} minutes late?`,
+                ) && late.mutate()
+              }
+            >
+              <Clock className="size-3.5" aria-hidden /> Running late
+            </Button>
+          </span>
+        }
       />
+      {late.data && (
+        <p className="mb-4 text-sm text-slate-600">
+          Told {late.data.notified} {late.data.notified === 1 ? 'person' : 'people'} booked later today.
+        </p>
+      )}
+      {late.error && <ErrorState error={late.error} />}
       {appts.isPending && <Loading />}
       {appts.error && <ErrorState error={appts.error} retry={() => void appts.refetch()} />}
       {untold > 0 && (

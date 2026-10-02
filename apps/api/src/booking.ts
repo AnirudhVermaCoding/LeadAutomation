@@ -11,7 +11,8 @@ import {
   type PartOfDay,
   type Slot,
 } from '@instantlead/core';
-import { and, asc, desc, eq, gt, inArray, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, lt } from 'drizzle-orm';
+import { sendToLead, type MessagingDeps } from './outbound.ts';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type TenantTx, type Tx } from './db/client.ts';
 import {
@@ -441,4 +442,65 @@ export async function lastDisplacedAppointment(tx: Tx, leadId: string) {
     .orderBy(desc(appointments.updatedAt))
     .limit(1);
   return row ?? null;
+}
+
+// ---- Running late: tell today's remaining booked people ----
+
+/**
+ * Staff tapped "Running late": every active appointment later today (optionally one doctor /
+ * agent) gets the running_late template once per delay value. A bigger delay later in the day
+ * sends again; the same or a smaller one doesn't.
+ */
+export async function notifyRunningLate(
+  deps: MessagingDeps,
+  tenantId: string,
+  input: { minutes: number; resource?: string | undefined },
+) {
+  const now = deps.clock.now();
+  const loaded = await withTenant(deps.db, tenantId, async (tx) => {
+    const config = (await getActiveConfig(tx))?.config;
+    if (!config) return null;
+    const tz = config.locale.timezone;
+    const today = localParts(now, tz).date;
+    const endOfDay = zonedTimeToUtc(addDays(today, 1), '00:00', tz);
+    const rows = await tx
+      .select({ appt: appointments, lead: leads })
+      .from(appointments)
+      .innerJoin(leads, eq(leads.id, appointments.leadId))
+      .where(
+        and(
+          inArray(appointments.status, ['scheduled', 'confirmed']),
+          gte(appointments.startsAt, new Date(now.getTime() - 15 * MINUTE)), // includes anyone just arriving
+          lt(appointments.startsAt, endOfDay),
+          input.resource ? eq(appointments.resource, input.resource) : undefined,
+        ),
+      )
+      .orderBy(asc(appointments.startsAt));
+    return { config, rows: rows.filter((r) => (r.appt.lateNoticeMinutes ?? 0) < input.minutes) };
+  });
+  if (!loaded) return [];
+  const { config, rows } = loaded;
+  const sent: { appointmentId: string; status: string }[] = [];
+  for (const { appt, lead } of rows) {
+    const time = formatSlot(appt.startsAt, config.locale.timezone).split(', ').at(-1) ?? '';
+    const r = await sendToLead(deps, tenantId, {
+      leadId: lead.id,
+      idempotencyKey: `late:${appt.id}:${input.minutes}`,
+      template: {
+        key: 'running_late',
+        values: {
+          ...(lead.name?.trim() ? { first_name: lead.name.trim().split(/\s+/)[0] ?? '' } : {}),
+          business_name: config.brand.business_name,
+          delay_minutes: String(input.minutes),
+          'appointment.time': time,
+        },
+      },
+    });
+    if (r.status === 'sent')
+      await withTenant(deps.db, tenantId, (tx) =>
+        tx.update(appointments).set({ lateNoticeMinutes: input.minutes }).where(eq(appointments.id, appt.id)),
+      );
+    sent.push({ appointmentId: appt.id, status: r.status });
+  }
+  return sent;
 }
