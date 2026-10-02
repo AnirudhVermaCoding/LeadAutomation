@@ -47,6 +47,9 @@ export type AppointmentChange =
   /** Cancelled by the business (doctor / agent unavailable, closure): the person is offered new times. */
   | 'displaced';
 
+/** What an `appointment-notify` job can do: a change plus `calendar_sync` (only bring the calendar up to date). */
+export type AppointmentNotifyKind = AppointmentChange | 'calendar_sync';
+
 /** Answer key holding the doctor / agent a lead asked for (set by book_slot with a resource). */
 export const PREFERRED_RESOURCE = 'preferred_resource';
 
@@ -290,11 +293,18 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
         })
         .onConflictDoUpdate({ target: [answers.leadId, answers.key], set: { value: input.resource } });
 
-    if (input.replaceAppointmentId)
+    if (input.replaceAppointmentId) {
       await tx
         .update(appointments)
         .set({ status: 'cancelled' })
         .where(eq(appointments.id, input.replaceAppointmentId));
+      // The old slot's calendar event must go too (the new appointment gets its own event).
+      await deps.enqueue(tx, QUEUES.appointmentNotify, {
+        tenantId,
+        appointmentId: input.replaceAppointmentId,
+        kind: 'calendar_sync',
+      });
+    }
     const status: AppointmentStatus =
       config.booking.mode === 'staff_confirm' && input.source === 'assistant' ? 'pending' : 'scheduled';
     const [appt] = await tx
@@ -461,6 +471,11 @@ export async function handleBlockedAppointments(deps: BookingDeps, tenantId: str
         appointmentId: a.id,
         from: a.resource,
         to: other,
+      });
+      await deps.enqueue(tx, QUEUES.appointmentNotify, {
+        tenantId,
+        appointmentId: a.id,
+        kind: 'calendar_sync',
       });
       return other;
     });

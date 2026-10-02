@@ -160,6 +160,10 @@ describe('booking lifecycle', () => {
     expect(r1.statusCode).toBe(201);
     const id1 = (r1.json() as { appointment: { id: string } }).appointment.id;
     await t.drainJobs();
+    const oldEventId = (
+      await withTenant(t.ctx.db, A, (tx) => tx.select().from(appointments).where(eq(appointments.id, id1)))
+    )[0]!.googleEventId!;
+    expect(calendar.events.has(oldEventId)).toBe(true);
 
     const moved = await api('POST', `/v1/appointments/${id1}/reschedule`, {
       date: second!.date,
@@ -169,6 +173,7 @@ describe('booking lifecycle', () => {
     const id2 = (moved.json() as { appointment: { id: string } }).appointment.id;
     expect((await slotsFor('Consultation', '2026-10-10')).some((s) => s.time === first!.time)).toBe(true);
     await t.drainJobs();
+    expect(calendar.events.has(oldEventId)).toBe(false); // the old slot's event is removed, not left behind
 
     const eventId = (
       await withTenant(t.ctx.db, A, (tx) => tx.select().from(appointments).where(eq(appointments.id, id2)))

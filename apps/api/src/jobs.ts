@@ -1,4 +1,4 @@
-import type { AppointmentChange } from './booking.ts';
+import type { AppointmentNotifyKind } from './booking.ts';
 import { sql } from 'drizzle-orm';
 import { fromDrizzle, PgBoss, type SendOptions } from 'pg-boss';
 import type { TenantTx } from './db/client.ts';
@@ -15,6 +15,7 @@ export const QUEUES = {
   maintenanceCron: 'maintenance-cron',
   webhookDeliver: 'webhook-deliver',
   staffAlert: 'staff-alert',
+  calendarRemove: 'calendar-remove',
   deadLetter: 'dead-letter',
 } as const;
 
@@ -32,8 +33,10 @@ export interface JobData {
   [QUEUES.appointmentNotify]: {
     tenantId: string;
     appointmentId: string;
-    kind: AppointmentChange;
+    kind: AppointmentNotifyKind;
   };
+  /** Delete our events from the clinic's Google Calendar (erasure, retention). `calendarId` null = primary. */
+  [QUEUES.calendarRemove]: { tenantId: string; events: { eventId: string; calendarId: string | null }[] };
 }
 export type QueueName = keyof JobData;
 
@@ -64,6 +67,7 @@ export async function ensureQueues(boss: PgBoss) {
     QUEUES.sequenceStep,
     QUEUES.webhookDeliver,
     QUEUES.staffAlert,
+    QUEUES.calendarRemove,
   ])
     await boss.createQueue(name, RETRY);
   // stately + singletonKey(leadId): at most one queued and one running turn per lead, so a burst

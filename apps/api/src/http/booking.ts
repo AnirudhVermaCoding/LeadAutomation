@@ -297,7 +297,8 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
     if (!oauth || !tenantId)
       return reply.code(400).type('text/plain').send('This link has expired. Start again from Settings.');
     if (q.error || !q.code) return reply.redirect(`${ctx.env.APP_URL}/settings?google=denied`);
-    const tokens = await exchangeGoogleCode(oauth, q.code);
+    const tokens = await exchangeGoogleCode(oauth, q.code).catch(() => null);
+    if (!tokens) return reply.redirect(`${ctx.env.APP_URL}/settings?google=error`);
     if (!tokens.refresh_token) return reply.redirect(`${ctx.env.APP_URL}/settings?google=no_refresh_token`);
     const refreshToken = tokens.refresh_token;
     await withTenant(ctx.db, tenantId, async (tx) => {

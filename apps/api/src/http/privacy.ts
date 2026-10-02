@@ -24,7 +24,7 @@ export function registerPrivacyRoutes(app: FastifyInstance, ctx: AppContext) {
   app.delete('/v1/leads/:id', { preHandler: admins }, async (req, reply) => {
     const id = idParam(req);
     const erased = await withTenant(ctx.db, tenantOf(req), (tx) =>
-      eraseLead(tx, ctx.clock, actor(req.principal), id),
+      eraseLead(tx, ctx, tenantOf(req), actor(req.principal), id),
     );
     return erased ? { erased: true } : reply.code(404).send({ error: 'not_found' });
   });

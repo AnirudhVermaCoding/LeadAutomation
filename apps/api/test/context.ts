@@ -9,7 +9,7 @@ import { registerHttp } from '../src/http/index.ts';
 import { QUEUES, type JobData } from '../src/jobs.ts';
 import { createAppContext } from '../src/system/context.ts';
 import { runAssistantTurn } from '../src/assistant/agent.ts';
-import { notifyAppointmentChange, notifyStaffAlert } from '../src/notify.ts';
+import { notifyAppointmentChange, notifyStaffAlert, removeCalendarEvents } from '../src/notify.ts';
 import { runStep, sweepDueSteps } from '../src/sequences.ts';
 import { importMetaLead, sendFirstReply } from '../src/workers.ts';
 import { deliverWebhook } from '../src/webhooks-out.ts';
@@ -102,6 +102,7 @@ export async function createTestContext(
         [QUEUES.sequenceStep]: (d: JobData['sequence-step']) => runStep(ctx, d),
         [QUEUES.webhookDeliver]: (d: JobData['webhook-deliver']) => deliverWebhook(ctx, d),
         [QUEUES.staffAlert]: (d: JobData['staff-alert']) => notifyStaffAlert(ctx, d),
+        [QUEUES.calendarRemove]: (d: JobData['calendar-remove']) => removeCalendarEvents(ctx, d),
       } as Record<string, (d: never) => Promise<unknown>>;
       for (const [queue, handler] of Object.entries(handlers)) {
         for (;;) {

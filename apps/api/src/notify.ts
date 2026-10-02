@@ -51,7 +51,9 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
         : kind === 'displaced'
           ? 'appointment_change'
           : null;
-  if (leadTemplate)
+  if (kind === 'calendar_sync') {
+    // Only the calendar needs to catch up (old slot after a reschedule, doctor reassigned).
+  } else if (leadTemplate)
     results.lead = await sendToLead(deps, tenantId, {
       leadId: lead.id,
       idempotencyKey: `appt:${appt.id}:${kind}`,
@@ -88,31 +90,54 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
     }
   }
 
-  // 3. Calendar (one-way).
-  if (calendar) {
-    const active = (ACTIVE_APPOINTMENT_STATUSES as readonly string[]).includes(appt.status);
-    if (active) {
-      const { id } = await calendar.upsert(
-        {
-          summary: `${appt.service} — ${lead.name ?? lead.phoneE164}`,
-          description: `Booked via InstantLead (${appt.status}). Phone: ${lead.phoneE164}`,
-          start: appt.startsAt,
-          end: appt.endsAt,
-          timeZone: tz,
-        },
-        appt.googleEventId,
-      );
-      if (id !== appt.googleEventId)
-        await withTenant(deps.db, tenantId, (tx) =>
-          tx.update(appointments).set({ googleEventId: id }).where(eq(appointments.id, appt.id)),
-        );
-      results.calendar = id;
-    } else if (appt.googleEventId) {
-      await calendar.remove(appt.googleEventId);
-      results.calendar = 'removed';
-    }
-  }
+  // 3. Calendar: the appointment is mirrored while it is upcoming or was held; cancelled ones are removed.
+  if (calendar) results.calendar = await syncCalendarEvent(deps, tenantId, calendar, { appt, lead, tz });
   return results;
+}
+
+/** Visits that happened (or were missed) stay on the calendar, marked; cancelled ones go. */
+const CALENDAR_PREFIX: Record<string, string> = { completed: 'Done — ', no_show: 'No-show — ' };
+
+async function syncCalendarEvent(
+  deps: NotifyDeps,
+  tenantId: string,
+  calendar: CalendarProvider,
+  { appt, lead, tz }: { appt: typeof appointments.$inferSelect; lead: typeof leads.$inferSelect; tz: string },
+) {
+  const keep =
+    (ACTIVE_APPOINTMENT_STATUSES as readonly string[]).includes(appt.status) || appt.status in CALENDAR_PREFIX;
+  if (!keep) {
+    if (!appt.googleEventId) return 'none';
+    await calendar.remove(appt.googleEventId);
+    await withTenant(deps.db, tenantId, (tx) =>
+      tx.update(appointments).set({ googleEventId: null }).where(eq(appointments.id, appt.id)),
+    );
+    return 'removed';
+  }
+  const { id } = await calendar.upsert(
+    {
+      summary: `${CALENDAR_PREFIX[appt.status] ?? ''}${appt.service} — ${lead.name ?? lead.phoneE164}`,
+      description: `Booked via InstantLead (${appt.status}). Phone: ${lead.phoneE164}`,
+      start: appt.startsAt,
+      end: appt.endsAt,
+      timeZone: tz,
+      appointmentId: appt.id,
+    },
+    appt.googleEventId,
+  );
+  if (id !== appt.googleEventId)
+    await withTenant(deps.db, tenantId, (tx) =>
+      tx.update(appointments).set({ googleEventId: id }).where(eq(appointments.id, appt.id)),
+    );
+  return id;
+}
+
+/** Erasure / retention: take the person's events out of the clinic's Google Calendar. */
+export async function removeCalendarEvents(deps: NotifyDeps, job: JobData['calendar-remove']) {
+  const calendar = await withTenant(deps.db, job.tenantId, (tx) => deps.calendarFor(tx, job.tenantId));
+  if (!calendar) return { skipped: 'no calendar' };
+  for (const e of job.events) await calendar.remove(e.eventId, e.calendarId ?? undefined);
+  return { removed: job.events.length };
 }
 
 /**
