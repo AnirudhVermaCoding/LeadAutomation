@@ -33,3 +33,9 @@ Deferred during the build:
 - Automated off-site backups (v0: documented cron + `pg_dump`).
 - Data principal self-service (patients request access/erasure themselves; v0 goes through the clinic).
 - Pin the resolved IP for webhook delivery (closes the DNS-rebinding window left by resolve-then-fetch) and a per-webhook delivery log / resend.
+- Voice-note transcription (needs a speech-to-text provider; v0 asks the customer to type, by choice).
+- Photo understanding (vision models; v0 never sends patient photos to an AI, by choice).
+- Streaming LLM responses (not useful for WhatsApp-length replies today).
+- Native Gemini / xAI SDK adapters if the OpenAI-compatible endpoints fall short in contract tests.
+- Emergency reply in the lead's language (v0: the configured text, usually English).
+- Per-tenant `ai.*` settings in the Settings UI (v0: edit via config JSON import/export).

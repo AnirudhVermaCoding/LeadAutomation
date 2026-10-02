@@ -58,17 +58,45 @@ Leave `privacy` out to keep data until erased manually. Every run is audited.
 
 ## Processors and where data goes
 
-| Service                             | What it receives                                        | Notes                                                                                                           |
-| ----------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Meta (WhatsApp Cloud API, Lead Ads) | Phone, message text                                     | The channel itself                                                                                              |
-| Anthropic (Claude)                  | Conversation text, clinic knowledge                     | Only when `ANTHROPIC_API_KEY` is set; the API does not train on it by default. Messages processed outside India |
-| Resend                              | Staff alerts, weekly reports (counts, no patient lists) | Only with `RESEND_API_KEY`                                                                                      |
-| Google Calendar                     | Appointment time, service, patient name and phone       | Only if the clinic connects it                                                                                  |
-| Client webhooks                     | Lead name, phone, email, status                         | Only to URLs the clinic adds                                                                                    |
+| Service                             | What it receives                                                       | Notes                                                    |
+| ----------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------- |
+| Meta (WhatsApp Cloud API, Lead Ads) | Phone, message text                                                    | The channel itself                                       |
+| AI provider(s), see below           | Conversation text (identifiers redacted), first name, clinic knowledge | Only providers the clinic allows; default Anthropic only |
+| Resend                              | Staff alerts, weekly reports (counts, no patient lists)                | Only with `RESEND_API_KEY`                               |
+| Google Calendar                     | Appointment time, service, patient name and phone                      | Only if the clinic connects it                           |
+| Client webhooks                     | Lead name, phone, email, status                                        | Only to URLs the clinic adds                             |
 
 Host the database and app in India (e.g. an AWS/GCP/DigitalOcean Mumbai or Bangalore region, see OPERATIONS).
 Cross-border transfer is allowed by the Act except to countries the government restricts. Check the list before
 adding a processor.
+
+## AI providers
+
+The assistant can run on Anthropic (Claude, the default), OpenAI, Google (Gemini) or xAI (Grok).
+
+- **Which providers a clinic's data may reach is the clinic's choice:** `ai.allowed_providers` in its config,
+  **default `['anthropic']`**. The router never sends a task to a provider outside that list, even when the
+  server has a key for it, and even as a fallback during an outage. Enforced in code and covered by tests.
+- **Disclosure:** the consent notice must name every provider in use. The presets say replies "may be written by an
+  AI assistant (processed by Anthropic)". Saving a config that allows another provider fails until the notice
+  names it. Clinics must be told before a non-default provider is enabled, and existing leads were told about
+  Anthropic only.
+- **Minimisation:** before any text goes to a provider, phone numbers, email addresses and Aadhaar/PAN-like numbers
+  in customer messages are replaced with `[phone]`, `[email]`, `[id number]`. Photos and voice notes are never
+  sent to an AI. The lead's first name stays (replies use it).
+- **No training on customer data:** each provider's terms, checked on 2026-10-02:
+
+  | Provider      | Trains on API data?                                                                                 | Retention                           | What to use                                                       |
+  | ------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------- |
+  | Anthropic     | No, by default (commercial API terms)                                                               | Limited, for abuse monitoring       | Standard API                                                      |
+  | OpenAI        | No, unless you opt in ("data sent to the OpenAI API is not used to train or improve OpenAI models") | Abuse-monitoring logs up to 30 days | Standard API; Zero Data Retention on request                      |
+  | Google Gemini | **Free tier: yes, content is used to improve Google's products. Paid tier: no.**                    | Per Google's terms                  | **Paid tier only**; never put a free-tier key in `GEMINI_API_KEY` |
+  | xAI           | No, without explicit permission (avoid "free credits for data sharing" offers)                      | 30 days for abuse auditing          | Standard API; Zero Data Retention available per team              |
+
+  Re-check these before enabling a provider for a clinic; terms change.
+
+- **Data location:** all four process data outside India. That is allowed under the DPDP Act unless the
+  government restricts the destination country; record the provider in the clinic's DPA.
 
 ## Breaches
 

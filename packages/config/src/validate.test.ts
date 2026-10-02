@@ -71,3 +71,22 @@ describe('readable errors', () => {
     ]);
   });
 });
+
+describe('AI providers', () => {
+  test('a non-default provider must be named in the consent notice', () => {
+    expect(
+      errorsFor(
+        (c) => void (c.ai = { allowed_providers: ['anthropic', 'openai'], monthly_cost_cap_usd: 50 }),
+      ),
+    ).toEqual([expect.stringMatching(/intake.consent_notice_text: mention OpenAI/)]);
+    expect(
+      errorsFor((c) => {
+        c.ai = { allowed_providers: ['anthropic', 'openai'], monthly_cost_cap_usd: 50 };
+        c.intake.consent_notice_text += ' AI replies may also be processed by OpenAI.';
+      }),
+    ).toEqual([]);
+    expect(errorsFor((c) => void (c.ai = { allowed_providers: [], monthly_cost_cap_usd: 50 }))).toEqual([
+      expect.stringMatching(/allow at least one AI provider/),
+    ]);
+  });
+});

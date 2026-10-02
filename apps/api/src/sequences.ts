@@ -313,12 +313,22 @@ export async function stopOnLeadEvent(tx: Tx, leadId: string, event: LeadEventTy
 }
 
 /** Claim due steps and queue one job each (the per-minute cron, and the demo's fast-forward). */
+/** claimDueSteps returns at most this many per call. */
+const SWEEP_BATCH = 200;
+
 export async function sweepDueSteps(ctx: {
   clock: Clock;
   system: { claimDueSteps(now: Date): Promise<{ stepId: string; tenantId: string }[]> };
   enqueue: Enqueue;
 }) {
-  const due = await ctx.system.claimDueSteps(ctx.clock.now());
-  for (const d of due) await ctx.enqueue(null, QUEUES.sequenceStep, d);
-  return due.length;
+  // Keep claiming while batches come back full (e.g. everything deferred past quiet hours at 09:00),
+  // bounded so one sweep can't run forever; anything left waits for the next minute.
+  let total = 0;
+  for (let round = 0; round < 25; round++) {
+    const due = await ctx.system.claimDueSteps(ctx.clock.now());
+    for (const d of due) await ctx.enqueue(null, QUEUES.sequenceStep, d);
+    total += due.length;
+    if (due.length < SWEEP_BATCH) break;
+  }
+  return total;
 }

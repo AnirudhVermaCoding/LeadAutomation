@@ -50,13 +50,30 @@ The client owns the WhatsApp Business Account (WABA); we get access to it.
   4. In each lead form, add the clinic's consent notice (Settings → Business) as the **custom disclaimer**, and include a phone number question.
 - **Click-to-WhatsApp ads** need nothing extra: the first message arrives on the connected number.
 
-## 4. Optional
+## 4. AI assistant (5 min)
+
+- **Provider:** every clinic starts on Anthropic (Claude) only. To allow another provider (OpenAI, Google Gemini,
+  xAI) for this clinic, first **tell the clinic and get their OK**, then add the provider's name to the consent
+  notice (Settings → Business) and to `ai.allowed_providers` (Settings → Import/Export JSON). The config won't
+  save until the notice names it. See [PRIVACY.md](PRIVACY.md#ai-providers) for what each provider receives.
+- **Budget:** `ai.monthly_cost_cap_usd` (default $50). The agency gets an alert email at 80%. At 100%, new
+  conversations are handed to staff until the next month or a higher cap. Agency → Usage shows % used.
+- **Services' "Good first step for"** (Settings → Booking): list the concerns each service is for, in patients'
+  words ("bleeding gums", "hair fall"). When someone describes a problem, the assistant suggests that service and
+  offers to book. It never diagnoses or suggests medicines.
+- **Emergency phrases** (Settings → Questions → safety): keep them specific ("face swelling", "bleeding a lot").
+  A bare "pain" or "bleeding" would send ordinary patients an ambulance message.
+- **Try it:** in Demo sandbox, describe a symptom, ask two questions in one message, ask "are you a bot?", send a
+  photo, and paste a vendor pitch. The last one should be tagged "Not a lead" in the Inbox. If the junk filter is
+  wrong, use **Mark as real lead**.
+
+## 5. Optional
 
 - **Google Calendar** (one-way: bookings appear in the clinic's calendar): Settings → Integrations → Connect Google Calendar. Needs `GOOGLE_CLIENT_ID/SECRET` on the server.
 - **Webhooks** to their CRM / Zapier / Make: Settings → Integrations → Webhooks (see [OPERATIONS.md](OPERATIONS.md#outbound-webhooks) for the signature format).
 - **Staff accounts:** create `client_staff` users (Inbox, Today, Sandbox; no settings or erasure).
 
-## 5. Hand-over (15 min)
+## 6. Hand-over (15 min)
 
 Show the front desk **Today** (Confirm / Completed / No-show — completion triggers the review request, no-show the recovery message) and **Inbox** (Take over pauses the AI for that patient; Hand back resumes it). Tell the owner when the first weekly report arrives.
 

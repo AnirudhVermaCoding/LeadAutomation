@@ -88,3 +88,12 @@
 
 - Node 24.21 LTS installed per-user via fnm (no admin needed); the full suite, `pnpm demo` 4/4, `pnpm loadtest` (p95 0.50 s) and `pnpm e2e` 2/2 pass with the server running on Node 24, the Docker image's runtime.
 - Webhook SSRF guard (production) and Content-Security-Policy headers; verified the dashboard and hosted form render with no CSP violations. 185 tests.
+
+## Production-grade conversations (post-M8)
+
+- **LLM layer**: provider-neutral types; Anthropic and OpenAI-compatible adapters (OpenAI, Gemini, xAI); model registry with capabilities and prices; per-task routing with failover; tenant `allowed_providers` (default Anthropic only); monthly AI cap with 80% alert; every run logs provider, model, task, prompt version, cost and fallback.
+- **Resilience and guardrails**: media replies (no AI), emoji and reaction handling, flood and bot-loop hand-over, junk screening (not a lead: one polite line or silence, kept out of reports, "Mark as real lead"), output guard with one repair, stale-turn drop, stuck detection, conversation memory, PII redaction, staff alerts on every hand-over, final-attempt holding reply (never silence).
+- **Human-like replies**: prompt v2 with examples; symptom → empathy → right service → booking offer; honest "virtual assistant"; weekly hours and open-now status; typing indicator; natural mock assistant; specific emergency phrases.
+- **Evals**: `pnpm evals` (41 conversations, hard checks + fixed-judge rubric, $8 cap) and gated live contract tests per provider.
+- Verified: lint, typecheck, 246 tests (+61: adapters and normalization, router failover / allowed providers / budget, 24 guard units, 14 guardrail DB tests, 7 conversation tests, config disclosure rule). Live on Node 24: `pnpm sim --persona all` 14/14 (new: symptom, bot question, vendor, auto-reply), `pnpm demo` 4/4, `pnpm e2e`. Eval dry run (mock model) 80% of hard checks: the gaps are the mock's own limits (no Hindi or Hinglish writing, no anger detection), and that run found 3 real issues, all fixed (opening hours missing from the prompt, toothache sent to 112, a tool note that could leak).
+- Not verified: any real model. No provider key is in `.env` yet, so `pnpm evals` and the live contract tests haven't run against Claude, OpenAI, Gemini or Grok.

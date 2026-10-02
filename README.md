@@ -8,6 +8,11 @@ report with numbers counted from the database. A real-estate preset (site visits
 
 Official WhatsApp Cloud API only. Everything runs in **mock mode with zero credentials**.
 
+The assistant is built to take anything a customer sends (symptoms in their own words, several questions at once,
+Hindi or Hinglish, photos, voice notes, spam, vendor pitches, other bots, prompt injection) and reply like a warm
+receptionist, behind deterministic guardrails. It runs on Claude by default, with optional OpenAI, Gemini or Grok
+per clinic, routed per task with automatic failover.
+
 ## Quick start (mock mode)
 
 Needs Node 24 LTS and pnpm 12.
@@ -28,6 +33,7 @@ pnpm demo        # the 4 acceptance scenarios against the running app
 pnpm loadtest    # 100 leads in 20 s; passes when p95 first reply < 60 s
 pnpm sim         # 10 scripted lead personas against the assistant
 pnpm e2e         # Playwright smoke test (desktop + mobile)
+pnpm evals       # assistant quality across AI providers with keys ($8 cap) -> docs/EVALS.md
 pnpm test        # 180+ unit/API/DB tests (embedded Postgres, no Docker needed)
 ```
 
@@ -45,7 +51,7 @@ flowchart LR
     Q --> W[Workers]
     W --> DB
     W -->|first reply, reminders,<br/>follow-ups| WA[WhatsApp Cloud API<br/>or fake channel]
-    W -->|assistant turns| LLM[Claude<br/>or rule-based fake]
+    W -->|assistant turns, routed per task<br/>with failover| LLM[Claude · OpenAI · Gemini · Grok<br/>or rule-based mock]
     W -->|reports, alerts| E[Resend email<br/>or fake]
     W -->|optional| G[Google Calendar]
     W -->|signed events| H[Client webhooks]

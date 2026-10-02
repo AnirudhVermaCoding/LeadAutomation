@@ -27,6 +27,7 @@ pnpm demo           # 4 acceptance scenarios against the running app (needs AGEN
 pnpm loadtest       # 100 leads / 20 s, pass if p95 first reply < 60 s
 pnpm e2e            # Playwright smoke against the running app (seeded)
 pnpm secrets:rotate # re-encrypt tenant secrets after setting SECRETS_KEY_PREVIOUS
+pnpm evals          # real-model eval suite (RUN_LLM_EVALS=1; $8 cap; EVAL_DRY_RUN=1 for the mock) -> docs/EVALS.md
 docker compose up -d --build   # db + app on :3000
 ```
 
@@ -54,6 +55,8 @@ docker compose up -d --build   # db + app on :3000
 - **Messaging:** every outbound message goes through `sendToLead` (apps/api/src/outbound.ts): opt-out, 24 h window, template approval, idempotency key. Jobs are enqueued with `ctx.enqueue(tx, …)` inside the tenant transaction.
 - **Validation:** zod at every trust boundary (HTTP bodies, env, webhooks, config, LLM tool args).
 - **Secrets:** never committed. Per-tenant secrets go through `apps/api/src/secrets.ts` (AES-256-GCM, key ring for rotation). Phone hashes use `ctx.hashKey`, never the rotating secrets key.
+- **LLM calls:** never call a provider SDK directly. Use `ctx.router.chain(task, config)` + `loggedCall` (multi-step) or `runStructured` (single JSON task); types from `packages/integrations/src/llm`. Model ids live only in `models.ts` (verified against provider docs) and `DEFAULT_LLM_ROUTING`. Tenants must allow a provider (`ai.allowed_providers`).
+- **Assistant guardrails:** every reply goes through `assistant/guard.ts` (`cleanReply` + `checkReply`) before `sendToLead`; customer text sent to any model goes through `redact`. Bump `PROMPT_VERSION` when the prompt changes and re-run `pnpm evals`.
 - **Privacy:** erasure/retention live in `apps/api/src/privacy.ts`; outbound webhooks in `webhooks-out.ts` (events table is the outbox).
 - **External APIs:** check current official docs before implementing; everything must work in mock mode with zero credentials.
 - **Auth:** Better Auth (admin plugin) on the owner connection; roles `agency_admin | client_admin | client_staff`.
