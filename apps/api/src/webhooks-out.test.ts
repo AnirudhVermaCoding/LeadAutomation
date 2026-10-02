@@ -13,6 +13,10 @@ test('webhook URLs on private, loopback, link-local or metadata addresses are re
     'https://[::1]/x',
     'https://[fd00::1]/x',
     'https://[::ffff:127.0.0.1]/x',
+    'https://[::ffff:10.0.0.1]/x',
+    'https://[::ffff:a9fe:a9fe]/x', // metadata address, hex-mapped (what URL normalises to)
+    'https://[::]/x',
+    'https://0.0.0.0/x',
   ])
     await expect(assertPublicUrl(url), url).rejects.toThrow(/not a public address/);
   await expect(assertPublicUrl('https://8.8.8.8/hook')).resolves.toBeUndefined();

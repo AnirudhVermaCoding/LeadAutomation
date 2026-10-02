@@ -71,7 +71,16 @@ const RETRY = {
 export const ASSISTANT_RETRY_LIMIT = 3;
 
 /** pg-boss runs on the owner connection; it owns the `pgboss` schema. */
-export const createBoss = (ownerUrl: string) => new PgBoss({ connectionString: ownerUrl, schema: 'pgboss' });
+export const createBoss = (ownerUrl: string) =>
+  new PgBoss({
+    connectionString: ownerUrl,
+    schema: 'pgboss',
+    max: 8,
+    // Explicit, so an upgrade of pg-boss can't silently change them: expire jobs a crashed worker left
+    // running after 15 minutes (they retry), keep finished jobs 7 days, run maintenance every 5 minutes.
+    maintenanceIntervalSeconds: 300,
+    monitorIntervalSeconds: 60,
+  });
 
 export async function ensureQueues(boss: PgBoss) {
   await boss.createQueue(QUEUES.deadLetter);

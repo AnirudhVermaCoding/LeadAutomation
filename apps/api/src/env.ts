@@ -65,6 +65,10 @@ const EnvSchema = z
     GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
     /** Where operational alerts go (failed sends, silent webhooks, LLM errors, dead jobs). */
     ALERT_EMAIL: z.email().optional(),
+    /** Error tracking (Sentry, or self-hosted GlitchTip). Off when unset. */
+    SENTRY_DSN: z.url().optional(),
+    /** Pinged after every monitor run (every 5 minutes): an uptime service alerts you when the pings stop. */
+    HEARTBEAT_URL: z.url().optional(),
     /** Agency alerts on WhatsApp, from the agency's own WABA (approved template il_agency_alert). All three, or none. */
     ALERT_WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
     ALERT_WHATSAPP_TOKEN: z.string().min(1).optional(),

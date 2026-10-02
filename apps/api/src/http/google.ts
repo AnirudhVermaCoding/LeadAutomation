@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { audit } from '../audit.ts';
 import { channelTokenValid, knownResources, recordGoogleConnected } from '../calendar-sync.ts';
 import { withTenant } from '../db/client.ts';
-import { appointments, blockedTimes, calendarLinks, googleConnections } from '../db/schema.ts';
+import { appointments, blockedTimes, calendarLinks, googleConnections, oauthNonces } from '../db/schema.ts';
 import { QUEUES } from '../jobs.ts';
 import { deleteTenantSecret, getTenantSecret, setTenantSecret } from '../secrets.ts';
 import type { AppContext } from '../system/context.ts';
@@ -31,9 +31,9 @@ function readState(key: Buffer, state: string, now: number) {
   const payload = state.slice(0, i);
   const given = Buffer.from(state.slice(i + 1));
   const expected = Buffer.from(sign(key, payload));
-  const [tenantId, expiresAt] = payload.split('.');
+  const [tenantId, expiresAt, nonce] = payload.split('.');
   if (i < 0 || given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
-  return tenantId && Number(expiresAt) > now ? tenantId : null;
+  return tenantId && nonce && Number(expiresAt) > now ? { tenantId, nonce } : null;
 }
 
 const LinkBody = z.strictObject({
@@ -63,9 +63,24 @@ export function registerGoogleRoutes(app: FastifyInstance, ctx: AppContext) {
     const q = z
       .object({ code: z.string().min(1).optional(), state: z.string().min(1), error: z.string().optional() })
       .parse(req.query);
-    const tenantId = readState(ctx.hashKey, q.state, ctx.clock.now().getTime());
-    if (!oauth || !tenantId)
+    const state = readState(ctx.hashKey, q.state, ctx.clock.now().getTime());
+    if (!oauth || !state)
       return reply.code(400).type('text/plain').send('This link has expired. Start again from Settings.');
+    const { tenantId } = state;
+    // Single use: a replayed callback (browser history, a leaked URL) must do nothing.
+    const fresh = await withTenant(ctx.db, tenantId, async (tx) => {
+      const rows = await tx
+        .insert(oauthNonces)
+        .values({ nonce: state.nonce })
+        .onConflictDoNothing()
+        .returning({ id: oauthNonces.id });
+      return rows.length > 0;
+    });
+    if (!fresh)
+      return reply
+        .code(400)
+        .type('text/plain')
+        .send('This link was already used. Start again from Settings.');
     if (q.error || !q.code) return reply.redirect(`${ctx.env.APP_URL}/settings?google=denied`);
     const tokens = await exchangeGoogleCode(oauth, q.code).catch(() => null);
     if (!tokens) return reply.redirect(`${ctx.env.APP_URL}/settings?google=error`);

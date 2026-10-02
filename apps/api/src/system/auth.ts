@@ -19,7 +19,7 @@ export function createAuth(systemDb: Db, env: Pick<Env, 'APP_URL' | 'BETTER_AUTH
       schema: { users, sessions, accounts, verifications },
     }),
     // No public sign-up: the agency admin (or seed) creates users server-side.
-    emailAndPassword: { enabled: true, disableSignUp: true },
+    emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: 12 },
     user: { additionalFields: { tenantId: { type: 'string', required: false, input: false } } },
     advanced: { database: { generateId: 'uuid' } },
     plugins: [

@@ -1,5 +1,7 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { captureError } from './sentry.ts';
+import { requestId, serializeError, serializeRequest } from './log-scrub.ts';
 
 // Keys that may carry PII or credentials anywhere we log objects.
 const REDACT = [
@@ -29,10 +31,21 @@ export interface AppDeps {
   trustProxy?: boolean;
 }
 
-export function buildApp(deps: AppDeps) {
-  const app = Fastify({
-    logger: { level: deps.logLevel, redact: { paths: REDACT, censor: '[redacted]' } },
+export function buildApp(deps: AppDeps): FastifyInstance {
+  const app: FastifyInstance = Fastify({
+    logger: {
+      level: deps.logLevel,
+      redact: { paths: REDACT, censor: '[redacted]' },
+      // No bound SQL parameters, no tokens in query strings, no customer numbers in error text.
+      serializers: { err: serializeError, req: serializeRequest },
+    },
     trustProxy: deps.trustProxy ?? false,
+    requestIdHeader: false,
+    genReqId: (req) => requestId(req.headers['x-request-id']),
+  });
+  app.addHook('onRequest', (req, reply, done) => {
+    reply.header('x-request-id', req.id);
+    done();
   });
 
   app.setErrorHandler((err, _req, reply) => {
@@ -40,7 +53,10 @@ export function buildApp(deps: AppDeps) {
       return reply.code(400).send({ error: 'invalid_request', message: z.prettifyError(err) });
     }
     const status = (err as { statusCode?: number }).statusCode ?? 500;
-    if (status >= 500) app.log.error({ err }, 'request failed');
+    if (status >= 500) {
+      captureError(err, { route: _req.routeOptions?.url });
+      app.log.error({ err }, 'request failed');
+    }
     return reply.code(status).send({
       error: status >= 500 ? 'internal_error' : 'bad_request',
       message: status >= 500 ? undefined : err instanceof Error ? err.message : undefined,
@@ -51,6 +67,9 @@ export function buildApp(deps: AppDeps) {
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-content-type-options', 'nosniff');
     reply.header('referrer-policy', 'strict-origin-when-cross-origin');
+    reply.header('permissions-policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    // Behind Caddy (HTTPS): tell browsers to stay on HTTPS.
+    if (deps.trustProxy) reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
     if (req.url.startsWith('/f/')) {
       // Hosted lead form: no scripts, inline styles only, embeddable anywhere, posts to itself.
       reply.header(

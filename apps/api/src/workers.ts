@@ -7,6 +7,8 @@ import { deliverWebhook, dispatchWebhookEvents } from './webhooks-out.ts';
 import { runScheduledReports } from './reports.ts';
 import { sendLeadNotice } from './notices.ts';
 import { syncTemplates } from './template-sync.ts';
+import { scrubText } from './log-scrub.ts';
+import { captureError } from './sentry.ts';
 import { runCalendarSync, sweepCalendars } from './calendar-sync.ts';
 import { runStaffDigest } from './staff-digest.ts';
 import { enrollFollowups, runStep, sweepDueSteps } from './sequences.ts';
@@ -79,7 +81,7 @@ async function runJob(log: FastifyBaseLogger, name: string, fn: () => Promise<un
     log.info({ job: name, result }, 'job done');
   } catch (err) {
     if (err instanceof ChannelError && !err.retryable) {
-      log.warn({ job: name, err: err.message }, 'job failed permanently');
+      log.warn({ job: name, err: scrubText(err.message) }, 'job failed permanently');
       return;
     }
     throw err;
@@ -98,13 +100,32 @@ async function workBatched<Q extends keyof JobData>(
   queue: Q,
   handler: (data: JobData[Q]) => Promise<unknown>,
   parallel = false,
+  /** Runs once when a job has used its last retry and is about to be dead-lettered (so a person hears about it). */
+  onFinalFailure?: (data: JobData[Q]) => Promise<unknown>,
 ) {
-  const one = async (job: { id: string; data: JobData[Q] }) => {
+  const one = async (job: { id: string; data: JobData[Q]; retryCount?: number; retryLimit?: number }) => {
     try {
       await runJob(log, queue, () => handler(job.data));
       return { id: job.id, status: 'completed' as const };
     } catch (err) {
-      return { id: job.id, status: 'failed' as const, output: { message: String(err) } };
+      const data = job.data as { tenantId?: string; leadId?: string };
+      const final = (job.retryCount ?? 0) >= (job.retryLimit ?? Infinity);
+      // Ids only: never the payload or the raw error text (it can hold customer data).
+      log.error(
+        {
+          queue,
+          jobId: job.id,
+          tenantId: data.tenantId,
+          leadId: data.leadId,
+          retryCount: job.retryCount,
+          final,
+          err,
+        },
+        'job failed',
+      );
+      captureError(err, { queue });
+      if (final && onFinalFailure) await onFinalFailure(job.data).catch(() => undefined);
+      return { id: job.id, status: 'failed' as const, output: { message: scrubText(String(err)) } };
     }
   };
   await ctx.boss.work<JobData[Q]>(
@@ -121,7 +142,21 @@ async function workBatched<Q extends keyof JobData>(
 
 export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   // The 60-second promise.
-  await workBatched(ctx, log, QUEUES.firstReply, (d) => sendFirstReply(ctx, d), true);
+  await workBatched(
+    ctx,
+    log,
+    QUEUES.firstReply,
+    (d) => sendFirstReply(ctx, d),
+    true,
+    // The first reply never went out (Meta down for ~10 minutes of retries): staff must call this lead themselves.
+    (d) =>
+      ctx.enqueue(null, QUEUES.staffAlert, {
+        tenantId: d.tenantId,
+        leadId: d.leadId,
+        reason: 'the automatic first WhatsApp reply could not be sent; please contact this lead',
+        at: ctx.clock.now().toISOString(),
+      }),
+  );
   await workBatched(ctx, log, QUEUES.sequenceStep, (d) => runStep(ctx, d));
   await workBatched(ctx, log, QUEUES.appointmentNotify, (d) => notifyAppointmentChange(ctx, d));
   await workBatched(ctx, log, QUEUES.webhookDeliver, (d) => deliverWebhook(ctx, d));
@@ -170,6 +205,9 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
         now: () => ctx.clock.now(),
       }),
     );
+    // Dead-man's switch: an uptime service alerts when these pings stop (workers down, database gone).
+    if (ctx.env.HEARTBEAT_URL)
+      await fetch(ctx.env.HEARTBEAT_URL, { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
   });
   await ctx.boss.schedule(QUEUES.monitorCron, '*/5 * * * *');
   await ctx.boss.work(QUEUES.maintenanceCron, async () => {

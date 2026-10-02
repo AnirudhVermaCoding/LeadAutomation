@@ -1,9 +1,19 @@
-import { HOUR } from '@instantlead/core';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { DAY, HOUR } from '@instantlead/core';
+import { eq, inArray, lt, sql } from 'drizzle-orm';
 import { audit, type Actor } from './audit.ts';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type Db, type TenantTx, type Tx } from './db/client.ts';
-import { answers, appointments, consents, conversations, leads, messages } from './db/schema.ts';
+import {
+  answers,
+  appointments,
+  consents,
+  conversations,
+  events,
+  leads,
+  llmRuns,
+  messages,
+  oauthNonces,
+} from './db/schema.ts';
 import { QUEUES, type Enqueue } from './jobs.ts';
 import type { LeadDeps } from './leads.ts';
 
@@ -64,6 +74,11 @@ export async function runRetention(
   const done: Record<string, number> = {};
   for (const { id: tenantId } of await deps.system.listTenants()) {
     done[tenantId] = await withTenant(deps.db, tenantId, async (tx) => {
+      // Operational data does not live for ever: single-use OAuth states after a day, domain events
+      // (the webhook outbox and history) after 180 days, AI call logs after 400 days (a year of usage history).
+      await tx.delete(oauthNonces).where(lt(oauthNonces.createdAt, new Date(now.getTime() - DAY)));
+      await tx.delete(events).where(lt(events.occurredAt, new Date(now.getTime() - 180 * DAY)));
+      await tx.delete(llmRuns).where(lt(llmRuns.occurredAt, new Date(now.getTime() - 400 * DAY)));
       const privacy = (await getActiveConfig(tx))?.config.privacy;
       if (!privacy?.retention_days) return 0;
       const cutoff = new Date(now.getTime() - privacy.retention_days * 24 * HOUR);

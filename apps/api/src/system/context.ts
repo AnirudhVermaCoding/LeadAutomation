@@ -22,6 +22,7 @@ import { createLlmRouter } from '../llm-router.ts';
 import { createDb } from '../db/client.ts';
 import type { Env } from '../env.ts';
 import { createBoss, createEnqueue } from '../jobs.ts';
+import { scrubText } from '../log-scrub.ts';
 import { createAuth } from './auth.ts';
 import { createSystemDb } from './db.ts';
 import { createSystem } from './index.ts';
@@ -156,9 +157,16 @@ export function createAppContext(
     checkDb: async () => {
       await app.pool.query('select 1');
     },
+    /** Readiness: the database answers AND the job queue is reachable (a process that can't enqueue is not ready). */
+    checkReady: async () => {
+      await app.pool.query('select 1');
+      await boss.getQueues();
+    },
     /** pg-boss must be started before anything can enqueue; workers only run where ROLE allows. */
     start: async () => {
-      boss.on('error', (err) => console.error('pg-boss error', err));
+      boss.on('error', (err) =>
+        console.error('pg-boss error', err instanceof Error ? scrubText(err.message) : 'unknown'),
+      );
       await boss.start();
     },
     close: async () => {

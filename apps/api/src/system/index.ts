@@ -17,6 +17,8 @@ import {
   apiKeys,
   breachLog,
   tenantSecrets,
+  accounts,
+  sessions,
   availabilityRules,
   calendarLinks,
   googleConnections,
@@ -30,6 +32,9 @@ import {
 import type { Auth } from './auth.ts';
 import { decryptSecret, encryptSecret, type SecretsKey } from '../secrets.ts';
 
+/** Same minimum Better Auth enforces at sign-in; the admin API that creates users does not check it. */
+const MIN_PASSWORD = 12;
+
 export interface NewUser {
   email: string;
   name: string;
@@ -41,6 +46,7 @@ export interface NewUser {
 /** Cross-tenant operations. Everything here runs on the owner connection (no RLS). */
 export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Auth; clock: Clock }) {
   async function createUser(u: NewUser) {
+    if (u.password.length < MIN_PASSWORD) throw new Error(`Password must be at least ${MIN_PASSWORD} characters`);
     const { user } = await auth.api.createUser({
       body: {
         email: u.email,
@@ -51,6 +57,24 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
       },
     });
     return user.id;
+  }
+
+  /** Agency: set a new password for a user who is locked out, and sign them out everywhere. */
+  async function resetPassword(email: string, newPassword: string) {
+    const [user] = await systemDb
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, email.toLowerCase()));
+    if (!user) return false;
+    const hash = await (await auth.$context).password.hash(newPassword);
+    await systemDb.transaction(async (tx) => {
+      await tx
+        .update(accounts)
+        .set({ password: hash })
+        .where(and(eq(accounts.userId, user.id), eq(accounts.providerId, 'credential')));
+      await tx.delete(sessions).where(eq(sessions.userId, user.id));
+    });
+    return true;
   }
 
   async function createApiKey(tenantId: string, name: string, actor: Actor) {
@@ -72,6 +96,7 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
 
   return {
     createUser,
+    resetPassword,
     createApiKey,
 
     async resolveApiKey(key: string) {

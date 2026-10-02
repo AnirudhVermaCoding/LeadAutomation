@@ -21,3 +21,6 @@ allowBuilds:
   cpu-features: false
   protobufjs: false
   ssh2: false
+
+overrides:
+  "@esbuild-kit/core-utils>esbuild": "^0.25.0"

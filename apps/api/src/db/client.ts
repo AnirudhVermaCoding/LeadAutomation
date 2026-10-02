@@ -5,7 +5,15 @@ import pg from 'pg';
 import * as schema from './schema.ts';
 
 export function createDb(url: string, max = 10) {
-  const pool = new pg.Pool({ connectionString: url, max });
+  // statement_timeout: a runaway query must not hold a connection (and a job) for ever.
+  const pool = new pg.Pool({
+    connectionString: url,
+    max,
+    statement_timeout: 30_000,
+    idleTimeoutMillis: 30_000,
+  });
+  // An idle client erroring (the database restarted) must not crash the process: the pool replaces it.
+  pool.on('error', (err) => console.error('postgres pool error (idle client)', err.message));
   return { pool, db: drizzle({ client: pool, schema, casing: 'snake_case' }) };
 }
 

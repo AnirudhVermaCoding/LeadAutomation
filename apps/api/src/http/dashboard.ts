@@ -360,6 +360,15 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
     deadLetters: await ctx.system.deadLetters(),
   }));
 
+  // A user forgot their password (there is no email reset flow): the agency sets a new one and signs them out everywhere.
+  app.post('/v1/admin/users/reset-password', { preHandler: agency }, async (req, reply) => {
+    const { email, password } = z
+      .strictObject({ email: z.email(), password: z.string().min(12).max(128) })
+      .parse(req.body);
+    const done = await ctx.system.resetPassword(email, password);
+    return done ? { reset: true } : reply.code(404).send({ error: 'not_found' });
+  });
+
   // A job that ran out of retries (Meta was down for an hour, a bad deploy…): run it again, or drop it.
   for (const action of ['retry', 'discard'] as const)
     app.post(`/v1/admin/dead-letter/:id/${action}`, { preHandler: agency }, async (req, reply) => {

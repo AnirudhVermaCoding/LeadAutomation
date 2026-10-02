@@ -483,6 +483,18 @@ export const calendarLinks = pgTable(
   (t) => [unique().on(t.tenantId, t.calendarId), tenantScoped()],
 );
 
+/** OAuth `state` values already used (single-use: a replayed callback link does nothing). Pruned daily. */
+export const oauthNonces = pgTable(
+  'oauth_nonces',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    nonce: text().notNull(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.tenantId, t.nonce), tenantScoped()],
+);
+
 /** Holidays, leave, maintenance, and (source 'google') other people's events on a synced calendar. `resource` null blocks every resource. */
 export const blockedTimes = pgTable(
   'blocked_times',

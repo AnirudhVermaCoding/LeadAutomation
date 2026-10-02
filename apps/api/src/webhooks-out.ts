@@ -42,7 +42,7 @@ for (const [net, bits] of [
 ] as const)
   PRIVATE.addSubnet(net, bits, 'ipv6');
 const isPrivate = (ip: string) => {
-  const mapped = /^::ffff:(d+.d+.d+.d+)$/i.exec(ip)?.[1]; // IPv4-mapped IPv6
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip)?.[1]; // IPv4-mapped IPv6, dotted form
   return mapped ? PRIVATE.check(mapped, 'ipv4') : PRIVATE.check(ip, isIP(ip) === 6 ? 'ipv6' : 'ipv4');
 };
 
@@ -52,7 +52,7 @@ const isPrivate = (ip: string) => {
  * ponytail: resolve-then-fetch leaves a DNS-rebinding window; pin the resolved IP in the request if that matters.
  */
 export async function assertPublicUrl(url: string) {
-  const host = new URL(url).hostname.replace(/^[|]$/g, '');
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
   const ips = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
   if (!ips.length || ips.some(isPrivate))
     throw new ChannelError(`Webhook host ${host} is not a public address`, { retryable: false });
