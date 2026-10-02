@@ -11,10 +11,10 @@ import type { LeadDeps } from './leads.ts';
 async function queueCalendarRemovals(tx: TenantTx, enqueue: Enqueue, tenantId: string, leadIds: string[]) {
   if (!leadIds.length) return;
   const rows = await tx
-    .select({ eventId: appointments.googleEventId })
+    .select({ eventId: appointments.googleEventId, calendarId: appointments.googleCalendarId })
     .from(appointments)
     .where(inArray(appointments.leadId, leadIds));
-  const events = rows.flatMap((r) => (r.eventId ? [{ eventId: r.eventId, calendarId: null }] : []));
+  const events = rows.flatMap((r) => (r.eventId ? [{ eventId: r.eventId, calendarId: r.calendarId }] : []));
   if (events.length) await enqueue(tx, QUEUES.calendarRemove, { tenantId, events });
 }
 
@@ -46,7 +46,10 @@ async function anonymizeLead(tx: Tx, leadId: string) {
   await tx.update(messages).set({ body: '[removed]', payload: null }).where(eq(messages.leadId, leadId));
   await tx.delete(answers).where(eq(answers.leadId, leadId));
   await tx.update(consents).set({ evidence: null }).where(eq(consents.leadId, leadId));
-  await tx.update(appointments).set({ notes: null, googleEventId: null }).where(eq(appointments.leadId, leadId));
+  await tx
+    .update(appointments)
+    .set({ notes: null, googleEventId: null, googleCalendarId: null })
+    .where(eq(appointments.leadId, leadId));
 }
 
 /**

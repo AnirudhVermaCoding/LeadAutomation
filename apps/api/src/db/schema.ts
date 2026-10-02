@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -416,7 +417,55 @@ export const availabilityRules = pgTable(
   () => [tenantScoped()],
 );
 
-/** Holidays, leave, maintenance. `resource` null blocks every resource. */
+/** One Google account per tenant (the refresh token lives in tenant_secrets). */
+export const googleConnections = pgTable(
+  'google_connections',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    /** `reauth_needed`: Google rejected the refresh token (revoked, expired); the clinic must reconnect. */
+    status: text({ enum: ['ok', 'reauth_needed'] })
+      .notNull()
+      .default('ok'),
+    lastError: text(),
+    /** Space-separated scopes Google granted (tells us whether the calendar picker is allowed). */
+    scopes: text(),
+    connectedAt: ts().notNull().defaultNow(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.tenantId), tenantScoped()],
+);
+
+/**
+ * A Google calendar we sync. `resource` null = clinic-wide (its events block every doctor / agent);
+ * otherwise it is that doctor's / agent's own calendar. Bookings for a resource are written to its
+ * `writeBookings` link, else to the clinic-wide one, else to the account's primary calendar.
+ */
+export const calendarLinks = pgTable(
+  'calendar_links',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    calendarId: text().notNull(),
+    label: text(),
+    resource: text(),
+    /** Other people's events on this calendar block slots. */
+    readBusy: boolean().notNull().default(true),
+    /** Our bookings are written to this calendar. */
+    writeBookings: boolean().notNull().default(true),
+    syncToken: text(),
+    channelId: text(),
+    channelResourceId: text(),
+    channelExpiresAt: ts(),
+    lastSyncedAt: ts(),
+    lastFullSyncAt: ts(),
+    lastError: text(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.tenantId, t.calendarId), tenantScoped()],
+);
+
+/** Holidays, leave, maintenance, and (source 'google') other people's events on a synced calendar. `resource` null blocks every resource. */
 export const blockedTimes = pgTable(
   'blocked_times',
   {
@@ -426,9 +475,20 @@ export const blockedTimes = pgTable(
     endsAt: ts().notNull(),
     resource: text(),
     reason: text(),
+    source: text({ enum: ['manual', 'google'] })
+      .notNull()
+      .default('manual'),
+    /** The Google event id (instance id for recurring events); idempotent upserts key on it. */
+    externalId: text(),
+    linkId: uuid().references(() => calendarLinks.id, { onDelete: 'cascade' }),
     ...timestamps,
   },
-  () => [tenantScoped()],
+  (t) => [
+    uniqueIndex('blocked_times_link_external')
+      .on(t.linkId, t.externalId)
+      .where(sql`${t.source} = 'google'`),
+    tenantScoped(),
+  ],
 );
 
 export const APPOINTMENT_STATUSES = [
@@ -468,6 +528,8 @@ export const appointments = pgTable(
     /** Running-late notice already sent today (minutes). */
     lateNoticeMinutes: integer(),
     googleEventId: text(),
+    /** The calendar `googleEventId` lives on (null = the account's primary). */
+    googleCalendarId: text(),
     notes: text(),
     ...timestamps,
   },

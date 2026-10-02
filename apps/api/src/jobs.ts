@@ -16,6 +16,8 @@ export const QUEUES = {
   webhookDeliver: 'webhook-deliver',
   staffAlert: 'staff-alert',
   calendarRemove: 'calendar-remove',
+  calendarSync: 'calendar-sync',
+  calendarSweep: 'calendar-sweep',
   deadLetter: 'dead-letter',
 } as const;
 
@@ -24,6 +26,9 @@ export interface JobData {
   [QUEUES.metaLeadgen]: { tenantId: string; leadgenId: string; formId?: string };
   [QUEUES.assistantTurn]: { tenantId: string; leadId: string };
   [QUEUES.sequenceSweep]: Record<string, never>;
+  [QUEUES.calendarSweep]: Record<string, never>;
+  /** Bring one Google calendar's busy time up to date (push notification, sweep or reconnect). `full` = from scratch. */
+  [QUEUES.calendarSync]: { tenantId: string; linkId: string; full?: boolean };
   [QUEUES.sequenceStep]: { tenantId: string; stepId: string };
   [QUEUES.reportsCron]: Record<string, never>;
   [QUEUES.monitorCron]: Record<string, never>;
@@ -58,7 +63,13 @@ export const createBoss = (ownerUrl: string) => new PgBoss({ connectionString: o
 export async function ensureQueues(boss: PgBoss) {
   await boss.createQueue(QUEUES.deadLetter);
   // One sweep at a time (cron fires every minute).
-  for (const cron of [QUEUES.sequenceSweep, QUEUES.reportsCron, QUEUES.monitorCron, QUEUES.maintenanceCron])
+  for (const cron of [
+    QUEUES.sequenceSweep,
+    QUEUES.calendarSweep,
+    QUEUES.reportsCron,
+    QUEUES.monitorCron,
+    QUEUES.maintenanceCron,
+  ])
     await boss.createQueue(cron, { policy: 'singleton', retryLimit: 0 });
   for (const name of [
     QUEUES.firstReply,
@@ -70,6 +81,15 @@ export async function ensureQueues(boss: PgBoss) {
     QUEUES.calendarRemove,
   ])
     await boss.createQueue(name, RETRY);
+  // One queued + one running sync per calendar (singletonKey = link id): a burst of push notifications is one sync.
+  await boss.createQueue(QUEUES.calendarSync, {
+    policy: 'stately',
+    retryLimit: 5,
+    retryDelay: 30,
+    retryBackoff: true,
+    retryDelayMax: 900,
+    deadLetter: QUEUES.deadLetter,
+  });
   // stately + singletonKey(leadId): at most one queued and one running turn per lead, so a burst
   // of messages becomes one reply and two turns never race. Short retries: it's a live chat.
   await boss.createQueue(QUEUES.assistantTurn, {

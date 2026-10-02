@@ -62,3 +62,9 @@ export async function getTenantSecret(tx: Tx, key: SecretsKey, tenantId: string,
     .where(and(eq(tenantSecrets.tenantId, tenantId), eq(tenantSecrets.name, name)));
   return row ? decryptSecret(key, tenantId, name, row.valueEnc) : null;
 }
+
+export async function deleteTenantSecret(tx: Tx, tenantId: string, name: string) {
+  await tx
+    .delete(tenantSecrets)
+    .where(and(eq(tenantSecrets.tenantId, tenantId), eq(tenantSecrets.name, name)));
+}

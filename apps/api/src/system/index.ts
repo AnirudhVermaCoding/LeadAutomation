@@ -18,6 +18,8 @@ import {
   breachLog,
   tenantSecrets,
   availabilityRules,
+  calendarLinks,
+  googleConnections,
   templates,
   tenantConfigs,
   tenants,
@@ -135,6 +137,36 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         )
         returning id, tenant_id`);
       return res.rows.map((r) => ({ stepId: r.id, tenantId: r.tenant_id }));
+    },
+
+    /** Webhook routing: which tenant's calendar link owns this Google push channel? */
+    async findCalendarChannel(channelId: string) {
+      const [row] = await systemDb
+        .select({ tenantId: calendarLinks.tenantId, linkId: calendarLinks.id })
+        .from(calendarLinks)
+        .where(eq(calendarLinks.channelId, channelId));
+      return row ?? null;
+    },
+
+    /** Every busy-source calendar of every connected (not reauth_needed) tenant, for the sync sweep. */
+    async calendarLinksForSweep() {
+      return systemDb
+        .select({
+          tenantId: calendarLinks.tenantId,
+          linkId: calendarLinks.id,
+          lastSyncedAt: calendarLinks.lastSyncedAt,
+          lastFullSyncAt: calendarLinks.lastFullSyncAt,
+          channelId: calendarLinks.channelId,
+          channelExpiresAt: calendarLinks.channelExpiresAt,
+        })
+        .from(calendarLinks)
+        .leftJoin(googleConnections, eq(googleConnections.tenantId, calendarLinks.tenantId))
+        .where(
+          and(
+            eq(calendarLinks.readBusy, true),
+            sql`coalesce(${googleConnections.status}, 'ok') <> 'reauth_needed'`,
+          ),
+        );
     },
 
     /** Agency view: per-tenant volume and running costs since `since` (protects margin). */
@@ -261,6 +293,17 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
              where c.tenant_id = t.id order by c.revision desc limit 1), ${DEFAULT_AI_SETTINGS.monthly_cost_cap_usd}) as cap
             from tenants t) x
           where x.cap > 0 and x.spend >= 0.8 * x.cap`),
+        // Google was disconnected behind our back (revoked, expired, 7-day testing limit): bookings stop syncing.
+        googleReauth: await rows<{ tenant_id: string; name: string }>(sql`
+          select g.tenant_id, t.name from google_connections g join tenants t on t.id = g.tenant_id
+          where g.status = 'reauth_needed'`),
+        // A calendar that should be syncing hasn't for 30+ minutes: busy time may be stale.
+        calendarStale: await rows<{ tenant_id: string; name: string; n: string }>(sql`
+          select l.tenant_id, t.name, count(*) as n from calendar_links l join tenants t on t.id = l.tenant_id
+          left join google_connections g on g.tenant_id = l.tenant_id
+          where l.read_busy and coalesce(g.status, 'ok') = 'ok'
+            and coalesce(l.last_synced_at, l.created_at) < now() - interval '30 minutes'
+          group by l.tenant_id, t.name`),
         backlog: Number(
           (
             await rows<{ n: string }>(sql`

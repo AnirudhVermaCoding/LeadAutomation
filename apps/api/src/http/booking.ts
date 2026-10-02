@@ -1,5 +1,3 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { exchangeGoogleCode, googleConsentUrl } from '@instantlead/integrations';
 import { and, asc, eq, gte, lt } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -16,7 +14,6 @@ import {
 } from '../booking.ts';
 import { withTenant } from '../db/client.ts';
 import { appointments, availabilityRules, blockedTimes, leads } from '../db/schema.ts';
-import { setTenantSecret } from '../secrets.ts';
 import type { AppContext } from '../system/context.ts';
 import { guard, type Principal } from './auth.ts';
 
@@ -41,22 +38,6 @@ async function bookingErrors<T>(reply: FastifyReply, fn: () => Promise<T>) {
       return reply.code(STATUS_FOR_ERROR[err.code]).send({ error: err.code, message: err.message });
     throw err;
   }
-}
-
-// OAuth state = tenant + expiry, HMAC-signed: proves the callback belongs to a flow we started.
-const sign = (key: Buffer, payload: string) => createHmac('sha256', key).update(payload).digest('base64url');
-function makeState(key: Buffer, tenantId: string, expiresAt: number) {
-  const payload = `${tenantId}.${expiresAt}.${randomBytes(8).toString('base64url')}`;
-  return `${payload}.${sign(key, payload)}`;
-}
-function readState(key: Buffer, state: string, now: number) {
-  const i = state.lastIndexOf('.');
-  const payload = state.slice(0, i);
-  const given = Buffer.from(state.slice(i + 1));
-  const expected = Buffer.from(sign(key, payload));
-  const [tenantId, expiresAt] = payload.split('.');
-  if (i < 0 || given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
-  return tenantId && Number(expiresAt) > now ? tenantId : null;
 }
 
 export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
@@ -278,38 +259,5 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
       tx.delete(blockedTimes).where(eq(blockedTimes.id, id)).returning(),
     );
     return rows.length ? { deleted: true } : reply.code(404).send({ error: 'not_found' });
-  });
-
-  // ---- Google Calendar (optional one-way sync) ----
-
-  app.get('/v1/integrations/google/start', { preHandler: admins }, (req, reply) => {
-    if (!ctx.googleOAuth) return reply.code(503).send({ error: 'google_not_configured' });
-    const state = makeState(ctx.hashKey, tenantOf(req), ctx.clock.now().getTime() + 10 * 60_000);
-    return { url: googleConsentUrl(ctx.googleOAuth, state) };
-  });
-
-  app.get('/v1/integrations/google/callback', async (req, reply) => {
-    const oauth = ctx.googleOAuth;
-    const q = z
-      .object({ code: z.string().min(1).optional(), state: z.string().min(1), error: z.string().optional() })
-      .parse(req.query);
-    const tenantId = readState(ctx.hashKey, q.state, ctx.clock.now().getTime());
-    if (!oauth || !tenantId)
-      return reply.code(400).type('text/plain').send('This link has expired. Start again from Settings.');
-    if (q.error || !q.code) return reply.redirect(`${ctx.env.APP_URL}/settings?google=denied`);
-    const tokens = await exchangeGoogleCode(oauth, q.code).catch(() => null);
-    if (!tokens) return reply.redirect(`${ctx.env.APP_URL}/settings?google=error`);
-    if (!tokens.refresh_token) return reply.redirect(`${ctx.env.APP_URL}/settings?google=no_refresh_token`);
-    const refreshToken = tokens.refresh_token;
-    await withTenant(ctx.db, tenantId, async (tx) => {
-      await setTenantSecret(tx, ctx.secretsKey, tenantId, 'google_refresh_token', refreshToken);
-      await audit(
-        tx,
-        ctx.clock,
-        { type: 'system' },
-        { action: 'integration.google.connected', entityType: 'integration', entityId: 'google' },
-      );
-    });
-    return reply.redirect(`${ctx.env.APP_URL}/settings?google=connected`);
   });
 }

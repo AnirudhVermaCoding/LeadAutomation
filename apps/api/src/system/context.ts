@@ -1,9 +1,11 @@
 import { OffsetClock, systemClock, type Clock } from '@instantlead/core';
 import {
   ChannelError,
+  createFakeCalendar,
   createFakeChannel,
   createFakeEmail,
   createGoogleCalendar,
+  FakeGoogle,
   createResendEmail,
   type CalendarProvider,
   type EmailProvider,
@@ -12,6 +14,7 @@ import {
 } from '@instantlead/integrations';
 import { getTenantSecret, type SecretsKey } from '../secrets.ts';
 import type { Tx } from '../db/client.ts';
+import { googleConnections } from '../db/schema.ts';
 import { createFakeLlm } from '../assistant/fake-llm.ts';
 import { createLlmRouter } from '../llm-router.ts';
 import { createDb } from '../db/client.ts';
@@ -80,6 +83,14 @@ export function createAppContext(
         }
       : null;
 
+  // Mock mode: one in-memory Google per tenant that "connected" (dev endpoints drive it).
+  const fakeGoogles = new Map<string, FakeGoogle>();
+  const fakeGoogleFor = (tenantId: string) => {
+    let g = fakeGoogles.get(tenantId);
+    if (!g) fakeGoogles.set(tenantId, (g = new FakeGoogle({ now: () => clock.now().getTime() })));
+    return g;
+  };
+
   return {
     env,
     clock,
@@ -107,10 +118,15 @@ export function createAppContext(
     calendarFor:
       overrides.calendarFor ??
       (async (tx: Tx, tenantId: string): Promise<CalendarProvider | null> => {
-        if (!googleOAuth) return null;
+        if (!googleOAuth) {
+          if (!mockMode) return null;
+          const [conn] = await tx.select({ id: googleConnections.id }).from(googleConnections);
+          return conn ? createFakeCalendar(fakeGoogleFor(tenantId)) : null;
+        }
         const refreshToken = await getTenantSecret(tx, secretsKey, tenantId, 'google_refresh_token');
         return refreshToken ? createGoogleCalendar({ client: googleOAuth, refreshToken }) : null;
       }),
+    fakeGoogleFor,
     fetch: overrides.fetch,
     checkDb: async () => {
       await app.pool.query('select 1');

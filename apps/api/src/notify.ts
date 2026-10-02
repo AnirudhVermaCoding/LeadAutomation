@@ -4,6 +4,7 @@ import { ChannelError, type CalendarProvider, type EmailProvider } from '@instan
 import { and, eq } from 'drizzle-orm';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type Tx } from './db/client.ts';
+import { calendarTargetFor } from './calendar-sync.ts';
 import { ACTIVE_APPOINTMENT_STATUSES, appointments, leads, templates } from './db/schema.ts';
 import type { JobData } from './jobs.ts';
 import { channelFor, sendToLead, type MessagingDeps } from './outbound.ts';
@@ -105,14 +106,26 @@ async function syncCalendarEvent(
   { appt, lead, tz }: { appt: typeof appointments.$inferSelect; lead: typeof leads.$inferSelect; tz: string },
 ) {
   const keep =
-    (ACTIVE_APPOINTMENT_STATUSES as readonly string[]).includes(appt.status) || appt.status in CALENDAR_PREFIX;
+    (ACTIVE_APPOINTMENT_STATUSES as readonly string[]).includes(appt.status) ||
+    appt.status in CALENDAR_PREFIX;
   if (!keep) {
     if (!appt.googleEventId) return 'none';
-    await calendar.remove(appt.googleEventId);
+    await calendar.remove(appt.googleEventId, appt.googleCalendarId ?? undefined);
     await withTenant(deps.db, tenantId, (tx) =>
-      tx.update(appointments).set({ googleEventId: null }).where(eq(appointments.id, appt.id)),
+      tx
+        .update(appointments)
+        .set({ googleEventId: null, googleCalendarId: null })
+        .where(eq(appointments.id, appt.id)),
     );
     return 'removed';
+  }
+  // Which calendar: the doctor's / agent's own, else the clinic-wide one, else primary.
+  const target = await withTenant(deps.db, tenantId, (tx) => calendarTargetFor(tx, appt.resource));
+  let existingId = appt.googleEventId;
+  if (existingId && (appt.googleCalendarId ?? null) !== target) {
+    // Reassigned to another doctor: the event moves with them.
+    await calendar.remove(existingId, appt.googleCalendarId ?? undefined);
+    existingId = null;
   }
   const { id } = await calendar.upsert(
     {
@@ -123,11 +136,15 @@ async function syncCalendarEvent(
       timeZone: tz,
       appointmentId: appt.id,
     },
-    appt.googleEventId,
+    existingId,
+    target ?? undefined,
   );
-  if (id !== appt.googleEventId)
+  if (id !== appt.googleEventId || (appt.googleCalendarId ?? null) !== target)
     await withTenant(deps.db, tenantId, (tx) =>
-      tx.update(appointments).set({ googleEventId: id }).where(eq(appointments.id, appt.id)),
+      tx
+        .update(appointments)
+        .set({ googleEventId: id, googleCalendarId: target })
+        .where(eq(appointments.id, appt.id)),
     );
   return id;
 }

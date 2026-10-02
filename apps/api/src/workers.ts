@@ -5,6 +5,7 @@ import { runMonitor } from './monitoring.ts';
 import { runRetention } from './privacy.ts';
 import { deliverWebhook, dispatchWebhookEvents } from './webhooks-out.ts';
 import { runScheduledReports } from './reports.ts';
+import { runCalendarSync, sweepCalendars } from './calendar-sync.ts';
 import { runStaffDigest } from './staff-digest.ts';
 import { enrollFollowups, runStep, sweepDueSteps } from './sequences.ts';
 import { ChannelError, fetchMetaLead } from '@instantlead/integrations';
@@ -124,6 +125,11 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   await workBatched(ctx, log, QUEUES.webhookDeliver, (d) => deliverWebhook(ctx, d));
   await workBatched(ctx, log, QUEUES.staffAlert, (d) => notifyStaffAlert(ctx, d));
   await workBatched(ctx, log, QUEUES.calendarRemove, (d) => removeCalendarEvents(ctx, d));
+  await workBatched(ctx, log, QUEUES.calendarSync, (d) => runCalendarSync(ctx, d));
+  await ctx.boss.work(QUEUES.calendarSweep, async () => {
+    await runJob(log, QUEUES.calendarSweep, () => sweepCalendars(ctx));
+  });
+  await ctx.boss.schedule(QUEUES.calendarSweep, '*/5 * * * *');
   await ctx.boss.work<JobData['meta-leadgen']>(QUEUES.metaLeadgen, async (jobs) => {
     for (const job of jobs) await runJob(log, QUEUES.metaLeadgen, () => importMetaLead(ctx, job.data));
   });

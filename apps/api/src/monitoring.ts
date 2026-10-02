@@ -33,6 +33,18 @@ export async function runMonitor(deps: {
       kind: 'webhook_silent',
       message: `${r.name}: ${r.n} WhatsApp messages sent but no delivery receipts for over an hour. Check the Meta webhook.`,
     })),
+    ...s.googleReauth.map((r) => ({
+      key: `google_reauth:${r.tenant_id}`,
+      tenantId: r.tenant_id,
+      kind: 'google_reauth',
+      message: `${r.name}: Google Calendar access was revoked or expired. Bookings are not syncing until an admin reconnects Google (Settings → Integrations).`,
+    })),
+    ...s.calendarStale.map((r) => ({
+      key: `calendar_stale:${r.tenant_id}`,
+      tenantId: r.tenant_id,
+      kind: 'calendar_stale',
+      message: `${r.name}: ${r.n} Google calendar(s) have not synced for 30+ minutes; busy time from Google may be out of date.`,
+    })),
     ...(s.backlog > 50
       ? [
           {

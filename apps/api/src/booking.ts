@@ -34,8 +34,9 @@ import {
   stopEnrollments,
 } from './sequences.ts';
 import type { Db } from './db/client.ts';
+import { recheckExternalBusy, type CalendarFor } from './calendar-sync.ts';
 
-export type BookingDeps = LeadDeps & { db: Db };
+export type BookingDeps = LeadDeps & { db: Db; calendarFor?: CalendarFor };
 export type AppointmentChange =
   | 'booked'
   | 'confirmed'
@@ -245,6 +246,9 @@ export async function bookSlot(
     resource?: string | undefined;
   },
 ) {
+  // Outside the transaction (a network call): pull in Google events the push channel hasn't delivered yet.
+  if (deps.calendarFor)
+    await recheckExternalBusy({ ...deps, calendarFor: deps.calendarFor }, tenantId, input);
   for (let attempt = 1; ; attempt++) {
     try {
       return await bookOnce(deps, tenantId, input);
