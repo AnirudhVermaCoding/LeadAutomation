@@ -33,6 +33,13 @@ export interface MessagingDeps extends LeadDeps {
 const TEMPLATE_COST_INR = { marketing: 0.8631, utility: 0.115 } as const;
 
 /** Meta Cloud API when the tenant has connected WhatsApp, otherwise the fake channel (if allowed). */
+/** Blue ticks + "typing…" on the lead's message while the assistant works on a reply. Best effort. */
+export async function showTyping(deps: MessagingDeps, tenantId: string, providerMessageId: string | null) {
+  if (!providerMessageId) return;
+  const channel = await withTenant(deps.db, tenantId, (tx) => channelFor(tx, deps, tenantId));
+  await channel.markRead(providerMessageId).catch(() => undefined);
+}
+
 export async function channelFor(tx: Tx, deps: MessagingDeps, tenantId: string): Promise<MessagingChannel> {
   const [tenant] = await tx.select({ phoneNumberId: tenants.waPhoneNumberId }).from(tenants);
   const token = await getTenantSecret(tx, deps.secretsKey, tenantId, 'whatsapp_access_token');

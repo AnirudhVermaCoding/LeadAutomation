@@ -17,6 +17,8 @@ export interface MessagingChannel {
   readonly provider: 'fake' | 'meta';
   /** `to` is E.164. Throws ChannelError on failure. */
   send(to: string, content: OutboundContent): Promise<{ providerMessageId: string }>;
+  /** Blue ticks on their message plus "typing…" until we reply (max 25 s). Best effort. */
+  markRead(providerMessageId: string): Promise<void>;
 }
 
 export class ChannelError extends Error {
@@ -34,9 +36,15 @@ export class ChannelError extends Error {
 /** Mock-mode channel: accepts everything, remembers what it sent (the DB is the real record). */
 export function createFakeChannel() {
   const sent: { to: string; content: OutboundContent; providerMessageId: string }[] = [];
-  const channel: MessagingChannel & { sent: typeof sent } = {
+  const read: string[] = [];
+  const channel: MessagingChannel & { sent: typeof sent; read: typeof read } = {
     provider: 'fake',
     sent,
+    read,
+    markRead(providerMessageId) {
+      read.push(providerMessageId);
+      return Promise.resolve();
+    },
     send(to, content) {
       const providerMessageId = `fake.${randomUUID()}`;
       sent.push({ to, content, providerMessageId });

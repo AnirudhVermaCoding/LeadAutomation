@@ -87,8 +87,16 @@ export function realEstatePreset(businessName = 'Demo Realty'): TenantConfig {
       slot_minutes: 30,
       buffer_minutes: 15,
       services: [
-        { name: 'Site visit', duration_minutes: 60 },
-        { name: 'Video walkthrough', duration_minutes: 30 },
+        {
+          name: 'Site visit',
+          duration_minutes: 60,
+          suitable_for: ['wants to see the property', 'shortlisted a flat', 'ready to decide soon'],
+        },
+        {
+          name: 'Video walkthrough',
+          duration_minutes: 30,
+          suitable_for: ['lives in another city', 'busy on weekdays', 'early stage, just exploring'],
+        },
       ],
       mode: 'auto_confirm',
       offer_slots: 3,

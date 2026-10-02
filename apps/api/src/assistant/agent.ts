@@ -21,7 +21,7 @@ import {
   runStructured,
   type LlmRouter,
 } from '../llm-router.ts';
-import { sendToLead, type MessagingDeps } from '../outbound.ts';
+import { sendToLead, showTyping, type MessagingDeps } from '../outbound.ts';
 import type { TurnHints } from './fake-llm.ts';
 import {
   checkReply,
@@ -36,7 +36,7 @@ import {
   sameReply,
   type NotALead,
 } from './guard.ts';
-import { buildSystemPrompt, buildTools, jsonSchema, stateMessage } from './prompt.ts';
+import { buildSystemPrompt, buildTools, jsonSchema, openingStatus, stateMessage } from './prompt.ts';
 import { activeAppointment, BookingError, updateAppointment } from '../booking.ts';
 import { alertStaff, escalate, loadAnswers, runTool } from './tools.ts';
 
@@ -51,7 +51,7 @@ const HISTORY = 40; // messages of context
 /** More inbound messages than this in 10 minutes = a flood (or another bot): hand over once. */
 const FLOOD_LIMIT = 15;
 /** Logged on every model call, so evals and incidents can be tied to the prompt that produced them. */
-export const PROMPT_VERSION = 'agent-v1';
+export const PROMPT_VERSION = 'agent-v2';
 
 const HOLDING = {
   en: 'Thanks for your message! A member of our team will get back to you shortly.',
@@ -257,6 +257,8 @@ export async function runAssistantTurn(
     return { status: 'replied', reason: `not a lead (${junk})` };
   }
 
+  await showTyping(deps, tenantId, lastInbound.providerMessageId);
+
   let chain: LlmProvider[];
   try {
     chain = deps.router.chain('agent_reply', config);
@@ -276,6 +278,7 @@ export async function runAssistantTurn(
     role: 'system',
     text: stateMessage({
       now: deps.clock.now().toLocaleString('en-IN', { timeZone: config.locale.timezone }),
+      openNow: openingStatus(config, deps.clock.now()),
       name: lead.name,
       language: lead.language,
       answers: ctx.answers,

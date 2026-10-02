@@ -65,12 +65,57 @@ function mapAnswer(q: TenantConfig['qualification']['questions'][number], text: 
   return text.includes('?') ? null : text.trim().slice(0, 300);
 }
 
+/** How a receptionist would ask, for the common preset questions; a gentle generic fallback otherwise. */
+const PHRASES: Record<string, string> = {
+  urgency: 'How soon would you like to come in — today, sometime this week, or later on?',
+  timeline: 'When are you hoping to move — in the next few months, or still exploring?',
+  treatment_interest: 'What would you like help with?',
+  concern: 'What would you like help with?',
+  first_visit: 'Will this be your first visit with us?',
+  preferred_time: 'Do mornings, afternoons or evenings suit you better?',
+  budget: 'Roughly what budget do you have in mind?',
+  location: 'Which area are you looking in?',
+  bhk: 'How many bedrooms are you looking for?',
+};
 function ask(config: TenantConfig, key: string) {
   const q = config.qualification.questions.find((x) => x.key === key);
   if (!q) return '';
-  const options = q.options ? ` (${q.options.map((o) => o.replaceAll('_', ' ')).join(' / ')})` : '';
-  return `Could you tell me: ${q.hint.toLowerCase()}${options}?`;
+  return PHRASES[key] ?? `Could you tell me a little about ${q.hint.toLowerCase().replace(/[?.]$/, '')}?`;
 }
+
+const BOT =
+  /\b(are you (a |an )?(bot|robot|ai|machine|real( person)?|human)|is this (a )?(bot|automated)|kya (aap|tum) (bot|insaan))\b/i;
+const YES = /^(yes|yeah|yep|sure|ok(ay)?|please|haan|han|ji|ha|theek hai|thik hai|chalega)\b/i;
+const SYMPTOM =
+  /\b(pain|paining|hurts?|ache|aching|bleed(s|ing)?|swollen|swelling|sensitiv\w*|broken|chipped|cavity|loose|bad breath|yellow|stain\w*|crooked|gap|acne|pimples?|scars?|spots|pigment\w*|rash\w*|itch\w*|dark circles|hair ?fall|thinning|dandruff|bald\w*|grey|gray|dard|khoon|daant)\b/i;
+
+/** The service whose suitable_for best matches what they wrote (word overlap), if any. */
+function serviceForConcern(config: TenantConfig, text: string): string | null {
+  const words = new Set(
+    text
+      .toLowerCase()
+      .split(/[^\p{L}]+/u)
+      .filter((w) => w.length > 3),
+  );
+  let best: { name: string; score: number } | null = null;
+  for (const svc of config.booking.services) {
+    const score = (svc.suitable_for ?? []).reduce(
+      (n, c) =>
+        n +
+        c
+          .toLowerCase()
+          .split(/[^\p{L}]+/u)
+          .filter((w) => w.length > 3 && [...words].some((x) => x.startsWith(w.slice(0, 5)))).length,
+      0,
+    );
+    if (score > 0 && (!best || score > best.score)) best = { name: svc.name, score };
+  }
+  return best?.name ?? null;
+}
+const lastAssistantText = (request: LlmRequest) => {
+  const t = request.turns.filter((x) => x.role === 'assistant').at(-1);
+  return t?.role === 'assistant' ? t.text : '';
+};
 
 function message(text: string, toolCalls: ToolCall[] = []): LlmResponse {
   return {
@@ -205,20 +250,47 @@ export function createFakeLlm(): LlmProvider {
             'Thanks for letting me know. This may not be the right fit for you, but our team can call you if you would like.',
           );
         const next = (state?.still_missing ?? h.missing)[0];
-        if (next) return reply(`${info}${info ? '' : 'Thanks! '}${ask(h.config, next)}`);
+        if (next)
+          return reply(
+            `${info}${info ? '' : SYMPTOM.test(inbound) ? 'Sorry to hear that — our doctor can take a proper look. ' : 'Thanks! '}${ask(h.config, next)}`,
+          );
         if (state?.status === 'qualified' && !h.appointment)
           return call('get_available_slots', { service: serviceFor(h) });
-        return reply(`${info}Is there anything else I can help you with?`);
+        return reply(
+          h.appointment
+            ? `${info}Anything else I can help with before your visit?`
+            : `${info}Would you like me to find you a time to come in?`,
+        );
       }
 
       // First step: decide what to do with the new message.
+      const { assistant_name: me, business_name: biz } = h.config.brand;
+      if (BOT.test(inbound))
+        return reply(
+          `I'm ${me}, ${biz}'s virtual assistant — I can answer most questions and book appointments, and someone from our team can step in anytime. How can I help?`,
+        );
       if (HUMAN.test(inbound)) return call('escalate_to_human', { reason: 'Lead asked for a person' });
+      // "Yes" to "shall I find you a <service> slot?": go find times for that service.
+      const offered = /find you a (.+?) slot/i.exec(lastAssistantText(request));
+      if (offered && YES.test(inbound.trim()) && !h.appointment) {
+        const svc = h.config.booking.services.find((x) => x.name.toLowerCase() === offered[1]!.toLowerCase());
+        return call('get_available_slots', { service: svc?.name ?? serviceFor(h) });
+      }
+      // A problem in their own words: empathy, no diagnosis, the right service, an offer to book.
+      // Older configs have no suitable_for: the first service (usually the general consultation) is the safe default.
+      const concernService = SYMPTOM.test(inbound)
+        ? (serviceForConcern(h.config, inbound) ?? h.config.booking.services[0]?.name ?? null)
+        : null;
+      if (concernService && !h.appointment && h.config.qualification.safety.no_medical_advice)
+        return reply(
+          `Sorry to hear that — that's worth getting checked properly. I can't say what's causing it, but our doctor can take a proper look. Would you like me to find you a ${concernService.toLowerCase()} slot this week?`,
+        );
       if (h.appointment && CANCEL.test(inbound)) return call('cancel', {});
       if (h.appointment && RESCHEDULE.test(inbound))
         return call('get_available_slots', { service: h.appointment.service });
       if (picking) return call('get_available_slots', { service: h.appointment?.service ?? serviceFor(h) });
-      const fact = FACTS.find(([re]) => re.test(inbound));
-      if (fact) return call('lookup_knowledge', { query: fact[1] });
+      const facts = FACTS.filter(([re]) => re.test(inbound)).map(([, q]) => q);
+      if (facts.length) return call('lookup_knowledge', { query: facts.join(' ') });
 
       const records = h.config.qualification.questions
         .filter((q) => h.answers[q.key] === undefined)
@@ -240,10 +312,10 @@ export function createFakeLlm(): LlmProvider {
         return call('get_available_slots', { service: serviceFor(h) });
       if (h.appointment)
         return reply(`You're booked for ${h.appointment.label}. Anything else I can help with?`);
-      const name = h.config.brand.assistant_name;
+      const greeted = request.turns.some((t) => t.role === 'assistant');
       return reply(
         next
-          ? `Hi! I'm ${name} from ${h.config.brand.business_name}. ${ask(h.config, next)}`
+          ? `${greeted ? '' : `Hi! I'm ${me} from ${biz}. `}${ask(h.config, next)}`
           : 'How can I help you today?',
       );
     },

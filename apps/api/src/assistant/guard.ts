@@ -111,7 +111,8 @@ const RULES: { category: NotALead; re: RegExp; certain?: boolean }[] = [
   },
   {
     category: 'job_seeker',
-    re: /\b(job|vacanc(y|ies)|resume|cv\b|hiring|internship|naukri|apply for (the )?(post|position)|looking for (a )?(job|work)|receptionist post|nurse post|salary)\b/i,
+    // Application intent, not just the word "job" ("write me a cover letter for a job" is off-topic, not a job seeker).
+    re: /\b(vacanc(y|ies)|job (opening|vacancy|opportunity)|any (job|opening)s?|are you hiring|my (resume|cv)\b|send (my |you my )?(resume|cv)\b|internship|naukri chahiye|apply for (the |a )?(job|post|position)|looking for (a )?(job|work)|(receptionist|nurse|assistant) (post|job))\b/i,
   },
   {
     category: 'wrong_number',

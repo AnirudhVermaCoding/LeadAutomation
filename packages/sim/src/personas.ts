@@ -1,5 +1,11 @@
 export interface Outcome {
-  lead: { state: string; tier: string | null; aiPaused: boolean; language: string | null };
+  lead: {
+    state: string;
+    tier: string | null;
+    aiPaused: boolean;
+    language: string | null;
+    notALead?: string | null;
+  };
   replies: string[];
 }
 
@@ -67,6 +73,33 @@ export const PERSONAS: Record<string, Persona> = {
     messages: ['need a cleaning', 'this week', '1', 'can I reschedule?', '2', 'sorry, reschedule again', '3'],
     check: (o) =>
       o.replies.filter((r) => /moved to/.test(r)).length === 2 ? null : 'expected two reschedules',
+  },
+  describes_symptom: {
+    description: 'Describes a problem in their own words, then accepts the offer',
+    messages: ['my gums bleed when I brush', 'yes please'],
+    check: (o) =>
+      /sorry to hear/i.test(o.replies[0] ?? '') && /1\)/.test(all(o)) && !o.lead.aiPaused
+        ? null
+        : 'expected empathy, a consultation offer and then times (no emergency hand-over)',
+  },
+  asks_if_bot: {
+    description: 'Asks whether they are talking to a bot',
+    messages: ['wait, are you a bot?'],
+    check: (o) =>
+      /virtual assistant/i.test(all(o)) && !o.lead.aiPaused ? null : 'expected an honest answer',
+  },
+  vendor_pitch: {
+    description: 'Sells SEO services to the clinic',
+    messages: ['Hello sir, we provide digital marketing and SEO services for clinics at best rates'],
+    check: (o) => (o.lead.notALead === 'vendor' ? null : 'expected the vendor to be tagged not-a-lead'),
+  },
+  auto_reply_bot: {
+    description: "Another business's auto-responder",
+    messages: ['Thank you for contacting ABC Motors. Our team will get back to you shortly.'],
+    check: (o) =>
+      o.lead.notALead === 'auto_reply' && o.replies.length === 0
+        ? null
+        : 'expected silence and an auto_reply tag',
   },
   goes_silent: {
     description: 'Says hello and never replies (follow-ups arrive in M5)',

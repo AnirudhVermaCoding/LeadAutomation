@@ -67,6 +67,20 @@ export function createMetaCloudChannel(opts: {
 
   return {
     provider: 'meta',
+    async markRead(providerMessageId) {
+      // Cloud API: mark as read + typing indicator in one call. Never worth failing a reply over.
+      await doFetch(url, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${opts.accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          status: 'read',
+          message_id: providerMessageId,
+          typing_indicator: { type: 'text' },
+        }),
+        signal: AbortSignal.timeout(5_000),
+      }).catch(() => undefined);
+    },
     async send(to, content) {
       let res: Response;
       try {

@@ -428,27 +428,41 @@ export function BookingSection({ draft, edit }: Props) {
     <Card title="Services and booking rules">
       <div className="space-y-3">
         {b.services.map((s, i) => (
-          <div key={i} className="flex items-end gap-2">
-            <Field label="Service">
-              <Input
-                value={s.name}
-                onChange={(e) => edit((d) => void (d.booking.services[i]!.name = e.target.value))}
+          <div key={i} className="space-y-2 rounded-lg border border-slate-100 p-3">
+            <div className="flex items-end gap-2">
+              <Field label="Service">
+                <Input
+                  value={s.name}
+                  onChange={(e) => edit((d) => void (d.booking.services[i]!.name = e.target.value))}
+                />
+              </Field>
+              <Field label="Minutes">
+                <Input
+                  type="number"
+                  className="w-24"
+                  value={s.duration_minutes}
+                  onChange={(e) =>
+                    edit((d) => void (d.booking.services[i]!.duration_minutes = num(e.target.value)))
+                  }
+                />
+              </Field>
+              <RemoveButton
+                label={`Remove ${s.name}`}
+                onClick={() => edit((d) => void d.booking.services.splice(i, 1))}
               />
-            </Field>
-            <Field label="Minutes">
-              <Input
-                type="number"
-                className="w-24"
-                value={s.duration_minutes}
-                onChange={(e) =>
-                  edit((d) => void (d.booking.services[i]!.duration_minutes = num(e.target.value)))
+            </div>
+            <Field
+              label="Good first step for"
+              hint="Concerns in customers' words, comma-separated. The assistant suggests this service when someone describes one of them."
+            >
+              <ListInput
+                value={s.suitable_for ?? []}
+                placeholder="tooth pain, bleeding gums, sensitivity"
+                onChange={(list) =>
+                  edit((d) => void (d.booking.services[i]!.suitable_for = list.length ? list : undefined))
                 }
               />
             </Field>
-            <RemoveButton
-              label={`Remove ${s.name}`}
-              onClick={() => edit((d) => void d.booking.services.splice(i, 1))}
-            />
           </div>
         ))}
         <Button

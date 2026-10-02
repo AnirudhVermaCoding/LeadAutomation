@@ -15,11 +15,42 @@ const VARIANTS: Record<ClinicVariant, VariantParts> = {
   dental: {
     treatments: ['checkup_cleaning', 'tooth_pain', 'root_canal', 'whitening', 'braces_aligners', 'implants'],
     services: [
-      { name: 'Consultation', duration_minutes: 20 },
-      { name: 'Cleaning & polishing', duration_minutes: 45 },
-      { name: 'Root canal consultation', duration_minutes: 30 },
-      { name: 'Teeth whitening', duration_minutes: 60 },
-      { name: 'Braces / aligners consultation', duration_minutes: 30 },
+      {
+        name: 'Consultation',
+        duration_minutes: 20,
+        suitable_for: [
+          'tooth pain or toothache',
+          'sensitivity to hot or cold',
+          'bleeding or swollen gums',
+          'bad breath',
+          'broken or chipped tooth',
+          'cavity or black spot',
+          'wisdom tooth trouble',
+          'loose tooth',
+          'missing teeth / implants',
+          'general check-up',
+        ],
+      },
+      {
+        name: 'Cleaning & polishing',
+        duration_minutes: 45,
+        suitable_for: ['tartar or stains', 'yellowish teeth from tea, coffee or smoking', 'routine cleaning'],
+      },
+      {
+        name: 'Root canal consultation',
+        duration_minutes: 30,
+        suitable_for: ['severe or throbbing tooth pain', 'pain when biting', 'a dentist said root canal'],
+      },
+      {
+        name: 'Teeth whitening',
+        duration_minutes: 60,
+        suitable_for: ['wants whiter teeth', 'dull or discoloured teeth', 'before a wedding or event'],
+      },
+      {
+        name: 'Braces / aligners consultation',
+        duration_minutes: 30,
+        suitable_for: ['crooked or gapped teeth', 'overbite or underbite', 'braces or clear aligners'],
+      },
     ],
     knowledge: [
       {
@@ -32,9 +63,30 @@ const VARIANTS: Record<ClinicVariant, VariantParts> = {
   skin: {
     treatments: ['acne', 'pigmentation', 'anti_ageing', 'hair_removal', 'chemical_peel', 'other'],
     services: [
-      { name: 'Dermatologist consultation', duration_minutes: 20 },
-      { name: 'Chemical peel', duration_minutes: 45 },
-      { name: 'Laser hair removal session', duration_minutes: 45 },
+      {
+        name: 'Dermatologist consultation',
+        duration_minutes: 20,
+        suitable_for: [
+          'acne or pimples',
+          'acne scars',
+          'pigmentation, dark spots or melasma',
+          'rashes, itching or allergies',
+          'dark circles',
+          'hair fall from the scalp',
+          'fine lines or ageing skin',
+          'any skin concern',
+        ],
+      },
+      {
+        name: 'Chemical peel',
+        duration_minutes: 45,
+        suitable_for: ['dull or uneven skin tone', 'tanning', 'mild acne marks (after a consultation)'],
+      },
+      {
+        name: 'Laser hair removal session',
+        duration_minutes: 45,
+        suitable_for: ['unwanted facial or body hair'],
+      },
     ],
     knowledge: [
       {
@@ -47,9 +99,28 @@ const VARIANTS: Record<ClinicVariant, VariantParts> = {
   hair: {
     treatments: ['hair_fall', 'dandruff', 'prp', 'hair_transplant', 'other'],
     services: [
-      { name: 'Trichologist consultation', duration_minutes: 30 },
-      { name: 'PRP session', duration_minutes: 60 },
-      { name: 'Hair transplant consultation', duration_minutes: 45 },
+      {
+        name: 'Trichologist consultation',
+        duration_minutes: 30,
+        suitable_for: [
+          'hair fall or thinning',
+          'dandruff or itchy scalp',
+          'receding hairline',
+          'bald patches',
+          'premature greying',
+          'any hair or scalp concern',
+        ],
+      },
+      {
+        name: 'PRP session',
+        duration_minutes: 60,
+        suitable_for: ['already advised PRP by the doctor', 'follow-up PRP sitting'],
+      },
+      {
+        name: 'Hair transplant consultation',
+        duration_minutes: 45,
+        suitable_for: ['advanced baldness', 'wants a hair transplant'],
+      },
     ],
     knowledge: [
       {
@@ -147,8 +218,17 @@ export function clinicPreset(variant: ClinicVariant, businessName = 'Demo Clinic
         emergency_keywords: [
           'emergency',
           'severe pain',
-          'bleeding',
-          'swelling',
+          // Specific phrasings: bleeding gums or mild swelling are common reasons to book, not emergencies.
+          'bleeding a lot',
+          'heavy bleeding',
+          'bleeding badly',
+          'swelling is spreading',
+          'swelling spreading',
+          "bleeding won't stop",
+          'non stop bleeding',
+          'face swelling',
+          'swollen face',
+          'swelling in my face',
           'accident',
           'unconscious',
           'chest pain',

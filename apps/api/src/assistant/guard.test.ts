@@ -42,6 +42,8 @@ describe('inbound', () => {
     ['Hello sir, we provide digital marketing for clinics at best rates', 'vendor'],
     ['Is there any vacancy for receptionist? I can send my resume', 'job_seeker'],
     ['Sorry, wrong number', 'wrong_number'],
+    ['Can you write me a cover letter for a job?', 'genuine'], // off-topic, but a person: the assistant declines politely
+    ['Are you hiring? I can send my CV', 'job_seeker'],
     ['My gums bleed when I brush, can I see a dentist?', 'genuine'],
     ['kitna kharcha hoga braces ka?', 'genuine'],
   ])('rule-based intent: %s -> %s', (text, category) => {
