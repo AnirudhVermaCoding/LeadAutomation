@@ -144,6 +144,12 @@ export async function activeAppointment(tx: Tx, leadId: string) {
   return row ?? null;
 }
 
+/** Deadlock / serialization failure: concurrent bookings collided; retrying gives the real answer. */
+const isTransientConflict = (err: unknown) =>
+  ['40P01', '40001'].includes(
+    (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code ?? '',
+  );
+
 const isOverlapViolation = (err: unknown) =>
   (err as { code?: string; cause?: { code?: string } }).code === '23P01' ||
   (err as { cause?: { code?: string } }).cause?.code === '23P01';
@@ -192,60 +198,65 @@ export async function bookSlot(
     replaceAppointmentId?: string;
   },
 ) {
-  try {
-    return await withTenant(deps.db, tenantId, async (tx) => {
-      const config = (await getActiveConfig(tx))?.config;
-      if (!config) throw new Error('tenant has no config');
-      const service = serviceOf(config, input.service);
-      const existing = await activeAppointment(tx, input.leadId);
-      if (existing && existing.id !== input.replaceAppointmentId)
-        throw new BookingError(
-          'already_booked',
-          `Lead already has an appointment on ${formatSlot(existing.startsAt, config.locale.timezone)}; reschedule it instead`,
-        );
-
-      const tz = config.locale.timezone;
-      const start = zonedTimeToUtc(input.date, input.time, tz);
-      const slot = (
-        await slotsFor(tx, deps, config, service.name, input.date, 1, input.replaceAppointmentId)
-      ).find((s) => s.start.getTime() === start.getTime());
-      if (!slot)
-        throw new BookingError(
-          'unavailable',
-          `${formatSlot(start, tz)} is not available for ${service.name}`,
-        );
-
-      if (input.replaceAppointmentId)
-        await tx
-          .update(appointments)
-          .set({ status: 'cancelled' })
-          .where(eq(appointments.id, input.replaceAppointmentId));
-      const status: AppointmentStatus =
-        config.booking.mode === 'staff_confirm' && input.source === 'assistant' ? 'pending' : 'scheduled';
-      const [appt] = await tx
-        .insert(appointments)
-        .values({
-          leadId: input.leadId,
-          service: service.name,
-          resource: slot.resources[0] ?? 'default',
-          startsAt: slot.start,
-          endsAt: slot.end,
-          busyUntil: new Date(slot.end.getTime() + config.booking.buffer_minutes * MINUTE),
-          status,
-          source: input.source,
-        })
-        .returning();
-      if (!appt) throw new Error('appointment insert failed');
-      const rescheduled = Boolean(input.replaceAppointmentId);
-      await change(tx, deps, tenantId, appt.id, input.leadId, rescheduled ? 'rescheduled' : 'booked', {
-        type: rescheduled ? 'RESCHEDULED' : 'BOOKED',
-      });
-      return { appointment: appt, label: formatSlot(appt.startsAt, tz), pending: status === 'pending' };
-    });
-  } catch (err) {
-    if (isOverlapViolation(err)) throw new BookingError('taken', 'That time was just taken by someone else');
-    throw err;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await bookOnce(deps, tenantId, input);
+    } catch (err) {
+      if (isOverlapViolation(err))
+        throw new BookingError('taken', 'That time was just taken by someone else');
+      if (attempt < 3 && isTransientConflict(err)) continue;
+      throw err;
+    }
   }
+}
+
+function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof bookSlot>[2]) {
+  return withTenant(deps.db, tenantId, async (tx) => {
+    const config = (await getActiveConfig(tx))?.config;
+    if (!config) throw new Error('tenant has no config');
+    const service = serviceOf(config, input.service);
+    const existing = await activeAppointment(tx, input.leadId);
+    if (existing && existing.id !== input.replaceAppointmentId)
+      throw new BookingError(
+        'already_booked',
+        `Lead already has an appointment on ${formatSlot(existing.startsAt, config.locale.timezone)}; reschedule it instead`,
+      );
+
+    const tz = config.locale.timezone;
+    const start = zonedTimeToUtc(input.date, input.time, tz);
+    const slot = (
+      await slotsFor(tx, deps, config, service.name, input.date, 1, input.replaceAppointmentId)
+    ).find((s) => s.start.getTime() === start.getTime());
+    if (!slot)
+      throw new BookingError('unavailable', `${formatSlot(start, tz)} is not available for ${service.name}`);
+
+    if (input.replaceAppointmentId)
+      await tx
+        .update(appointments)
+        .set({ status: 'cancelled' })
+        .where(eq(appointments.id, input.replaceAppointmentId));
+    const status: AppointmentStatus =
+      config.booking.mode === 'staff_confirm' && input.source === 'assistant' ? 'pending' : 'scheduled';
+    const [appt] = await tx
+      .insert(appointments)
+      .values({
+        leadId: input.leadId,
+        service: service.name,
+        resource: slot.resources[0] ?? 'default',
+        startsAt: slot.start,
+        endsAt: slot.end,
+        busyUntil: new Date(slot.end.getTime() + config.booking.buffer_minutes * MINUTE),
+        status,
+        source: input.source,
+      })
+      .returning();
+    if (!appt) throw new Error('appointment insert failed');
+    const rescheduled = Boolean(input.replaceAppointmentId);
+    await change(tx, deps, tenantId, appt.id, input.leadId, rescheduled ? 'rescheduled' : 'booked', {
+      type: rescheduled ? 'RESCHEDULED' : 'BOOKED',
+    });
+    return { appointment: appt, label: formatSlot(appt.startsAt, tz), pending: status === 'pending' };
+  });
 }
 
 export async function rescheduleLeadAppointment(

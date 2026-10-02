@@ -293,6 +293,13 @@ function report(summaries: Summary[], judgeModel: string, aborted: string | null
             .join(', ')}; models may favour their own provider's style, so read that rubric score with care.`,
         ]
       : []),
+    ...(dryRun
+      ? [
+          '',
+          '> **Dry run on the rule-based mock model.** This only proves the harness works; it says nothing about real-model quality. Add provider keys to .env and run `pnpm evals` for real results.',
+          '',
+        ]
+      : []),
     `Total spend: $${spend.usd.toFixed(2)} of the $${BUDGET} cap.${aborted ? ` **Aborted early: ${aborted}.**` : ''}`,
     '',
     '| Model | Hard checks passed | Rubric (1-5) | Turn latency p50 / p95 | Cost per conversation |',

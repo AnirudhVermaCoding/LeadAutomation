@@ -4,11 +4,14 @@
 
 41 scripted customer conversations per model (apps/api/src/assistant/evals/cases.ts), run through the real pipeline (guardrails, tools, booking) on a throwaway database.
 Hard checks are deterministic; the rubric (natural, empathetic, helpful, on-brand; 1-5) is scored by one fixed judge: **fake-judge**.
+
+> **Dry run on the rule-based mock model.** This only proves the harness works; it says nothing about real-model quality. Add provider keys to .env and run `pnpm evals` for real results.
+
 Total spend: $0.00 of the $8 cap.
 
 | Model | Hard checks passed | Rubric (1-5) | Turn latency p50 / p95 | Cost per conversation |
-|---|---|---|---|---|
-| fake | 80% | 3.00 | 0.0 s / 0.0 s | $0.0000 |
+| ----- | ------------------ | ------------ | ---------------------- | --------------------- |
+| fake  | 80%                | 3.00         | 0.0 s / 0.1 s          | $0.0000               |
 
 ## Recommendation
 
