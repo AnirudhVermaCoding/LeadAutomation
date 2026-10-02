@@ -6,7 +6,7 @@ import { GoogleCard } from './GoogleCard.tsx';
 import { Badge, Button, Card, ErrorState, Field, fmt, Input, Loading } from '../../ui.tsx';
 
 interface Status {
-  whatsapp: { connected: boolean; phone_number_id: string | null };
+  whatsapp: { connected: boolean; phone_number_id: string | null; waba_id: string | null };
   lead_ads: { connected: boolean; page_id: string | null };
   channel: 'meta' | 'fake' | 'none';
   form_url: string | null;
@@ -96,6 +96,11 @@ export function Integrations({ canEdit }: { canEdit: boolean }) {
             idLabel="Phone number ID"
             tokenLabel="Permanent access token"
             current={s.whatsapp.phone_number_id}
+            extra={{
+              label: 'WhatsApp Business Account ID',
+              hint: 'Optional. Lets InstantLead read each template approval status from Meta automatically.',
+              current: s.whatsapp.waba_id,
+            }}
             path="/v1/integrations/whatsapp"
             onDone={refresh}
           />
@@ -125,6 +130,7 @@ function Connect({
   idLabel,
   tokenLabel,
   current,
+  extra,
   path,
   onDone,
 }: {
@@ -132,13 +138,20 @@ function Connect({
   idLabel: string;
   tokenLabel: string;
   current: string | null;
+  /** A second optional id sent as `waba_id` (WhatsApp only). */
+  extra?: { label: string; hint: string; current: string | null };
   path: string;
   onDone: () => unknown;
 }) {
   const [id, setId] = useState(current ?? '');
+  const [extraId, setExtraId] = useState(extra?.current ?? '');
   const [token, setToken] = useState('');
   const save = useMutation({
-    mutationFn: () => api(path, { method: 'PUT', body: { id, access_token: token } }),
+    mutationFn: () =>
+      api(path, {
+        method: 'PUT',
+        body: { id, access_token: token, ...(extraId.trim() ? { waba_id: extraId.trim() } : {}) },
+      }),
     onSuccess: () => {
       setToken('');
       return onDone();
@@ -150,6 +163,11 @@ function Connect({
         <Field label={idLabel}>
           <Input value={id} onChange={(e) => setId(e.target.value)} inputMode="numeric" />
         </Field>
+        {extra && (
+          <Field label={extra.label} hint={extra.hint}>
+            <Input value={extraId} onChange={(e) => setExtraId(e.target.value)} inputMode="numeric" />
+          </Field>
+        )}
         <Field label={tokenLabel} hint="Stored encrypted. It is never shown again.">
           <Input
             type="password"

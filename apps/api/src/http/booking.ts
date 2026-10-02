@@ -141,7 +141,13 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
     app.post(`/v1/appointments/:id/${path}`, { preHandler: staff }, async (req, reply) => {
       const { id } = z.object({ id: z.uuid() }).parse(req.params);
       return bookingErrors(reply, async () => {
-        const updated = await updateAppointment(ctx, tenantOf(req), id, kind);
+        const updated = await updateAppointment(
+          ctx,
+          tenantOf(req),
+          id,
+          kind,
+          kind === 'cancelled' ? { cancelReason: 'staff' } : {},
+        );
         await withTenant(ctx.db, tenantOf(req), (tx) =>
           audit(tx, ctx.clock, actor(req.principal), {
             action: `appointment.${kind}`,

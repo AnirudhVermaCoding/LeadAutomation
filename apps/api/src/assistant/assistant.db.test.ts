@@ -145,6 +145,16 @@ describe('safety', () => {
     expect(await t.drainAssistant()).toEqual([]);
   });
 
+  test('the emergency reply comes in the customer language (Hindi, Hinglish), English otherwise', async () => {
+    await say('9800000031', 'मसूड़ों से खून आ रहा है और बहुत दर्द है');
+    await t.drainAssistant();
+    expect((await outbound((await lead('+919800000031')).id))[0]).toMatch(/112.*|कृपया तुरंत 112/);
+    expect((await outbound((await lead('+919800000031')).id))[0]).toMatch(/कृपया तुरंत/);
+    await say('9800000032', 'mere daant se khoon aa raha hai, saans nahi le pa raha');
+    await t.drainAssistant();
+    expect((await outbound((await lead('+919800000032')).id))[0]).toMatch(/Yeh serious lag raha hai/);
+  });
+
   test('asking for a person escalates via the tool', async () => {
     await say('9800000004', 'can I talk to a real person please');
     expect(await t.drainAssistant()).toMatchObject([{ status: 'escalated' }]);

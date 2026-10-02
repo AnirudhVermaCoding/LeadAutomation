@@ -299,6 +299,10 @@ interface TemplateRow {
   providerName: string;
   category: string;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  /** Meta's own status from the last sync / webhook (PAUSED, DISABLED, …). */
+  providerStatus: string | null;
+  statusReason: string | null;
+  syncedAt: string | null;
 }
 const STATUS_TONE = {
   draft: 'bg-slate-100 text-slate-600 ring-slate-200',
@@ -320,13 +324,25 @@ export function Templates({ canEdit }: { canEdit: boolean }) {
         qc.invalidateQueries({ queryKey: ['onboarding'] }),
       ]),
   });
+  const sync = useMutation({
+    mutationFn: () => api('/v1/templates/sync', { method: 'POST', body: {} }),
+    onSuccess: () => setTimeout(() => void qc.invalidateQueries({ queryKey: ['templates'] }), 2500),
+  });
   return (
     <Card
       title="WhatsApp templates"
       actions={
-        <span className="text-xs text-slate-500">Submit them as listed in TEMPLATES-TO-SUBMIT.md</span>
+        <span className="flex items-center gap-3 text-xs text-slate-500">
+          Submit them as listed in TEMPLATES-TO-SUBMIT.md
+          {canEdit && (
+            <Button size="sm" variant="secondary" loading={sync.isPending} onClick={() => sync.mutate()}>
+              Sync from Meta
+            </Button>
+          )}
+        </span>
       }
     >
+      {sync.error && <p className="mb-2 text-sm text-red-700">{sync.error.message}</p>}
       {q.isPending && <Loading />}
       {q.error && <ErrorState error={q.error} />}
       <div className="-mx-4 overflow-x-auto">
@@ -346,6 +362,11 @@ export function Templates({ canEdit }: { canEdit: boolean }) {
                 <td className="px-2 py-2">{t.language}</td>
                 <td className="px-2 py-2">{t.category}</td>
                 <td className="px-4 py-2">
+                  {t.providerStatus && t.providerStatus !== t.status.toUpperCase() && (
+                    <span className="mr-2 text-xs text-slate-500" title={t.statusReason ?? undefined}>
+                      Meta: {t.providerStatus.toLowerCase()}
+                    </span>
+                  )}
                   {canEdit ? (
                     <Select
                       value={t.status}

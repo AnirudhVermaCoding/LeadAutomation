@@ -13,7 +13,7 @@ import type { TenantTx, Tx } from './db/client.ts';
 import { consents, events, leads, suppressions, type LeadSource } from './db/schema.ts';
 import { QUEUES, type Enqueue } from './jobs.ts';
 import type { SecretsKey } from './secrets.ts';
-import { stopOnLeadEvent } from './sequences.ts';
+import { stopEnrollments, stopOnLeadEvent } from './sequences.ts';
 
 export interface LeadDeps {
   clock: Clock;
@@ -74,6 +74,50 @@ export async function optOut(
     .onConflictDoNothing();
   await transitionLead(tx, lead.id, { type: 'OPTED_OUT' });
   await emit(tx, deps.clock, 'lead.opted_out', { leadId: lead.id, reason });
+}
+
+/**
+ * The customer asked to hear from the business again (or staff recorded that they did): lift the
+ * suppression, record fresh consent with the evidence, and restart as a new conversation.
+ */
+export async function optIn(
+  tx: Tx,
+  deps: LeadDeps,
+  tenantId: string,
+  lead: { id: string; phoneE164: string },
+  consent: { source: string; noticeText: string; evidence: Record<string, unknown> },
+) {
+  await tx
+    .delete(suppressions)
+    .where(eq(suppressions.phoneHash, hashPhone(deps.hashKey, tenantId, lead.phoneE164)));
+  await transitionLead(tx, lead.id, { type: 'OPTED_IN' });
+  await tx.insert(consents).values({ leadId: lead.id, ...consent, grantedAt: deps.clock.now() });
+  await emit(tx, deps.clock, 'lead.opted_in', { leadId: lead.id, source: consent.source });
+}
+
+/**
+ * WhatsApp says this customer stopped marketing messages (error 131050 on a send, or the
+ * user_preferences webhook). Marketing-category templates and the follow-up / review sequences stop;
+ * utility messages (reminders, confirmations) and replies inside a chat they started are unaffected.
+ */
+export async function setMarketingOptOut(
+  tx: Tx,
+  deps: Pick<LeadDeps, 'clock'>,
+  leadId: string,
+  optedOut: boolean,
+  reason: string,
+) {
+  const [lead] = await tx
+    .update(leads)
+    .set({ marketingOptOutAt: optedOut ? deps.clock.now() : null })
+    .where(eq(leads.id, leadId))
+    .returning({ id: leads.id });
+  if (!lead) return;
+  if (optedOut) await stopEnrollments(tx, leadId, ['followup', 'review_request'], 'marketing_opt_out');
+  await emit(tx, deps.clock, optedOut ? 'lead.marketing_opted_out' : 'lead.marketing_opted_in', {
+    leadId,
+    reason,
+  });
 }
 
 export interface IntakeInput {

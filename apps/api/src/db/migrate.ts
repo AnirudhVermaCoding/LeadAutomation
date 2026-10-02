@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { TEMPLATE_KEYS, TEMPLATE_LANGUAGES, TEMPLATES } from '@instantlead/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate as runMigrations } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
@@ -9,7 +10,7 @@ const migrationsFolder = fileURLToPath(new URL('../../drizzle', import.meta.url)
 
 /**
  * 1. Ensure the RLS-bound app role exists (credentials taken from the app's DATABASE_URL).
- * 2. Run drizzle migrations as the owner.
+ * 2. Run drizzle migrations as the owner, then add rows for any new template keys to existing tenants.
  * 3. Install the pg-boss schema and queues (owner-owned).
  * 4. Grant the app role CRUD, except: audit_log is append-only and auth tables are owner-only.
  *    The app role may also enqueue jobs (inside its own transactions) in the pgboss schema.
@@ -30,6 +31,16 @@ export async function migrate(ownerUrl: string, appUrl: string): Promise<void> {
     );
 
     await runMigrations(drizzle({ client }), { migrationsFolder });
+
+    // Template keys added in a release reach existing clinics too (never overwriting their approval status).
+    for (const key of TEMPLATE_KEYS)
+      for (const language of TEMPLATE_LANGUAGES)
+        await client.query(
+          `insert into templates (tenant_id, key, language, provider_name, category)
+           select id, $1, $2, $3, $4 from tenants
+           on conflict (tenant_id, key, language) do nothing`,
+          [key, language, TEMPLATES[key].providerName, TEMPLATES[key].category],
+        );
 
     const boss = createBoss(ownerUrl);
     await boss.start();

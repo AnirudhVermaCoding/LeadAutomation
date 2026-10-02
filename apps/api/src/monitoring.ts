@@ -39,6 +39,12 @@ export async function runMonitor(deps: {
       kind: 'google_reauth',
       message: `${r.name}: Google Calendar access was revoked or expired. Bookings are not syncing until an admin reconnects Google (Settings → Integrations).`,
     })),
+    ...s.templatesBlocked.map((r) => ({
+      key: `templates_blocked:${r.tenant_id}`,
+      tenantId: r.tenant_id,
+      kind: 'templates_blocked',
+      message: `${r.name}: Meta paused or disabled ${r.n} WhatsApp template(s) (${r.keys}). Messages using them fail until they are fixed in WhatsApp Manager.`,
+    })),
     ...s.calendarStale.map((r) => ({
       key: `calendar_stale:${r.tenant_id}`,
       tenantId: r.tenant_id,

@@ -68,10 +68,11 @@ const FUNNEL = {
 } as const satisfies Record<string, { from: readonly LeadState[]; to: LeadState }>;
 
 type FunnelEventType = keyof typeof FUNNEL;
-export type LeadEventType = FunnelEventType | 'OPTED_OUT' | 'HUMAN_TAKEOVER' | 'HUMAN_RESUME';
+export type LeadEventType = FunnelEventType | 'OPTED_OUT' | 'OPTED_IN' | 'HUMAN_TAKEOVER' | 'HUMAN_RESUME';
 export const LEAD_EVENT_TYPES: readonly LeadEventType[] = [
   ...(Object.keys(FUNNEL) as FunnelEventType[]),
   'OPTED_OUT',
+  'OPTED_IN',
   'HUMAN_TAKEOVER',
   'HUMAN_RESUME',
 ];
@@ -93,8 +94,13 @@ export const initialLeadStatus = (): LeadStatus => ({ state: 'new', tier: null, 
 
 /** Pure transition. Throws InvalidTransitionError when the event is not allowed. */
 export function transition(lead: LeadStatus, event: LeadEvent): LeadStatus {
-  // Opt-out always wins and is permanent; replies after opting out change nothing.
+  // Opt-out always wins; replies after opting out change nothing. Only the customer's own explicit
+  // opt-in (or staff recording one the customer gave) brings them back, as a fresh conversation.
   if (event.type === 'OPTED_OUT') return { ...lead, state: 'opted_out' };
+  if (event.type === 'OPTED_IN') {
+    if (lead.state !== 'opted_out') throw new InvalidTransitionError(lead.state, event.type);
+    return { state: 'contacted', tier: lead.tier, aiPaused: false };
+  }
   if (lead.state === 'opted_out') {
     if (event.type === 'LEAD_REPLIED') return lead;
     throw new InvalidTransitionError(lead.state, event.type);

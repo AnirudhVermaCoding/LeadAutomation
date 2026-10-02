@@ -312,3 +312,100 @@ describe('lead ads', () => {
     });
   });
 });
+
+describe('template and preference webhooks', () => {
+  const envelope = (id: string, field: string, value: object) => ({
+    object: 'whatsapp_business_account',
+    entry: [{ id, changes: [{ field, value }] }],
+  });
+
+  test('template status and category updates carry the WABA id', () => {
+    expect(
+      parseMetaWebhook(
+        envelope('555', 'message_template_status_update', {
+          event: 'PAUSED',
+          message_template_id: 1,
+          message_template_name: 'il_first_reply',
+          message_template_language: 'en_US',
+          reason: 'Low quality',
+          message_template_category: 'UTILITY',
+        }),
+      ),
+    ).toEqual([
+      {
+        type: 'template_status',
+        wabaId: '555',
+        event: 'PAUSED',
+        name: 'il_first_reply',
+        language: 'en_US',
+        reason: 'Low quality',
+        category: 'UTILITY',
+      },
+    ]);
+    expect(
+      parseMetaWebhook(
+        envelope('555', 'message_template_category_update', {
+          message_template_name: 'il_followup_day2',
+          message_template_language: 'en',
+          new_category: 'MARKETING',
+          previous_category: 'UTILITY',
+        }),
+      ),
+    ).toEqual([
+      {
+        type: 'template_category',
+        wabaId: '555',
+        name: 'il_followup_day2',
+        language: 'en',
+        newCategory: 'MARKETING',
+      },
+    ]);
+  });
+
+  test('user_preferences (stop / resume marketing) becomes an event with the customer E.164 number', () => {
+    expect(
+      parseMetaWebhook(
+        envelope('555', 'user_preferences', {
+          messaging_product: 'whatsapp',
+          metadata: { display_phone_number: '15550783881', phone_number_id: '106540352242922' },
+          contacts: [{ wa_id: '919876543210' }],
+          user_preferences: [
+            {
+              wa_id: '919876543210',
+              detail: 'User requested to stop marketing messages',
+              category: 'marketing_messages',
+              value: 'stop',
+              timestamp: 1731705721,
+            },
+          ],
+        }),
+      ),
+    ).toEqual([
+      {
+        type: 'user_preference',
+        phoneNumberId: '106540352242922',
+        from: '+919876543210',
+        category: 'marketing_messages',
+        value: 'stop',
+      },
+    ]);
+  });
+
+  test('a template event without an entry id is ignored, not an error', () => {
+    expect(
+      parseMetaWebhook({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            changes: [
+              {
+                field: 'message_template_status_update',
+                value: { event: 'APPROVED', message_template_name: 'x', message_template_language: 'en' },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+});

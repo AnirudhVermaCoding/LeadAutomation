@@ -8,7 +8,11 @@ import {
 } from '@instantlead/integrations';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { handleInboundMessage, handleStatusUpdate } from '../inbound.ts';
+import { and, eq } from 'drizzle-orm';
+import { withTenant } from '../db/client.ts';
+import { templates } from '../db/schema.ts';
+import { handleInboundMessage, handleStatusUpdate, handleUserPreference } from '../inbound.ts';
+import { applyTemplateStatuses, languageOf } from '../template-sync.ts';
 import { QUEUES } from '../jobs.ts';
 import { runScheduledReports } from '../reports.ts';
 import { runStaffDigest } from '../staff-digest.ts';
@@ -49,7 +53,9 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
         const tenantId =
           e.type === 'leadgen'
             ? await ctx.system.findTenantIdBy('metaPageId', e.pageId)
-            : await ctx.system.findTenantIdBy('waPhoneNumberId', e.phoneNumberId);
+            : e.type === 'template_status' || e.type === 'template_category'
+              ? await ctx.system.findTenantIdBy('wabaId', e.wabaId)
+              : await ctx.system.findTenantIdBy('waPhoneNumberId', e.phoneNumberId);
         if (!tenantId) {
           req.log.warn({ type: e.type }, 'webhook for an unknown number/page; ignored');
           continue;
@@ -66,6 +72,28 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
             profileName: e.profileName,
           });
         else if (e.type === 'status') await handleStatusUpdate(ctx, tenantId, e);
+        else if (e.type === 'template_status')
+          await withTenant(ctx.db, tenantId, (tx) =>
+            applyTemplateStatuses(tx, ctx.clock, [
+              { name: e.name, language: e.language, status: e.event, category: e.category, reason: e.reason },
+            ]),
+          );
+        else if (e.type === 'template_category')
+          await withTenant(ctx.db, tenantId, async (tx) => {
+            const language = languageOf(e.language);
+            const category =
+              e.newCategory.toUpperCase() === 'MARKETING'
+                ? 'marketing'
+                : e.newCategory.toUpperCase() === 'UTILITY'
+                  ? 'utility'
+                  : null;
+            if (language && category)
+              await tx
+                .update(templates)
+                .set({ category })
+                .where(and(eq(templates.providerName, e.name), eq(templates.language, language)));
+          });
+        else if (e.type === 'user_preference') await handleUserPreference(ctx, tenantId, e);
         // Meta may retry a webhook; a duplicate job just finds the lead already exists.
         else
           await ctx.enqueue(null, QUEUES.metaLeadgen, { tenantId, leadgenId: e.leadgenId, formId: e.formId });

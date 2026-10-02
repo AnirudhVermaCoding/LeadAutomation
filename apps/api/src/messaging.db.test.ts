@@ -169,6 +169,12 @@ describe('WhatsApp rules', () => {
     });
     const lead = (await leadByPhone(A, '+919822233344'))!;
     expect(lead.state).toBe('opted_out');
+    // The only message an opted-out number ever gets: the confirmation of the opt-out itself.
+    const confirmation = await t.drainJobs();
+    expect(confirmation).toMatchObject([{ queue: 'lead-notice', result: { status: 'sent' } }]);
+    expect(
+      (await thread(A, lead.id)).some((m) => /unsubscribed from Smile Dental.*reply START/.test(m.body)),
+    ).toBe(true);
     expect(
       await sendToLead(t.ctx, A, {
         leadId: lead.id,
@@ -205,6 +211,7 @@ describe('WhatsApp rules', () => {
     expect((await leadByPhone(A, '+919833300002'))?.state).toBe('opted_out');
     await inbound({ from: '9833300003', button_payload: 'first_reply:stop' });
     expect((await leadByPhone(A, '+919833300003'))?.state).toBe('opted_out');
+    await t.drainJobs(); // their opt-out confirmations
   });
 });
 

@@ -151,6 +151,15 @@ function Conversation({
     mutationFn: () => api(`/v1/leads/${leadId}/real-lead`, { method: 'POST' }),
     onSettled: refresh,
   });
+  // Customer told the front desk (call, in person) to stop, or asked to be messaged again.
+  const optOut = useMutation({
+    mutationFn: () => api(`/v1/leads/${leadId}/opt-out`, { method: 'POST', body: {} }),
+    onSettled: refresh,
+  });
+  const optIn = useMutation({
+    mutationFn: (note: string) => api(`/v1/leads/${leadId}/opt-in`, { body: { note } }),
+    onSettled: refresh,
+  });
   const [text, setText] = useState('');
   const send = useMutation({
     mutationFn: () => api(`/v1/leads/${leadId}/messages`, { body: { text } }),
@@ -266,6 +275,34 @@ function Conversation({
             {lead.aiPaused
               ? 'AI is paused for this lead.'
               : 'Sending a reply does not pause the AI. Use "Take over" for that.'}
+            {lead.state !== 'opted_out' ? (
+              <button
+                type="button"
+                className="ml-2 text-slate-600 underline-offset-2 hover:underline"
+                onClick={() =>
+                  confirm(
+                    'Record that this person asked us to stop messaging them? Nothing more will be sent to them.',
+                  ) && optOut.mutate()
+                }
+              >
+                Record opt-out
+              </button>
+            ) : (
+              canErase && (
+                <button
+                  type="button"
+                  className="ml-2 text-slate-600 underline-offset-2 hover:underline"
+                  onClick={() => {
+                    const note = prompt(
+                      'How did they ask to be messaged again? (kept as the consent record)',
+                    );
+                    if (note && note.trim().length >= 5) optIn.mutate(note.trim());
+                  }}
+                >
+                  Record opt-in
+                </button>
+              )
+            )}
             {canErase && (
               <button
                 type="button"

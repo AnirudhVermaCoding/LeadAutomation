@@ -359,6 +359,26 @@ export function QualificationSection({ draft, edit }: Props) {
               onChange={(e) => edit((d) => void (d.qualification.safety.emergency_response = e.target.value))}
             />
           </Field>
+          {(['hi', 'hinglish'] as const).map((lang) => (
+            <Field
+              key={lang}
+              label={`Emergency reply in ${lang === 'hi' ? 'Hindi' : 'Hinglish'} (optional)`}
+              hint="Sent when the customer writes in this language; otherwise the reply above."
+            >
+              <Textarea
+                value={q.safety.emergency_response_i18n?.[lang] ?? ''}
+                onChange={(e) =>
+                  edit((d) => {
+                    const s = d.qualification.safety;
+                    s.emergency_response_i18n = {
+                      ...s.emergency_response_i18n,
+                      [lang]: e.target.value || undefined,
+                    };
+                  })
+                }
+              />
+            </Field>
+          ))}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

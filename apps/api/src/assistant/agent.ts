@@ -48,7 +48,7 @@ import {
   activeAppointment,
   BookingError,
   findSlots,
-  lastDisplacedAppointment,
+  lastCancelledAppointment,
   updateAppointment,
 } from '../booking.ts';
 import { alertStaff, escalate, loadAnswers, runTool } from './tools.ts';
@@ -179,10 +179,12 @@ export async function runAssistantTurn(
   // Safety first, without the model: emergencies get the fixed reply and a person, immediately.
   const safety = config.qualification.safety;
   if (safety.emergency_keywords.length && matchesEmergency(ctx.inboundText, safety.emergency_keywords)) {
-    await reply(
-      fillVariables(safety.emergency_response, { business_name: config.brand.business_name }),
-      'emergency',
-    );
+    // In the customer's own language when the clinic wrote that version; English otherwise.
+    const text =
+      (lead.language === 'hi' ? safety.emergency_response_i18n?.hi : undefined) ??
+      (lead.language === 'hinglish' ? safety.emergency_response_i18n?.hinglish : undefined) ??
+      safety.emergency_response;
+    await reply(fillVariables(text, { business_name: config.brand.business_name }), 'emergency');
     await escalate(tool, 'emergency keywords');
     return { status: 'escalated', reason: 'emergency' };
   }
@@ -196,9 +198,12 @@ export async function runAssistantTurn(
       await reply('Sure — someone from our team will call you shortly.', 'button');
       return { status: 'escalated', reason: 'call requested' };
     }
-    if (button.key === 'appointment_change' && button.buttonId === 'times') {
-      // Rebooking after the business cancelled: same service, similar time of day if possible.
-      const old = await withTenant(deps.db, tenantId, (tx) => lastDisplacedAppointment(tx, leadId));
+    if (
+      (button.key === 'appointment_change' && button.buttonId === 'times') ||
+      (button.key === 'cancellation' && button.buttonId === 'rebook')
+    ) {
+      // Rebooking after a cancellation: same service, similar time of day if possible.
+      const old = await withTenant(deps.db, tenantId, (tx) => lastCancelledAppointment(tx, leadId));
       const service = old?.service ?? config.booking.services[0]?.name ?? '';
       const hour = old ? Number(localParts(old.startsAt, config.locale.timezone).time.slice(0, 2)) : 12;
       const prefer = hour < 12 ? 'morning' : hour < 16 ? 'afternoon' : 'evening';
@@ -228,7 +233,9 @@ export async function runAssistantTurn(
       try {
         if (button.buttonId === 'cancel') {
           // The cancellation message itself is sent by the appointment-notify job.
-          await updateAppointment(deps, tenantId, ctx.appointmentId, 'cancelled');
+          await updateAppointment(deps, tenantId, ctx.appointmentId, 'cancelled', {
+            cancelReason: 'customer',
+          });
           return { status: 'replied', reason: 'cancelled by button' };
         }
         await updateAppointment(deps, tenantId, ctx.appointmentId, 'lead_confirmed');

@@ -24,6 +24,7 @@ Use the exact **name**, **category** and **language**; body variables are positi
 | `il_staff_new_booking` | utility | To clinic staff: a new booking or booking request needs attention. |
 | `il_staff_handover` | utility | To clinic staff: a conversation needs a person (handover, emergency, photo or voice note received). |
 | `il_appointment_change` | utility | The booked time can no longer go ahead (doctor / agent unavailable, closure); offers new times. |
+| `il_cancellation` | utility | The appointment was cancelled (by staff, or at the customer request) and the 24-hour chat window is closed, so a plain message cannot be sent. |
 | `il_running_late` | utility | Sent by staff from Today when the doctor / agent is running late. |
 | `il_staff_update` | utility | To staff: something needs a look (unconfirmed booking or reminder, auto-confirmed booking, unmarked visits). |
 
@@ -287,12 +288,35 @@ Quick-reply buttons: `Show new times` · `Call me`
 
 Quick-reply buttons: `नए समय दिखाएँ` · `मुझे कॉल करें`
 
+## `il_cancellation`
+
+- **Category:** utility
+- **Purpose:** The appointment was cancelled (by staff, or at the customer request) and the 24-hour chat window is closed, so a plain message cannot be sent.
+- **Variables:** `{{1}}` = first_name, `{{2}}` = appointment.service, `{{3}}` = appointment.time, `{{4}}` = business_name
+- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = consultation, `{{3}}` = 6 Oct, 11:30 AM, `{{4}}` = Smile Dental
+
+**English (`en`)**
+
+```text
+Hi {{1}}, your {{2}} on {{3}} at {{4}} has been cancelled. If you would like a new time, tap below and we will find one for you.
+```
+
+Quick-reply buttons: `Book a new time`
+
+**Hindi (`hi`)**
+
+```text
+नमस्ते {{1}}, {{4}} में {{3}} को आपकी {{2}} रद्द कर दी गई है। नया समय चाहिए तो नीचे टैप करें, हम आपके लिए ढूंढ देंगे।
+```
+
+Quick-reply buttons: `नया समय बुक करें`
+
 ## `il_running_late`
 
 - **Category:** utility
 - **Purpose:** Sent by staff from Today when the doctor / agent is running late.
 - **Variables:** `{{1}}` = first_name, `{{2}}` = business_name, `{{3}}` = delay_minutes, `{{4}}` = appointment.time
-- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = Smile Dental, `{{3}}` = undefined, `{{4}}` = 6 Oct, 11:30 AM
+- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = Smile Dental, `{{3}}` = 20, `{{4}}` = 6 Oct, 11:30 AM
 
 **English (`en`)**
 
@@ -311,7 +335,7 @@ Hi {{1}}, a quick heads-up from {{2}}: we are running about {{3}} minutes late t
 - **Category:** utility
 - **Purpose:** To staff: something needs a look (unconfirmed booking or reminder, auto-confirmed booking, unmarked visits).
 - **Variables:** `{{1}}` = note
-- **Sample values (for Meta review):** `{{1}}` = undefined
+- **Sample values (for Meta review):** `{{1}}` = Priya has not confirmed tomorrow at 11:30 AM
 
 **English (`en`)**
 

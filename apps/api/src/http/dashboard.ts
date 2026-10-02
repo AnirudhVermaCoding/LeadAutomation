@@ -17,7 +17,7 @@ import {
   templates,
   tenantConfigs,
 } from '../db/schema.ts';
-import { transitionLead } from '../leads.ts';
+import { optIn, optOut, transitionLead } from '../leads.ts';
 import { integrationHealth, runMonitor } from '../monitoring.ts';
 import { sendToLead } from '../outbound.ts';
 import { computeReport, listReports, renderReportEmail } from '../reports.ts';
@@ -35,6 +35,12 @@ const GO_LIVE_TEMPLATES = [
   'booking_pending',
   'reminder_24h',
   'reminder_2h',
+  'cancellation',
+  'appointment_change',
+  // To staff: without these approved, alerts to the clinic's WhatsApp never arrive.
+  'staff_new_booking',
+  'staff_handover',
+  'staff_update',
 ];
 
 export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
@@ -104,6 +110,48 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
       return s;
     });
     return status ?? reply.code(404).send({ error: 'not_found' });
+  });
+
+  // The customer told staff (a call, in person) to stop messaging them, or asked to be messaged again.
+  // Opting back in needs a note of how they asked: it is kept as the consent evidence.
+  app.post('/v1/leads/:id/opt-out', { preHandler: staff }, async (req, reply) => {
+    const id = leadParam(req);
+    const done = await withTenant(ctx.db, tenantOf(req), async (tx) => {
+      const [lead] = await tx.select().from(leads).where(eq(leads.id, id));
+      if (!lead) return null;
+      await optOut(tx, ctx, tenantOf(req), lead, 'manual');
+      await audit(tx, ctx.clock, actor(req.principal), {
+        action: 'lead.opted_out_by_staff',
+        entityType: 'lead',
+        entityId: id,
+      });
+      return true;
+    });
+    return done ? { opted_out: true } : reply.code(404).send({ error: 'not_found' });
+  });
+
+  app.post('/v1/leads/:id/opt-in', { preHandler: admins }, async (req, reply) => {
+    const id = leadParam(req);
+    const { note } = z.strictObject({ note: z.string().trim().min(5).max(300) }).parse(req.body);
+    const done = await withTenant(ctx.db, tenantOf(req), async (tx) => {
+      const [lead] = await tx.select().from(leads).where(eq(leads.id, id));
+      if (!lead) return 'missing' as const;
+      if (lead.state !== 'opted_out') return 'not_opted_out' as const;
+      await optIn(tx, ctx, tenantOf(req), lead, {
+        source: 'staff_recorded',
+        noticeText: 'Staff recorded that the customer asked to receive messages again.',
+        evidence: { note, by: req.principal?.kind === 'user' ? req.principal.userId : null },
+      });
+      await audit(tx, ctx.clock, actor(req.principal), {
+        action: 'lead.opted_in_by_staff',
+        entityType: 'lead',
+        entityId: id,
+      });
+      return 'ok' as const;
+    });
+    if (done === 'missing') return reply.code(404).send({ error: 'not_found' });
+    if (done === 'not_opted_out') return reply.code(409).send({ error: 'not_opted_out' });
+    return { opted_in: true };
   });
 
   // Staff typing in the inbox: free-form, so only inside the 24 h window.

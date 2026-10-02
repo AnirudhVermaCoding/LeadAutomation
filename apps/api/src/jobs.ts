@@ -17,6 +17,9 @@ export const QUEUES = {
   staffAlert: 'staff-alert',
   calendarRemove: 'calendar-remove',
   calendarSync: 'calendar-sync',
+  leadNotice: 'lead-notice',
+  templateSync: 'template-sync',
+  templateSyncCron: 'template-sync-cron',
   calendarSweep: 'calendar-sweep',
   deadLetter: 'dead-letter',
 } as const;
@@ -27,6 +30,16 @@ export interface JobData {
   [QUEUES.assistantTurn]: { tenantId: string; leadId: string };
   [QUEUES.sequenceSweep]: Record<string, never>;
   [QUEUES.calendarSweep]: Record<string, never>;
+  [QUEUES.templateSyncCron]: Record<string, never>;
+  /** Pull this tenant's template approval statuses from Meta. */
+  [QUEUES.templateSync]: { tenantId: string };
+  /** A fixed confirmation to the customer: they just opted out or back in. `key` makes it idempotent. */
+  [QUEUES.leadNotice]: {
+    tenantId: string;
+    leadId: string;
+    kind: 'opt_out_confirmed' | 'opt_in_confirmed';
+    key: string;
+  };
   /** Bring one Google calendar's busy time up to date (push notification, sweep or reconnect). `full` = from scratch. */
   [QUEUES.calendarSync]: { tenantId: string; linkId: string; full?: boolean };
   [QUEUES.sequenceStep]: { tenantId: string; stepId: string };
@@ -65,6 +78,7 @@ export async function ensureQueues(boss: PgBoss) {
   // One sweep at a time (cron fires every minute).
   for (const cron of [
     QUEUES.sequenceSweep,
+    QUEUES.templateSyncCron,
     QUEUES.calendarSweep,
     QUEUES.reportsCron,
     QUEUES.monitorCron,
@@ -79,6 +93,8 @@ export async function ensureQueues(boss: PgBoss) {
     QUEUES.webhookDeliver,
     QUEUES.staffAlert,
     QUEUES.calendarRemove,
+    QUEUES.leadNotice,
+    QUEUES.templateSync,
   ])
     await boss.createQueue(name, RETRY);
   // One queued + one running sync per calendar (singletonKey = link id): a burst of push notifications is one sync.

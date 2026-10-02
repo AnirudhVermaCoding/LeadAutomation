@@ -48,7 +48,7 @@ const normalise = (s: string) =>
  * "don't stop, I want to book" doesn't unsubscribe anyone; multi-word phrases
  * ("stop messages", "band karo") may appear anywhere in the message.
  */
-export function isOptOutMessage(text: string, keywords: readonly string[]): boolean {
+export function matchesKeyword(text: string, keywords: readonly string[]): boolean {
   const msg = normalise(text);
   if (!msg) return false;
   return keywords.some((k) => {
@@ -57,6 +57,10 @@ export function isOptOutMessage(text: string, keywords: readonly string[]): bool
     return kw.includes(' ') ? ` ${msg} `.includes(` ${kw} `) : msg === kw;
   });
 }
+
+export const isOptOutMessage = matchesKeyword;
+/** "START" / "subscribe": the customer asking to hear from the business again (same matching rules). */
+export const isOptInMessage = matchesKeyword;
 
 /**
  * Emergency pre-check, run before the AI sees a message: any configured keyword anywhere

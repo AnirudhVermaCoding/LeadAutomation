@@ -12,6 +12,7 @@ import { audit, type Actor } from '../audit.ts';
 import { getActiveConfig, saveConfig } from '../config-store.ts';
 import { withTenant } from '../db/client.ts';
 import { conversations, leads, messages, templates } from '../db/schema.ts';
+import { QUEUES } from '../jobs.ts';
 import { getTenantSecret, setTenantSecret } from '../secrets.ts';
 import type { AppContext } from '../system/context.ts';
 import { guard, type Principal } from './auth.ts';
@@ -89,7 +90,11 @@ export function registerRoutes(app: FastifyInstance, ctx: AppContext) {
       );
     const whatsappConnected = Boolean(routing?.waPhoneNumberId) && (await has('whatsapp_access_token'));
     return {
-      whatsapp: { connected: whatsappConnected, phone_number_id: routing?.waPhoneNumberId ?? null },
+      whatsapp: {
+        connected: whatsappConnected,
+        phone_number_id: routing?.waPhoneNumberId ?? null,
+        waba_id: routing?.wabaId ?? null,
+      },
       lead_ads: {
         connected: Boolean(routing?.metaPageId) && (await has('meta_page_access_token')),
         page_id: routing?.metaPageId ?? null,
@@ -102,13 +107,20 @@ export function registerRoutes(app: FastifyInstance, ctx: AppContext) {
   const ConnectBody = z.strictObject({
     id: z.string().regex(/^\d{5,30}$/, 'numeric Meta id'),
     access_token: z.string().min(20),
+    /** WhatsApp Business Account id (WhatsApp only): lets us read template approval from Meta. */
+    waba_id: z
+      .string()
+      .regex(/^\d{5,30}$/, 'numeric WhatsApp Business Account id')
+      .optional(),
   });
   const connect = (kind: 'whatsapp' | 'lead_ads') => async (req: FastifyRequest) => {
     const body = ConnectBody.parse(req.body);
     const tenantId = tenantOf(req);
     await ctx.system.setTenantRouting(
       tenantId,
-      kind === 'whatsapp' ? { waPhoneNumberId: body.id } : { metaPageId: body.id },
+      kind === 'whatsapp'
+        ? { waPhoneNumberId: body.id, ...(body.waba_id ? { wabaId: body.waba_id } : {}) }
+        : { metaPageId: body.id },
     );
     await withTenant(ctx.db, tenantId, async (tx) => {
       const secret = kind === 'whatsapp' ? 'whatsapp_access_token' : 'meta_page_access_token';
@@ -119,6 +131,8 @@ export function registerRoutes(app: FastifyInstance, ctx: AppContext) {
         entityId: kind,
       });
     });
+    // First sight of the WABA id: read the real approval status of every template right away.
+    if (kind === 'whatsapp' && body.waba_id) await ctx.enqueue(null, QUEUES.templateSync, { tenantId });
     return { connected: true };
   };
   app.put('/v1/integrations/whatsapp', { preHandler: tenantAdmins }, connect('whatsapp'));
@@ -131,6 +145,18 @@ export function registerRoutes(app: FastifyInstance, ctx: AppContext) {
       tx.select().from(templates).orderBy(asc(templates.key), asc(templates.language)),
     ),
   );
+
+  // Read approval statuses from Meta now (needs the WhatsApp Business Account id).
+  app.post('/v1/templates/sync', { preHandler: tenantAdmins }, async (req, reply) => {
+    const routing = await ctx.system.getTenantRouting(tenantOf(req));
+    if (!routing?.wabaId)
+      return reply.code(409).send({
+        error: 'no_waba_id',
+        message: 'Save the WhatsApp Business Account id under Integrations → WhatsApp first.',
+      });
+    await ctx.enqueue(null, QUEUES.templateSync, { tenantId: tenantOf(req) });
+    return { queued: true };
+  });
 
   const TemplateParams = z.object({ key: z.enum(TEMPLATE_KEYS), language: z.enum(TEMPLATE_LANGUAGES) });
   const TemplateBody = z.strictObject({

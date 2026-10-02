@@ -57,6 +57,8 @@ const SAMPLES: Record<string, string> = {
   'appointment.time': '6 Oct, 11:30 AM',
   'appointment.date': '6 Oct',
   review_link: 'https://g.page/r/example/review',
+  note: 'Priya has not confirmed tomorrow at 11:30 AM',
+  delay_minutes: '20',
 };
 
 if (import.meta.main) {

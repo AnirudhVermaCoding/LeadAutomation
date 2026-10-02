@@ -228,6 +228,9 @@ async function booking(
     }
     case 'cancel':
       await cancelLeadAppointment(deps, tenantId, leadId);
-      return { cancelled: true };
+      return {
+        cancelled: true,
+        note: 'A cancellation message with the details is sent automatically: do not repeat it. Add at most one warm line, e.g. offering a new time.',
+      };
   }
 }

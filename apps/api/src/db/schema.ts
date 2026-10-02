@@ -64,6 +64,8 @@ export const tenants = pgTable(
       .default(sql`replace(gen_random_uuid()::text, '-', '')`),
     /** Webhook routing: Meta sends one webhook per app, we find the tenant by these ids. */
     waPhoneNumberId: text().unique(),
+    /** The WhatsApp Business Account id: template status webhooks arrive under it, and templates are listed through it. */
+    wabaId: text().unique(),
     metaPageId: text().unique(),
     ...timestamps,
   },
@@ -218,6 +220,8 @@ export const leads = pgTable(
     aiPaused: boolean().notNull().default(false),
     /** Set when the first messages show this isn't a real enquiry (spam, vendor, wrong number…). Excluded from reports. */
     notALead: text({ enum: ['wrong_number', 'vendor', 'job_seeker', 'spam', 'auto_reply'] }),
+    /** WhatsApp told us this customer stopped marketing messages (error 131050 or the user_preferences webhook). Utility messages and chat replies are unaffected. */
+    marketingOptOutAt: ts(),
     receivedAt: ts().notNull(),
     ...timestamps,
   },
@@ -327,6 +331,10 @@ export const templates = pgTable(
     status: text({ enum: ['draft', 'submitted', 'approved', 'rejected'] })
       .notNull()
       .default('draft'),
+    /** Meta's own status (APPROVED, PENDING, REJECTED, PAUSED, DISABLED, …) from the last sync or webhook. */
+    providerStatus: text(),
+    statusReason: text(),
+    syncedAt: ts(),
     ...timestamps,
   },
   (t) => [unique().on(t.tenantId, t.key, t.language), tenantScoped()],

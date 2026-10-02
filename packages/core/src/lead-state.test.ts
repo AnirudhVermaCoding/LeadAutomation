@@ -43,15 +43,26 @@ describe('lead state machine', () => {
     expect(end).toEqual({ state: 'completed', tier: 'warm', aiPaused: false });
   });
 
-  test('opt-out wins from every state and can never be left', () => {
+  test('opt-out wins from every state and is left only by an explicit opt-in', () => {
     for (const s of LEAD_STATES) {
       const out = transition(at(s), { type: 'OPTED_OUT' });
       expect(out.state).toBe('opted_out');
       for (const e of LEAD_EVENT_TYPES) {
-        if (canTransition(out, ev(e))) expect(transition(out, ev(e)).state).toBe('opted_out');
+        if (e !== 'OPTED_IN' && canTransition(out, ev(e)))
+          expect(transition(out, ev(e)).state).toBe('opted_out');
       }
     }
     expect(canTransition(at('opted_out'), { type: 'HUMAN_TAKEOVER' })).toBe(false);
+  });
+
+  test('opt-in works only from opted_out and starts a fresh conversation', () => {
+    expect(transition(at('opted_out'), { type: 'OPTED_IN' })).toEqual({
+      state: 'contacted',
+      tier: null,
+      aiPaused: false,
+    });
+    for (const s of LEAD_STATES.filter((x) => x !== 'opted_out'))
+      expect(canTransition(at(s), { type: 'OPTED_IN' })).toBe(false);
   });
 
   test('human takeover pauses the AI without touching the funnel', () => {

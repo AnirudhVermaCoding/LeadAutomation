@@ -27,6 +27,7 @@ const RESCHEDULE = { id: 'reschedule', text: { en: 'Reschedule', hi: 'समय 
 const CANCEL = { id: 'cancel', text: { en: 'Cancel', hi: 'रद्द करें' } };
 const YES = { id: 'yes', text: { en: 'Yes, please', hi: 'हाँ, ज़रूर' } };
 const SHOW_TIMES = { id: 'times', text: { en: 'Show new times', hi: 'नए समय दिखाएँ' } };
+const REBOOK = { id: 'rebook', text: { en: 'Book a new time', hi: 'नया समय बुक करें' } };
 const CALL_ME = { id: 'call', text: { en: 'Call me', hi: 'मुझे कॉल करें' } };
 
 export const TEMPLATES = {
@@ -167,6 +168,18 @@ export const TEMPLATES = {
       hi: 'नमस्ते {{1}}, हमें खेद है: {{4}} में {{3}} को आपकी {{2}} हमारी ओर से अचानक बदलाव के कारण तय समय पर नहीं हो पाएगी। नीचे टैप करें, हम तुरंत नया समय ढूंढ देंगे।',
     },
     buttons: [SHOW_TIMES, CALL_ME],
+  },
+  cancellation: {
+    providerName: 'il_cancellation',
+    category: 'utility',
+    purpose:
+      'The appointment was cancelled (by staff, or at the customer request) and the 24-hour chat window is closed, so a plain message cannot be sent.',
+    variables: ['first_name', 'appointment.service', 'appointment.time', 'business_name'],
+    body: {
+      en: 'Hi {{1}}, your {{2}} on {{3}} at {{4}} has been cancelled. If you would like a new time, tap below and we will find one for you.',
+      hi: 'नमस्ते {{1}}, {{4}} में {{3}} को आपकी {{2}} रद्द कर दी गई है। नया समय चाहिए तो नीचे टैप करें, हम आपके लिए ढूंढ देंगे।',
+    },
+    buttons: [REBOOK],
   },
   running_late: {
     providerName: 'il_running_late',

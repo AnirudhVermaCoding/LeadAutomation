@@ -99,7 +99,7 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
     },
 
     /** Webhook / hosted-form routing: which tenant owns this WhatsApp number, Facebook page or form? */
-    async findTenantIdBy(field: 'waPhoneNumberId' | 'metaPageId' | 'formKey', value: string) {
+    async findTenantIdBy(field: 'waPhoneNumberId' | 'metaPageId' | 'formKey' | 'wabaId', value: string) {
       const [row] = await systemDb.select({ id: tenants.id }).from(tenants).where(eq(tenants[field], value));
       return row?.id ?? null;
     },
@@ -108,6 +108,7 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
       const [row] = await systemDb
         .select({
           waPhoneNumberId: tenants.waPhoneNumberId,
+          wabaId: tenants.wabaId,
           metaPageId: tenants.metaPageId,
           formKey: tenants.formKey,
         })
@@ -116,7 +117,10 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
       return row ?? null;
     },
 
-    async setTenantRouting(tenantId: string, routing: { waPhoneNumberId?: string; metaPageId?: string }) {
+    async setTenantRouting(
+      tenantId: string,
+      routing: { waPhoneNumberId?: string; wabaId?: string | null; metaPageId?: string },
+    ) {
       await systemDb.update(tenants).set(routing).where(eq(tenants.id, tenantId));
     },
 
@@ -263,6 +267,14 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
       return row;
     },
 
+    /** Tenants with a WhatsApp Business Account id (the daily template sync). */
+    async tenantsWithWaba() {
+      return systemDb
+        .select({ id: tenants.id })
+        .from(tenants)
+        .where(sql`${tenants.wabaId} is not null`);
+    },
+
     /** Cross-tenant health signals for the agency monitor (real time, DB clock). */
     async monitorSignals() {
       const rows = async <T extends Record<string, unknown>>(q: ReturnType<typeof sql>) =>
@@ -297,6 +309,12 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         googleReauth: await rows<{ tenant_id: string; name: string }>(sql`
           select g.tenant_id, t.name from google_connections g join tenants t on t.id = g.tenant_id
           where g.status = 'reauth_needed'`),
+        // A template that was approved is now paused / disabled / flagged by Meta: sends using it will fail.
+        templatesBlocked: await rows<{ tenant_id: string; name: string; n: string; keys: string }>(sql`
+          select tp.tenant_id, t.name, count(*) as n, string_agg(distinct tp.key, ', ') as keys
+          from templates tp join tenants t on t.id = tp.tenant_id
+          where tp.provider_status in ('PAUSED', 'DISABLED', 'FLAGGED', 'LOCKED')
+          group by tp.tenant_id, t.name`),
         // A calendar that should be syncing hasn't for 30+ minutes: busy time may be stale.
         calendarStale: await rows<{ tenant_id: string; name: string; n: string }>(sql`
           select l.tenant_id, t.name, count(*) as n from calendar_links l join tenants t on t.id = l.tenant_id

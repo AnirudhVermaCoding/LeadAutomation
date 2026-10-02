@@ -9,6 +9,8 @@ import { registerHttp } from '../src/http/index.ts';
 import { QUEUES, type JobData } from '../src/jobs.ts';
 import { createAppContext } from '../src/system/context.ts';
 import { runAssistantTurn } from '../src/assistant/agent.ts';
+import { sendLeadNotice } from '../src/notices.ts';
+import { syncTemplates } from '../src/template-sync.ts';
 import { runCalendarSync, sweepCalendars } from '../src/calendar-sync.ts';
 import { notifyAppointmentChange, notifyStaffAlert, removeCalendarEvents } from '../src/notify.ts';
 import { runStep, sweepDueSteps } from '../src/sequences.ts';
@@ -103,6 +105,8 @@ export async function createTestContext(
         [QUEUES.sequenceStep]: (d: JobData['sequence-step']) => runStep(ctx, d),
         [QUEUES.webhookDeliver]: (d: JobData['webhook-deliver']) => deliverWebhook(ctx, d),
         [QUEUES.staffAlert]: (d: JobData['staff-alert']) => notifyStaffAlert(ctx, d),
+        [QUEUES.templateSync]: (d: JobData['template-sync']) => syncTemplates(ctx, d),
+        [QUEUES.leadNotice]: (d: JobData['lead-notice']) => sendLeadNotice(ctx, d),
         [QUEUES.calendarSync]: (d: JobData['calendar-sync']) => runCalendarSync(ctx, d),
         [QUEUES.calendarRemove]: (d: JobData['calendar-remove']) => removeCalendarEvents(ctx, d),
       } as Record<string, (d: never) => Promise<unknown>>;

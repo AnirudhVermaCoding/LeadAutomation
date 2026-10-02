@@ -401,7 +401,7 @@ export async function updateAppointment(
 export async function cancelLeadAppointment(deps: BookingDeps, tenantId: string, leadId: string) {
   const current = await withTenant(deps.db, tenantId, (tx) => activeAppointment(tx, leadId));
   if (!current) throw new BookingError('no_appointment', 'There is no upcoming appointment to cancel');
-  return updateAppointment(deps, tenantId, current.id, 'cancelled');
+  return updateAppointment(deps, tenantId, current.id, 'cancelled', { cancelReason: 'customer' });
 }
 
 /** Default availability for a new tenant: its business hours, one resource. */
@@ -493,12 +493,17 @@ export async function handleBlockedAppointments(deps: BookingDeps, tenantId: str
   return results;
 }
 
-/** The person's last appointment that the business cancelled (for "Show new times"). */
-export async function lastDisplacedAppointment(tx: Tx, leadId: string) {
+/** The person's last cancelled appointment (for "Show new times" / "Book a new time"). Moves made by rescheduling have no reason, so they don't count. */
+export async function lastCancelledAppointment(tx: Tx, leadId: string) {
   const [row] = await tx
     .select()
     .from(appointments)
-    .where(and(eq(appointments.leadId, leadId), eq(appointments.cancelReason, 'clinic_unavailable')))
+    .where(
+      and(
+        eq(appointments.leadId, leadId),
+        inArray(appointments.cancelReason, ['clinic_unavailable', 'staff', 'customer']),
+      ),
+    )
     .orderBy(desc(appointments.updatedAt))
     .limit(1);
   return row ?? null;

@@ -240,6 +240,11 @@ export function clinicPreset(variant: ClinicVariant, businessName = 'Demo Clinic
         ],
         emergency_response:
           'This sounds urgent. Please call 112 or go to the nearest hospital emergency right away. I am also alerting the {{business_name}} team to call you.',
+        emergency_response_i18n: {
+          hi: 'यह गंभीर लग रहा है। कृपया तुरंत 112 पर कॉल करें या नज़दीकी अस्पताल की इमरजेंसी में जाएँ। मैं {{business_name}} की टीम को भी आपको कॉल करने के लिए बता रही हूँ।',
+          hinglish:
+            'Yeh serious lag raha hai. Please turant 112 par call karein ya nazdeeki hospital ki emergency mein jayein. Main {{business_name}} ki team ko bhi aapko call karne ke liye bata rahi hoon.',
+        },
         no_medical_advice: true,
       },
     },

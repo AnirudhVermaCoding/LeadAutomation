@@ -17,7 +17,7 @@ import { and, eq } from 'drizzle-orm';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type Db, type TenantTx, type Tx } from './db/client.ts';
 import { conversations, leads, messages, templates, tenants } from './db/schema.ts';
-import { isSuppressed, type LeadDeps } from './leads.ts';
+import { isSuppressed, setMarketingOptOut, type LeadDeps } from './leads.ts';
 import { getTenantSecret } from './secrets.ts';
 
 export interface MessagingDeps extends LeadDeps {
@@ -81,6 +81,8 @@ export interface SendRequest {
   idempotencyKey: string;
   template?: { key: TemplateKey; values?: Record<string, string> };
   freeForm?: Extract<OutboundContent, { kind: 'text' | 'buttons' }>;
+  /** Only for the confirmation of the opt-out itself. Everything else is refused for an opted-out lead. */
+  allowOptedOut?: boolean;
   /** Runs in the same transaction that records a successful send (e.g. lead state change). */
   onSent?: (tx: TenantTx) => Promise<void>;
 }
@@ -103,7 +105,10 @@ export async function sendToLead(
   const prepared = await withTenant(deps.db, tenantId, async (tx) => {
     const [lead] = await tx.select().from(leads).where(eq(leads.id, req.leadId));
     if (!lead) return { kind: 'skip', reason: 'lead not found' } as const;
-    if (lead.state === 'opted_out' || (await isSuppressed(tx, deps, tenantId, lead.phoneE164)))
+    if (
+      !req.allowOptedOut &&
+      (lead.state === 'opted_out' || (await isSuppressed(tx, deps, tenantId, lead.phoneE164)))
+    )
       return { kind: 'skip', reason: 'opted out' } as const;
 
     const [previous] = await tx
@@ -169,6 +174,9 @@ export async function sendToLead(
 
     const { key, values: overrides = {} } = choice.template;
     const def = TEMPLATES[key];
+    // They muted marketing messages in WhatsApp: only utility templates (and chat replies) may reach them.
+    if (def.category === 'marketing' && lead.marketingOptOutAt)
+      return { kind: 'skip', reason: 'stopped marketing messages' } as const;
     const lang = templateLanguage(lead.language ?? config.brand.default_language);
     const rows = await tx
       .select()
@@ -226,6 +234,11 @@ export async function sendToLead(
     await withTenant(deps.db, tenantId, (tx) =>
       tx.update(messages).set({ status: 'failed', error }).where(eq(messages.id, prepared.messageId)),
     );
+    // 131050: the customer stopped marketing messages in WhatsApp. Remember it, so we stop trying.
+    if (err instanceof ChannelError && err.code === 131050)
+      await withTenant(deps.db, tenantId, (tx) =>
+        setMarketingOptOut(tx, deps, req.leadId, true, 'send_error_131050'),
+      );
     if (err instanceof ChannelError && !err.retryable)
       return { status: 'failed', reason: err.message, messageId: prepared.messageId };
     throw err;

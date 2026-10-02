@@ -54,7 +54,26 @@ export type MetaEvent =
       pricingCategory?: string;
       billable?: boolean;
     }
-  | { type: 'leadgen'; pageId: string; leadgenId: string; formId?: string };
+  | { type: 'leadgen'; pageId: string; leadgenId: string; formId?: string }
+  /** Meta reviewed, paused or disabled one of the account's templates. `wabaId` = the entry id. */
+  | {
+      type: 'template_status';
+      wabaId: string;
+      event: string;
+      name: string;
+      language: string;
+      reason?: string;
+      category?: string;
+    }
+  | { type: 'template_category'; wabaId: string; name: string; language: string; newCategory: string }
+  /** The customer used WhatsApp's own control to stop (or resume) marketing messages from the business. */
+  | {
+      type: 'user_preference';
+      phoneNumberId: string;
+      from: string; // E.164
+      category: string;
+      value: 'stop' | 'resume';
+    };
 
 /** WhatsApp message types we answer specially (voice notes arrive as audio). */
 export const MEDIA_TYPES = [
@@ -126,10 +145,35 @@ const LeadgenValue = z.looseObject({
   page_id: z.union([z.string(), z.number()]),
   form_id: z.union([z.string(), z.number()]).optional(),
 });
+const UserPreferences = z.looseObject({
+  metadata: z.looseObject({ phone_number_id: z.string() }),
+  user_preferences: z.array(
+    z.looseObject({
+      wa_id: z.string(),
+      category: z.string(),
+      value: z.enum(['stop', 'resume']),
+    }),
+  ),
+});
+const TemplateStatusValue = z.looseObject({
+  event: z.string(),
+  message_template_name: z.string(),
+  message_template_language: z.string(),
+  reason: z.string().nullish(),
+  message_template_category: z.string().optional(),
+});
+const TemplateCategoryValue = z.looseObject({
+  message_template_name: z.string(),
+  message_template_language: z.string(),
+  new_category: z.string(),
+});
 const Payload = z.looseObject({
   object: z.string(),
   entry: z.array(
-    z.looseObject({ changes: z.array(z.looseObject({ field: z.string(), value: z.unknown() })).default([]) }),
+    z.looseObject({
+      id: z.union([z.string(), z.number()]).optional(),
+      changes: z.array(z.looseObject({ field: z.string(), value: z.unknown() })).default([]),
+    }),
   ),
 });
 
@@ -178,6 +222,22 @@ export function parseMetaWebhook(body: unknown): MetaEvent[] {
   const events: MetaEvent[] = [];
   for (const entry of payload.entry) {
     for (const change of entry.changes) {
+      if (change.field === 'user_preferences' || change.field === 'messages') {
+        // Meta documents this under its own `user_preferences` field; accept it on `messages` too.
+        const prefs = UserPreferences.safeParse(change.value);
+        if (prefs.success)
+          for (const p of prefs.data.user_preferences) {
+            const from = fromWaId(p.wa_id);
+            if (from)
+              events.push({
+                type: 'user_preference',
+                phoneNumberId: prefs.data.metadata.phone_number_id,
+                from,
+                category: p.category,
+                value: p.value,
+              });
+          }
+      }
       if (change.field === 'messages') {
         const v = MessagesValue.safeParse(change.value);
         if (!v.success) continue;
@@ -197,6 +257,28 @@ export function parseMetaWebhook(body: unknown): MetaEvent[] {
             errors: s.errors,
             pricingCategory: s.pricing?.category,
             billable: s.pricing?.billable,
+          });
+      } else if (change.field === 'message_template_status_update') {
+        const v = TemplateStatusValue.safeParse(change.value);
+        if (v.success && entry.id !== undefined)
+          events.push({
+            type: 'template_status',
+            wabaId: String(entry.id),
+            event: v.data.event,
+            name: v.data.message_template_name,
+            language: v.data.message_template_language,
+            reason: v.data.reason ?? undefined,
+            category: v.data.message_template_category,
+          });
+      } else if (change.field === 'message_template_category_update') {
+        const v = TemplateCategoryValue.safeParse(change.value);
+        if (v.success && entry.id !== undefined)
+          events.push({
+            type: 'template_category',
+            wabaId: String(entry.id),
+            name: v.data.message_template_name,
+            language: v.data.message_template_language,
+            newCategory: v.data.new_category,
           });
       } else if (change.field === 'leadgen') {
         const v = LeadgenValue.safeParse(change.value);

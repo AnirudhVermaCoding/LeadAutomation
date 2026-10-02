@@ -1,5 +1,5 @@
-import { parseButtonPayload } from '@instantlead/config';
-import { isOptOutMessage, windowExpiresAt } from '@instantlead/core';
+import { DEFAULT_OPT_IN_KEYWORDS, parseButtonPayload } from '@instantlead/config';
+import { isOptInMessage, isOptOutMessage, windowExpiresAt } from '@instantlead/core';
 import type { MediaType, Referral } from '@instantlead/integrations';
 import { normalizeInbound } from './assistant/guard.ts';
 import { eq } from 'drizzle-orm';
@@ -7,7 +7,15 @@ import { getActiveConfig } from './config-store.ts';
 import { withTenant, type Db } from './db/client.ts';
 import { conversations, leads, messages, type MessageStatus } from './db/schema.ts';
 import { QUEUES } from './jobs.ts';
-import { emit, intakeLead, optOut, transitionLead, type LeadDeps } from './leads.ts';
+import {
+  emit,
+  intakeLead,
+  optIn,
+  optOut,
+  setMarketingOptOut,
+  transitionLead,
+  type LeadDeps,
+} from './leads.ts';
 
 export interface InboundMessage {
   provider: 'meta' | 'fake';
@@ -102,10 +110,34 @@ export async function handleInboundMessage(
       const optingOut =
         button?.buttonId === 'stop' || isOptOutMessage(text, active.config.intake.opt_out_keywords);
 
-      if (lead.state === 'opted_out')
+      if (lead.state === 'opted_out') {
+        // Only an explicit "START" brings them back; anything else is recorded and ignored.
+        const keywords = active.config.intake.opt_in_keywords ?? DEFAULT_OPT_IN_KEYWORDS;
+        if (!msg.buttonPayload && isOptInMessage(text, keywords)) {
+          await optIn(tx, deps, tenantId, lead, {
+            source: 'whatsapp_opt_in',
+            noticeText:
+              'The customer asked to receive messages again by replying to the business on WhatsApp.',
+            evidence: { providerMessageId: msg.providerMessageId, text },
+          });
+          await deps.enqueue(tx, QUEUES.leadNotice, {
+            tenantId,
+            leadId,
+            kind: 'opt_in_confirmed',
+            key: inserted.id,
+          });
+          return { leadId, messageId: inserted.id, action: 'opted_in' } as const;
+        }
         return { leadId, messageId: inserted.id, action: 'ignored_opted_out' } as const;
+      }
       if (optingOut) {
         await optOut(tx, deps, tenantId, lead, button ? 'button' : 'keyword');
+        await deps.enqueue(tx, QUEUES.leadNotice, {
+          tenantId,
+          leadId,
+          kind: 'opt_out_confirmed',
+          key: inserted.id,
+        });
         return { leadId, messageId: inserted.id, action: 'opted_out' } as const;
       }
       // A reaction (👍 on our message) is not a reply to answer.
@@ -144,7 +176,7 @@ const RANK: Record<MessageStatus, number> = {
 
 /** Delivery status callback. Never moves a message backwards (webhooks can arrive out of order). */
 export async function handleStatusUpdate(
-  deps: { db: Db },
+  deps: { db: Db; clock: LeadDeps['clock'] },
   tenantId: string,
   update: {
     providerMessageId: string;
@@ -165,6 +197,11 @@ export async function handleStatusUpdate(
       update.status === 'failed' ? row.status !== 'read' : RANK[update.status] > RANK[row.status];
     if (!advance) return false;
     const first = update.errors?.[0];
+    // 131050 = the customer stopped marketing messages: remember it so follow-ups stop.
+    if (update.status === 'failed' && update.errors?.some((e) => e.code === 131050)) {
+      const [m] = await tx.select({ leadId: messages.leadId }).from(messages).where(eq(messages.id, row.id));
+      if (m) await setMarketingOptOut(tx, deps, m.leadId, true, 'status_error_131050');
+    }
     await tx
       .update(messages)
       .set({
@@ -175,6 +212,21 @@ export async function handleStatusUpdate(
           : undefined,
       })
       .where(eq(messages.id, row.id));
+    return true;
+  });
+}
+
+/** WhatsApp's own "stop / resume marketing messages" control, as the customer used it. */
+export async function handleUserPreference(
+  deps: { db: Db; clock: LeadDeps['clock'] },
+  tenantId: string,
+  pref: { from: string; category: string; value: 'stop' | 'resume' },
+) {
+  if (pref.category !== 'marketing_messages') return false;
+  return withTenant(deps.db, tenantId, async (tx) => {
+    const [lead] = await tx.select({ id: leads.id }).from(leads).where(eq(leads.phoneE164, pref.from));
+    if (!lead) return false;
+    await setMarketingOptOut(tx, deps, lead.id, pref.value === 'stop', 'user_preferences');
     return true;
   });
 }

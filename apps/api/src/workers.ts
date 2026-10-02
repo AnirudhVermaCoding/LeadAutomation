@@ -5,6 +5,8 @@ import { runMonitor } from './monitoring.ts';
 import { runRetention } from './privacy.ts';
 import { deliverWebhook, dispatchWebhookEvents } from './webhooks-out.ts';
 import { runScheduledReports } from './reports.ts';
+import { sendLeadNotice } from './notices.ts';
+import { syncTemplates } from './template-sync.ts';
 import { runCalendarSync, sweepCalendars } from './calendar-sync.ts';
 import { runStaffDigest } from './staff-digest.ts';
 import { enrollFollowups, runStep, sweepDueSteps } from './sequences.ts';
@@ -125,6 +127,17 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   await workBatched(ctx, log, QUEUES.webhookDeliver, (d) => deliverWebhook(ctx, d));
   await workBatched(ctx, log, QUEUES.staffAlert, (d) => notifyStaffAlert(ctx, d));
   await workBatched(ctx, log, QUEUES.calendarRemove, (d) => removeCalendarEvents(ctx, d));
+  await workBatched(ctx, log, QUEUES.templateSync, (d) => syncTemplates(ctx, d));
+  await ctx.boss.work(QUEUES.templateSyncCron, async () => {
+    await runJob(log, QUEUES.templateSyncCron, async () => {
+      const tenants = await ctx.system.tenantsWithWaba();
+      for (const t of tenants)
+        await ctx.enqueue(null, QUEUES.templateSync, { tenantId: t.id }, { singletonKey: t.id });
+      return { queued: tenants.length };
+    });
+  });
+  await ctx.boss.schedule(QUEUES.templateSyncCron, '20 4 * * *'); // daily, quiet time
+  await workBatched(ctx, log, QUEUES.leadNotice, (d) => sendLeadNotice(ctx, d));
   await workBatched(ctx, log, QUEUES.calendarSync, (d) => runCalendarSync(ctx, d));
   await ctx.boss.work(QUEUES.calendarSweep, async () => {
     await runJob(log, QUEUES.calendarSweep, () => sweepCalendars(ctx));

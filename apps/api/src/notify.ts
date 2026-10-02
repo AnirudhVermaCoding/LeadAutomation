@@ -61,7 +61,7 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
       template: { key: leadTemplate, values },
     });
   else if (kind === 'cancelled')
-    // No cancellation template: only possible while the conversation window is open.
+    // Plain text while the chat window is open, the approved template once it has closed.
     results.lead = await sendToLead(deps, tenantId, {
       leadId: lead.id,
       idempotencyKey: `appt:${appt.id}:cancelled`,
@@ -69,7 +69,18 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
         kind: 'text',
         body: `Your ${appt.service} on ${values['appointment.time']} has been cancelled. Reply here any time to book again.`,
       },
+      template: { key: 'cancellation', values },
     });
+
+  // A message that could not go out (template not approved, window closed) must never fail silently.
+  const sent = results.lead as { status?: string; reason?: string } | undefined;
+  if (sent?.status === 'failed')
+    results.leadFailed = await sendStaffNote(
+      deps,
+      tenantId,
+      `Could not message ${lead.name?.trim() || lead.phoneE164} about their ${appt.service} on ${values['appointment.time']} (${sent.reason}). Please call them`,
+      `appt:${appt.id}:${kind}:lead-failed`,
+    ).catch((err: unknown) => ({ error: String(err) }));
 
   // 2. Staff.
   if (kind === 'booked' || kind === 'rescheduled' || kind === 'cancelled' || kind === 'lead_confirmed') {

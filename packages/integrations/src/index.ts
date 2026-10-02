@@ -2,6 +2,7 @@ export * from './channel.ts';
 export { buildMessageBody, createMetaCloudChannel, verifyWhatsAppNumber } from './meta/cloud-channel.ts';
 export { GRAPH_VERSION } from './meta/graph.ts';
 export { fetchMetaLead, type MetaLead } from './meta/lead-ads.ts';
+export { listMessageTemplates, type MetaTemplate } from './meta/templates.ts';
 export {
   metaVerificationChallenge,
   MEDIA_TYPES,
