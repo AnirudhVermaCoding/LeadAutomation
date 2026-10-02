@@ -1,3 +1,4 @@
+import { TEMPLATES } from '@instantlead/config';
 import { OffsetClock, systemClock, type Clock } from '@instantlead/core';
 import {
   ChannelError,
@@ -5,6 +6,7 @@ import {
   createFakeChannel,
   createFakeEmail,
   createGoogleCalendar,
+  createMetaCloudChannel,
   FakeGoogle,
   createResendEmail,
   type CalendarProvider,
@@ -83,6 +85,28 @@ export function createAppContext(
         }
       : null;
 
+  // Agency alerts on WhatsApp: the agency's own WABA and number, an approved il_agency_alert template.
+  const agencyWhatsApp =
+    env.ALERT_WHATSAPP_PHONE_NUMBER_ID && env.ALERT_WHATSAPP_TOKEN && env.ALERT_WHATSAPP_TO
+      ? (() => {
+          const channel = createMetaCloudChannel({
+            accessToken: env.ALERT_WHATSAPP_TOKEN,
+            phoneNumberId: env.ALERT_WHATSAPP_PHONE_NUMBER_ID,
+            fetch: overrides.fetch,
+          });
+          const to = env.ALERT_WHATSAPP_TO;
+          return async (note: string) => {
+            await channel.send(to, {
+              kind: 'template',
+              name: TEMPLATES.agency_alert.providerName,
+              language: 'en',
+              bodyParams: [note],
+              buttonPayloads: [],
+            });
+          };
+        })()
+      : null;
+
   // Mock mode: one in-memory Google per tenant that "connected" (dev endpoints drive it).
   const fakeGoogles = new Map<string, FakeGoogle>();
   const fakeGoogleFor = (tenantId: string) => {
@@ -127,6 +151,7 @@ export function createAppContext(
         return refreshToken ? createGoogleCalendar({ client: googleOAuth, refreshToken }) : null;
       }),
     fakeGoogleFor,
+    agencyWhatsApp,
     fetch: overrides.fetch,
     checkDb: async () => {
       await app.pool.query('select 1');

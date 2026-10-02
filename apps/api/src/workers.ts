@@ -166,6 +166,7 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
         system: ctx.system,
         email: ctx.email,
         alertEmail: ctx.env.ALERT_EMAIL,
+        whatsapp: ctx.agencyWhatsApp,
         now: () => ctx.clock.now(),
       }),
     );

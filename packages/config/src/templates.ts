@@ -169,6 +169,30 @@ export const TEMPLATES = {
     },
     buttons: [SHOW_TIMES, CALL_ME],
   },
+  report_weekly: {
+    providerName: 'il_report_weekly',
+    category: 'utility',
+    purpose:
+      'To the owner / staff numbers listed under Reports: the weekly numbers in one line (email carries the full report).',
+    variables: ['note'],
+    body: {
+      en: 'Your weekly report from the WhatsApp assistant: {{1}}. Open the InstantLead dashboard for the full report.',
+      hi: 'WhatsApp असिस्टेंट की साप्ताहिक रिपोर्ट: {{1}}। पूरी रिपोर्ट के लिए InstantLead डैशबोर्ड खोलें।',
+    },
+    buttons: [],
+  },
+  agency_alert: {
+    providerName: 'il_agency_alert',
+    category: 'utility',
+    purpose:
+      'To the agency (your own number, your own WABA): something needs attention across clients (alerts also go by email).',
+    variables: ['note'],
+    body: {
+      en: 'InstantLead alert: {{1}}. Open the Agency page for details.',
+      hi: 'InstantLead अलर्ट: {{1}}। विवरण के लिए Agency पेज खोलें।',
+    },
+    buttons: [],
+  },
   cancellation: {
     providerName: 'il_cancellation',
     category: 'utility',

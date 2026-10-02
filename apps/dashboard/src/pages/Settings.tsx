@@ -7,6 +7,8 @@ import { Button, Card, cx, PageHeader } from '../ui.tsx';
 import { Integrations } from './settings/Integrations.tsx';
 import { Availability, Templates } from './settings/Operations.tsx';
 import {
+  AiPrivacySection,
+  BookingPolicySection,
   BookingSection,
   BusinessSection,
   KnowledgeSection,
@@ -24,6 +26,7 @@ const TABS = [
   ['booking', 'Booking'],
   ['messages', 'Messages'],
   ['reports', 'Reports'],
+  ['ai', 'AI & data'],
   ['integrations', 'Integrations'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
@@ -148,6 +151,7 @@ export function SettingsPage({
         {tab === 'booking' && (
           <>
             <BookingSection draft={draft} edit={edit} />
+            <BookingPolicySection draft={draft} edit={edit} />
             <Availability canEdit={canEdit} />
           </>
         )}
@@ -158,6 +162,7 @@ export function SettingsPage({
           </>
         )}
         {tab === 'reports' && <ReportsSection draft={draft} edit={edit} />}
+        {tab === 'ai' && <AiPrivacySection draft={draft} edit={edit} />}
         {tab === 'integrations' && <Integrations canEdit={canEdit} />}
       </fieldset>
 

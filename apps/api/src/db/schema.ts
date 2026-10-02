@@ -66,6 +66,8 @@ export const tenants = pgTable(
     waPhoneNumberId: text().unique(),
     /** The WhatsApp Business Account id: template status webhooks arrive under it, and templates are listed through it. */
     wabaId: text().unique(),
+    /** Secret path segment of this tenant's inbound-email webhook (/webhooks/email-in/:key): portal lead emails are forwarded there. */
+    emailInKey: text().unique(),
     metaPageId: text().unique(),
     ...timestamps,
   },
@@ -199,7 +201,15 @@ export const auditLog = pgTable(
 
 // ---- M2: leads, consent, messaging ----
 
-export const LEAD_SOURCES = ['form', 'meta_lead_ads', 'click_to_whatsapp', 'whatsapp', 'api', 'csv'] as const;
+export const LEAD_SOURCES = [
+  'form',
+  'meta_lead_ads',
+  'click_to_whatsapp',
+  'whatsapp',
+  'api',
+  'csv',
+  'portal_email',
+] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 
 export const leads = pgTable(

@@ -24,6 +24,8 @@ Use the exact **name**, **category** and **language**; body variables are positi
 | `il_staff_new_booking` | utility | To clinic staff: a new booking or booking request needs attention. |
 | `il_staff_handover` | utility | To clinic staff: a conversation needs a person (handover, emergency, photo or voice note received). |
 | `il_appointment_change` | utility | The booked time can no longer go ahead (doctor / agent unavailable, closure); offers new times. |
+| `il_report_weekly` | utility | To the owner / staff numbers listed under Reports: the weekly numbers in one line (email carries the full report). |
+| `il_agency_alert` | utility | To the agency (your own number, your own WABA): something needs attention across clients (alerts also go by email). |
 | `il_cancellation` | utility | The appointment was cancelled (by staff, or at the customer request) and the 24-hour chat window is closed, so a plain message cannot be sent. |
 | `il_running_late` | utility | Sent by staff from Today when the doctor / agent is running late. |
 | `il_staff_update` | utility | To staff: something needs a look (unconfirmed booking or reminder, auto-confirmed booking, unmarked visits). |
@@ -287,6 +289,44 @@ Quick-reply buttons: `Show new times` · `Call me`
 ```
 
 Quick-reply buttons: `नए समय दिखाएँ` · `मुझे कॉल करें`
+
+## `il_report_weekly`
+
+- **Category:** utility
+- **Purpose:** To the owner / staff numbers listed under Reports: the weekly numbers in one line (email carries the full report).
+- **Variables:** `{{1}}` = note
+- **Sample values (for Meta review):** `{{1}}` = Priya has not confirmed tomorrow at 11:30 AM
+
+**English (`en`)**
+
+```text
+Your weekly report from the WhatsApp assistant: {{1}}. Open the InstantLead dashboard for the full report.
+```
+
+**Hindi (`hi`)**
+
+```text
+WhatsApp असिस्टेंट की साप्ताहिक रिपोर्ट: {{1}}। पूरी रिपोर्ट के लिए InstantLead डैशबोर्ड खोलें।
+```
+
+## `il_agency_alert`
+
+- **Category:** utility
+- **Purpose:** To the agency (your own number, your own WABA): something needs attention across clients (alerts also go by email).
+- **Variables:** `{{1}}` = note
+- **Sample values (for Meta review):** `{{1}}` = Priya has not confirmed tomorrow at 11:30 AM
+
+**English (`en`)**
+
+```text
+InstantLead alert: {{1}}. Open the Agency page for details.
+```
+
+**Hindi (`hi`)**
+
+```text
+InstantLead अलर्ट: {{1}}। विवरण के लिए Agency पेज खोलें।
+```
 
 ## `il_cancellation`
 

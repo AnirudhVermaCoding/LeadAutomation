@@ -23,6 +23,7 @@ import { sendToLead } from '../outbound.ts';
 import { computeReport, listReports, renderReportEmail } from '../reports.ts';
 import { getTenantSecret } from '../secrets.ts';
 import type { AppContext } from '../system/context.ts';
+import { QUEUES } from '../jobs.ts';
 import { guard, type Principal } from './auth.ts';
 
 const actor = (p: Principal | null) =>
@@ -359,11 +360,28 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
     deadLetters: await ctx.system.deadLetters(),
   }));
 
+  // A job that ran out of retries (Meta was down for an hour, a bad deploy…): run it again, or drop it.
+  for (const action of ['retry', 'discard'] as const)
+    app.post(`/v1/admin/dead-letter/:id/${action}`, { preHandler: agency }, async (req, reply) => {
+      const { id } = z.object({ id: z.uuid() }).parse(req.params);
+      const job = await ctx.system.getDeadLetter(id);
+      if (!job) return reply.code(404).send({ error: 'not_found' });
+      if (action === 'retry') {
+        const queue = job.source_name;
+        if (!queue || !(Object.values(QUEUES) as string[]).includes(queue) || queue === QUEUES.deadLetter)
+          return reply.code(409).send({ error: 'cannot_retry', message: 'The original queue is unknown.' });
+        await ctx.boss.send(queue, job.data as object);
+      }
+      await ctx.boss.deleteJob(QUEUES.deadLetter, id);
+      return { [action === 'retry' ? 'requeued' : 'discarded']: true };
+    });
+
   app.post('/v1/admin/monitoring/run', { preHandler: agency }, () =>
     runMonitor({
       system: ctx.system,
       email: ctx.email,
       alertEmail: ctx.env.ALERT_EMAIL,
+      whatsapp: ctx.agencyWhatsApp,
       now: () => ctx.clock.now(),
     }),
   );

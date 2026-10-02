@@ -683,6 +683,15 @@ export function ReportsSection({ draft, edit }: Props) {
         <Field label="Send to" hint="Comma-separated emails">
           <ListInput value={r.send_to} onChange={(v) => edit((d) => void (d.reports.send_to = v))} />
         </Field>
+        <Field
+          label="Also on WhatsApp"
+          hint="One-line summary to these numbers, e.g. +919876543210. Needs the report template approved."
+        >
+          <ListInput
+            value={r.whatsapp_to ?? []}
+            onChange={(v) => edit((d) => void (d.reports.whatsapp_to = v.length ? v : undefined))}
+          />
+        </Field>
         <Field label="Average visit value (₹)" hint="Used to estimate revenue recovered">
           <Input
             type="number"
@@ -692,5 +701,160 @@ export function ReportsSection({ draft, edit }: Props) {
         </Field>
       </div>
     </Card>
+  );
+}
+
+/** Rules for changing and confirming bookings. */
+export function BookingPolicySection({ draft, edit }: Props) {
+  const b = draft.booking;
+  return (
+    <Card title="Changes, cancellations and confirmation">
+      <div className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Customers can change or cancel up to (hours before the visit)"
+            hint="Inside this window the assistant hands the request to your team. Staff can always change bookings. Default 2."
+          >
+            <Input
+              type="number"
+              min={0}
+              value={b.change_notice_hours ?? 2}
+              onChange={(e) => edit((d) => void (d.booking.change_notice_hours = num(e.target.value)))}
+            />
+          </Field>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              className="mt-1"
+              type="checkbox"
+              checked={b.auto_confirm_pending ?? true}
+              onChange={(e) => edit((d) => void (d.booking.auto_confirm_pending = e.target.checked))}
+            />
+            <span>
+              Confirm automatically if staff do not
+              <span className="block text-xs text-slate-500">
+                Staff-confirm bookings are confirmed for the customer at the deadline (the evening before, or
+                4 hours before). Untick to only remind staff.
+              </span>
+            </span>
+          </label>
+        </div>
+        <Field
+          label="Cancellation policy"
+          hint="Shown to customers who ask or who are too late to cancel, for example: Please give 24 hours notice; late cancellations are charged 50%."
+        >
+          <Textarea
+            value={b.cancellation_policy ?? ''}
+            maxLength={500}
+            onChange={(e) => edit((d) => void (d.booking.cancellation_policy = e.target.value || undefined))}
+          />
+        </Field>
+      </div>
+    </Card>
+  );
+}
+
+const PROVIDERS = [
+  ['anthropic', 'Anthropic (Claude)'],
+  ['openai', 'OpenAI'],
+  ['gemini', 'Google Gemini'],
+  ['xai', 'xAI (Grok)'],
+] as const;
+
+/** Which AI may read conversations, how much it may spend, and how long data is kept. */
+export function AiPrivacySection({ draft, edit }: Props) {
+  const ai = draft.ai ?? { allowed_providers: ['anthropic' as const], monthly_cost_cap_usd: 50 };
+  const privacy = draft.privacy ?? { retention_days: 365, mode: 'anonymize' as const };
+  return (
+    <>
+      <Card title="AI assistant">
+        <div className="space-y-4">
+          <Field
+            label="AI providers allowed to process this business's conversations"
+            hint="Anthropic is the default. Adding another provider means telling your customers: name it in the consent notice (Business tab) or the config will not save."
+          >
+            <div className="flex flex-wrap gap-4">
+              {PROVIDERS.map(([key, label]) => (
+                <label key={key} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={ai.allowed_providers.includes(key)}
+                    onChange={(e) =>
+                      edit((d) => {
+                        const cur = d.ai ?? {
+                          allowed_providers: ['anthropic' as const],
+                          monthly_cost_cap_usd: 50,
+                        };
+                        const set = new Set(cur.allowed_providers);
+                        if (e.target.checked) set.add(key);
+                        else set.delete(key);
+                        d.ai = { ...cur, allowed_providers: [...set] };
+                      })
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </Field>
+          <Field
+            label="Monthly AI budget (US$)"
+            hint="You are warned at 80%. At 100% new conversations go to your team until next month or a higher budget."
+          >
+            <Input
+              type="number"
+              className="w-40"
+              min={0}
+              value={ai.monthly_cost_cap_usd}
+              onChange={(e) =>
+                edit((d) => {
+                  const cur = d.ai ?? { allowed_providers: ['anthropic' as const], monthly_cost_cap_usd: 50 };
+                  d.ai = { ...cur, monthly_cost_cap_usd: num(e.target.value) };
+                })
+              }
+            />
+          </Field>
+          <p className="text-xs text-slate-500">
+            Per-task model routing is advanced: use Export / Import JSON (the ai.routing field).
+          </p>
+        </div>
+      </Card>
+      <Card title="How long we keep customer data">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="After this many idle days (0 = never)"
+            hint="Idle = no message or appointment. Anyone with an upcoming appointment is kept."
+          >
+            <Input
+              type="number"
+              min={0}
+              value={privacy.retention_days}
+              onChange={(e) =>
+                edit(
+                  (d) =>
+                    void (d.privacy = { ...(d.privacy ?? privacy), retention_days: num(e.target.value) }),
+                )
+              }
+            />
+          </Field>
+          <Field label="Then" hint="Anonymise keeps the counts for reports and removes the person.">
+            <Select
+              value={privacy.mode}
+              onChange={(e) =>
+                edit(
+                  (d) =>
+                    void (d.privacy = {
+                      ...(d.privacy ?? privacy),
+                      mode: e.target.value as 'anonymize' | 'delete',
+                    }),
+                )
+              }
+            >
+              <option value="anonymize">Anonymise</option>
+              <option value="delete">Delete</option>
+            </Select>
+          </Field>
+        </div>
+      </Card>
+    </>
   );
 }

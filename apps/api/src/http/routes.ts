@@ -5,6 +5,7 @@ import {
   validateConfig,
   type PresetKey,
 } from '@instantlead/config';
+import { randomBytes } from 'node:crypto';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -101,6 +102,7 @@ export function registerRoutes(app: FastifyInstance, ctx: AppContext) {
       },
       channel: whatsappConnected ? 'meta' : ctx.allowFakeChannel ? 'fake' : 'none',
       form_url: routing ? `${ctx.env.APP_URL}/f/${routing.formKey}` : null,
+      email_in_url: routing?.emailInKey ? `${ctx.env.APP_URL}/webhooks/email-in/${routing.emailInKey}` : null,
     };
   });
 
@@ -145,6 +147,20 @@ export function registerRoutes(app: FastifyInstance, ctx: AppContext) {
       tx.select().from(templates).orderBy(asc(templates.key), asc(templates.language)),
     ),
   );
+
+  // Portal lead emails are forwarded to a secret URL; rotating it invalidates the old one.
+  app.post('/v1/integrations/email-in/rotate', { preHandler: tenantAdmins }, async (req) => {
+    const key = randomBytes(24).toString('hex');
+    await ctx.system.setTenantRouting(tenantOf(req), { emailInKey: key });
+    await withTenant(ctx.db, tenantOf(req), (tx) =>
+      audit(tx, ctx.clock, actorOf(req.principal), {
+        action: 'integration.email_in.rotated',
+        entityType: 'integration',
+        entityId: 'email_in',
+      }),
+    );
+    return { email_in_url: `${ctx.env.APP_URL}/webhooks/email-in/${key}` };
+  });
 
   // Read approval statuses from Meta now (needs the WhatsApp Business Account id).
   app.post('/v1/templates/sync', { preHandler: tenantAdmins }, async (req, reply) => {

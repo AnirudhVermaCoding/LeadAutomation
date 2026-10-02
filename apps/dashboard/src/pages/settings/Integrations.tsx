@@ -10,6 +10,7 @@ interface Status {
   lead_ads: { connected: boolean; page_id: string | null };
   channel: 'meta' | 'fake' | 'none';
   form_url: string | null;
+  email_in_url: string | null;
 }
 
 const Dot = ({ ok, label }: { ok: boolean; label: string }) => (
@@ -118,6 +119,7 @@ export function Integrations({ canEdit }: { canEdit: boolean }) {
       <GoogleCard canEdit={canEdit} />
 
       {s.form_url && <FormEmbed url={s.form_url} />}
+      {canEdit && <EmailIn url={s.email_in_url} onDone={refresh} />}
       {canEdit && <ApiKeys />}
       {canEdit && <Webhooks />}
       {canEdit && <DataExport />}
@@ -453,6 +455,39 @@ function Health() {
           </div>
         ))}
       </dl>
+    </Card>
+  );
+}
+
+/** Portal lead emails (99acres, MagicBricks, Housing, Practo, JustDial…) are forwarded to this secret address. */
+function EmailIn({ url, onDone }: { url: string | null; onDone: () => unknown }) {
+  const rotate = useMutation({
+    mutationFn: () => api('/v1/integrations/email-in/rotate', { method: 'POST', body: {} }),
+    onSuccess: onDone,
+  });
+  return (
+    <Card title="Leads from portal emails">
+      <p className="mb-2 text-sm text-slate-600">
+        Forward the portal's "new enquiry" emails here (Mailgun / SendGrid inbound parse, Zapier, Make or an
+        email worker POSTs them). Each email with a phone number becomes a lead and gets a WhatsApp reply
+        within a minute.
+      </p>
+      {url ? (
+        <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">{url}</pre>
+      ) : (
+        <p className="text-sm text-slate-500">No address yet.</p>
+      )}
+      <Button
+        size="sm"
+        variant="secondary"
+        className="mt-2"
+        loading={rotate.isPending}
+        onClick={() =>
+          (!url || confirm('Create a new address? The old one stops working.')) && rotate.mutate()
+        }
+      >
+        {url ? 'Replace address' : 'Create address'}
+      </Button>
     </Card>
   );
 }

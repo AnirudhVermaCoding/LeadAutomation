@@ -1,11 +1,13 @@
 import type { TenantConfig } from '@instantlead/config';
 import { addDays, localParts, zonedTimeToUtc } from '@instantlead/core';
 import type { EmailProvider } from '@instantlead/integrations';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import { getActiveConfig } from './config-store.ts';
-import { withTenant, type Db, type Tx } from './db/client.ts';
+import { withTenant, type Tx } from './db/client.ts';
 import { reports, type ReportData } from './db/schema.ts';
-import type { LeadDeps } from './leads.ts';
+import { emit, type LeadDeps } from './leads.ts';
+import { sendStaffWhatsApp } from './notify.ts';
+import type { MessagingDeps } from './outbound.ts';
 
 /** What leads ask about, by keyword group (deterministic, no LLM): clinics. */
 const CLINIC_TOPICS: [string, RegExp][] = [
@@ -175,12 +177,77 @@ export function lastWeek(now: Date, tz: string) {
   return { start: zonedTimeToUtc(addDays(localParts(end, tz).date, -7), '00:00', tz), end };
 }
 
+/** One line for WhatsApp; the email carries the full report. */
+export function reportOneLine(r: ReportData) {
+  return `${r.period.label}: ${r.leads} enquiries, ${r.repliedLeads} replied, ${r.booked} booked, ${r.shows} visits done, est. ${inr(r.revenueRecoveredInr)}`;
+}
+
+type ReportDeps = LeadDeps & MessagingDeps & { email: EmailProvider };
+
+/**
+ * Email (and WhatsApp, if numbers are configured) one report. Each channel is sent at most once
+ * even across retries (email by idempotency key, WhatsApp by an event marker); `error` names what failed.
+ */
+async function deliverReport(
+  deps: ReportDeps,
+  tenantId: string,
+  report: { id: string; data: ReportData },
+  config: TenantConfig,
+) {
+  const errors: string[] = [];
+  const to = config.reports.send_to;
+  try {
+    if (to.length)
+      await deps.email.send({
+        to,
+        ...renderReportEmail(config.brand.business_name, report.data),
+        idempotencyKey: `report:${report.id}`,
+      });
+  } catch (err) {
+    errors.push(`email: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  for (const number of config.reports.whatsapp_to ?? []) {
+    const marker = `${report.id}:${number}`;
+    const already = await withTenant(
+      deps.db,
+      tenantId,
+      async (tx) =>
+        (
+          await tx.execute(
+            sql`select 1 from events where type = 'report.whatsapp_sent' and payload->>'key' = ${marker} limit 1`,
+          )
+        ).rows.length > 0,
+    );
+    if (already) continue;
+    try {
+      await sendStaffWhatsApp(deps, tenantId, number, 'report_weekly', [reportOneLine(report.data)]);
+      await withTenant(deps.db, tenantId, (tx) =>
+        emit(tx, deps.clock, 'report.whatsapp_sent', { key: marker }),
+      );
+    } catch (err) {
+      errors.push(`whatsapp ${number}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  const error = errors.length ? errors.join('; ') : null;
+  await withTenant(deps.db, tenantId, (tx) =>
+    tx
+      .update(reports)
+      .set({
+        sentTo: [...to, ...(config.reports.whatsapp_to ?? [])],
+        sentAt: error ? null : deps.clock.now(),
+        error,
+      })
+      .where(eq(reports.id, report.id)),
+  );
+}
+
 /**
  * Hourly (and on demo fast-forward): on each tenant's report day from 09:00 local, build last
- * week's report once (unique per period), store it, and email it to the configured recipients.
+ * week's report once (unique per period), store it, and send it. A report that failed to go out is
+ * retried on later runs for 3 days.
  */
 export async function runScheduledReports(
-  deps: LeadDeps & { db: Db; email: EmailProvider; system: { listTenants(): Promise<{ id: string }[]> } },
+  deps: ReportDeps & { system: { listTenants(): Promise<{ id: string }[]> } },
 ) {
   const now = deps.clock.now();
   const sent: string[] = [];
@@ -188,8 +255,21 @@ export async function runScheduledReports(
     const due = await withTenant(deps.db, tenantId, async (tx) => {
       const config = (await getActiveConfig(tx))?.config;
       if (!config) return null;
+      // Earlier reports that did not go out (email provider down, WhatsApp template not approved yet…).
+      const retry = (
+        await tx
+          .select()
+          .from(reports)
+          .where(
+            and(
+              isNull(reports.sentAt),
+              isNotNull(reports.error),
+              gt(reports.periodEnd, new Date(now.getTime() - 3 * 86_400_000)),
+            ),
+          )
+      ).map((r) => ({ id: r.id, config, data: r.data as ReportData }));
       const local = localParts(now, config.locale.timezone);
-      if (local.weekday !== config.reports.weekly_day || local.time < '09:00') return null;
+      if (local.weekday !== config.reports.weekly_day || local.time < '09:00') return retry;
       const { start, end } = lastWeek(now, config.locale.timezone);
       const data = await computeReport(tx, config, start, end, now);
       const [row] = await tx
@@ -197,28 +277,12 @@ export async function runScheduledReports(
         .values({ periodStart: start, periodEnd: end, data })
         .onConflictDoNothing({ target: [reports.tenantId, reports.periodStart] })
         .returning({ id: reports.id });
-      return row ? { id: row.id, config, data } : null;
+      return row ? [...retry, { id: row.id, config, data }] : retry;
     });
-    if (!due) continue;
-    const to = due.config.reports.send_to;
-    let error: string | null = null;
-    try {
-      if (to.length)
-        await deps.email.send({
-          to,
-          ...renderReportEmail(due.config.brand.business_name, due.data),
-          idempotencyKey: `report:${due.id}`,
-        });
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
+    for (const r of due ?? []) {
+      await deliverReport(deps, tenantId, r, r.config);
+      sent.push(tenantId);
     }
-    await withTenant(deps.db, tenantId, (tx) =>
-      tx
-        .update(reports)
-        .set({ sentTo: to, sentAt: error ? null : deps.clock.now(), error })
-        .where(eq(reports.id, due.id)),
-    );
-    sent.push(tenantId);
   }
   return sent;
 }

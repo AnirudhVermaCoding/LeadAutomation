@@ -99,7 +99,10 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
     },
 
     /** Webhook / hosted-form routing: which tenant owns this WhatsApp number, Facebook page or form? */
-    async findTenantIdBy(field: 'waPhoneNumberId' | 'metaPageId' | 'formKey' | 'wabaId', value: string) {
+    async findTenantIdBy(
+      field: 'waPhoneNumberId' | 'metaPageId' | 'formKey' | 'wabaId' | 'emailInKey',
+      value: string,
+    ) {
       const [row] = await systemDb.select({ id: tenants.id }).from(tenants).where(eq(tenants[field], value));
       return row?.id ?? null;
     },
@@ -109,6 +112,7 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         .select({
           waPhoneNumberId: tenants.waPhoneNumberId,
           wabaId: tenants.wabaId,
+          emailInKey: tenants.emailInKey,
           metaPageId: tenants.metaPageId,
           formKey: tenants.formKey,
         })
@@ -119,7 +123,12 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
 
     async setTenantRouting(
       tenantId: string,
-      routing: { waPhoneNumberId?: string; wabaId?: string | null; metaPageId?: string },
+      routing: {
+        waPhoneNumberId?: string;
+        wabaId?: string | null;
+        metaPageId?: string;
+        emailInKey?: string | null;
+      },
     ) {
       await systemDb.update(tenants).set(routing).where(eq(tenants.id, tenantId));
     },
@@ -367,6 +376,14 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
           select id, source_name, data, source_output, created_on from pgboss.job where name = 'dead-letter'
           order by created_on desc limit ${limit}`)
       ).rows;
+    },
+
+    async getDeadLetter(id: string) {
+      const rows = (
+        await systemDb.execute<{ id: string; source_name: string | null; data: unknown }>(sql`
+          select id, source_name, data from pgboss.job where name = 'dead-letter' and id = ${id}`)
+      ).rows;
+      return rows[0] ?? null;
     },
 
     async findTenantBySlug(slug: string) {

@@ -1,10 +1,11 @@
 import { fillVariables, LANGUAGES, type TenantConfig } from '@instantlead/config';
+import { parseLeadEmail } from '@instantlead/integrations';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getActiveConfig } from '../config-store.ts';
 import { csvRecords } from '../csv.ts';
 import { withTenant } from '../db/client.ts';
-import { IntakeError, intakeLead } from '../leads.ts';
+import { emit, IntakeError, intakeLead } from '../leads.ts';
 import type { AppContext } from '../system/context.ts';
 import { guard, type Principal } from './auth.ts';
 
@@ -196,6 +197,65 @@ export function registerIntakeRoutes(app: FastifyInstance, ctx: AppContext) {
     const active = await withTenant(ctx.db, tenantId, getActiveConfig);
     return active && { tenantId, config: active.config };
   };
+
+  // Portal lead emails (99acres, MagicBricks, Housing, Practo, JustDial…) forwarded here by Mailgun / SendGrid
+  // inbound parse, a Cloudflare Email Worker, Zapier or Make. The secret key in the path identifies the clinic.
+  const InboundMail = z.looseObject({
+    from: z.string().optional(),
+    sender: z.string().optional(),
+    subject: z.string().optional(),
+    text: z.string().optional(),
+    'body-plain': z.string().optional(),
+    plain: z.string().optional(),
+    html: z.string().optional(),
+    'body-html': z.string().optional(),
+  });
+  app.post<{ Params: { key: string } }>(
+    '/webhooks/email-in/:key',
+    { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const tenantId = await ctx.system.findTenantIdBy('emailInKey', req.params.key);
+      if (!tenantId) return reply.code(404).send({ error: 'not_found' });
+      const mail = InboundMail.safeParse(req.body);
+      if (!mail.success) return reply.code(400).send({ error: 'invalid_request' });
+      const m = mail.data;
+      const parsed = parseLeadEmail({
+        from: m.from ?? m.sender,
+        subject: m.subject,
+        text: m.text ?? m['body-plain'] ?? m.plain,
+        html: m.html ?? m['body-html'],
+      });
+      // Always 200 once it is ours: providers retry on errors, and a retry would not help an unparseable email.
+      if (!parsed.phone) {
+        await withTenant(ctx.db, tenantId, (tx) =>
+          emit(tx, ctx.clock, 'lead.email_unparsed', {
+            portal: parsed.portal,
+            subjectLength: m.subject?.length ?? 0,
+          }),
+        );
+        return { ok: true, ignored: 'no phone number found' };
+      }
+      const phone = parsed.phone;
+      const result = await withTenant(ctx.db, tenantId, async (tx) => {
+        const active = await getActiveConfig(tx);
+        if (!active) throw new Error('tenant has no config');
+        return intakeLead(tx, ctx, tenantId, {
+          phone,
+          name: parsed.name ?? undefined,
+          email: parsed.email ?? undefined,
+          source: 'portal_email',
+          sourceDetails: { portal: parsed.portal, message: parsed.message },
+          consent: {
+            source: 'portal_email',
+            // The customer asked the portal to be contacted about this enquiry; the clinic confirms that basis (ONBOARDING).
+            noticeText: `The customer sent an enquiry through ${parsed.portal ?? 'a listing portal'} and asked to be contacted about it.`,
+            evidence: { portal: parsed.portal, from: m.from ?? m.sender ?? null, subject: m.subject ?? null },
+          },
+        });
+      });
+      return { ok: true, lead_id: result.leadId, created: result.created };
+    },
+  );
 
   app.get<{ Params: { formKey: string } }>('/f/:formKey', async (req, reply) => {
     const t = await formTenant(req.params.formKey);

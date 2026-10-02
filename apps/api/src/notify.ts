@@ -220,7 +220,7 @@ export async function sendStaffNote(
 }
 
 /** Staff alerts go out as an approved template (staff aren't in a conversation window). */
-async function sendStaffWhatsApp(
+export async function sendStaffWhatsApp(
   deps: MessagingDeps,
   tenantId: string,
   to: string,

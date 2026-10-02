@@ -251,6 +251,11 @@ function Monitoring() {
     queryFn: () => api<MonitoringData>('/v1/admin/monitoring'),
     refetchInterval: 60_000,
   });
+  const dead = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'retry' | 'discard' }) =>
+      api(`/v1/admin/dead-letter/${id}/${action}`, { method: 'POST', body: {} }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['monitoring'] }),
+  });
   const run = useMutation({
     mutationFn: () => api<{ found: number; emailed: number }>('/v1/admin/monitoring/run', { method: 'POST' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['monitoring'] }),
@@ -299,6 +304,26 @@ function Monitoring() {
                   <code className="mt-1 block break-all text-slate-600">
                     {JSON.stringify(d.source_output ?? d.data).slice(0, 300)}
                   </code>
+                  <span className="mt-2 flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={dead.isPending}
+                      onClick={() => dead.mutate({ id: d.id, action: 'retry' })}
+                    >
+                      Retry
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        confirm('Discard this failed job? It will not run.') &&
+                        dead.mutate({ id: d.id, action: 'discard' })
+                      }
+                    >
+                      Discard
+                    </Button>
+                  </span>
                 </li>
               ))}
             </ul>

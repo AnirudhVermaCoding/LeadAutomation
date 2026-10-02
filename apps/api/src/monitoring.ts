@@ -11,6 +11,8 @@ export async function runMonitor(deps: {
   system: System;
   email: EmailProvider;
   alertEmail?: string | undefined;
+  /** Also tell the agency on WhatsApp (their own number): one short line per run. */
+  whatsapp?: ((note: string) => Promise<void>) | null | undefined;
   now: () => Date;
 }) {
   const s = await deps.system.monitorSignals();
@@ -93,6 +95,14 @@ export async function runMonitor(deps: {
       subject: `InstantLead alert: ${toSend.length} issue${toSend.length > 1 ? 's' : ''}`,
       text: `${toSend.map((m) => `• ${m}`).join('\n')}\n\nOpen the Agency page for details.`,
     });
+  if (toSend.length && deps.whatsapp)
+    await deps
+      .whatsapp(
+        toSend.length === 1
+          ? toSend[0]!.slice(0, 200)
+          : `${toSend.length} issues, e.g. ${toSend[0]!.slice(0, 120)}`,
+      )
+      .catch(() => undefined); // email is the record; never fail the monitor over WhatsApp
   return { found: found.length, emailed: toSend.length };
 }
 
