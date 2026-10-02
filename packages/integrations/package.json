@@ -8,6 +8,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
     "@instantlead/core": "workspace:*",
+    "openai": "^7.27.0",
     "zod": "^4.6.5"
   }
 }

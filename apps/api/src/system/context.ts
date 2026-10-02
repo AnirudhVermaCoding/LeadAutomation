@@ -1,7 +1,6 @@
 import { OffsetClock, systemClock, type Clock } from '@instantlead/core';
 import {
   ChannelError,
-  createAnthropicProvider,
   createFakeChannel,
   createFakeEmail,
   createGoogleCalendar,
@@ -14,6 +13,7 @@ import {
 import { getTenantSecret, type SecretsKey } from '../secrets.ts';
 import type { Tx } from '../db/client.ts';
 import { createFakeLlm } from '../assistant/fake-llm.ts';
+import { createLlmRouter } from '../llm-router.ts';
 import { createDb } from '../db/client.ts';
 import type { Env } from '../env.ts';
 import { createBoss, createEnqueue } from '../jobs.ts';
@@ -27,7 +27,10 @@ export function createAppContext(
   clockOverride?: Clock,
   overrides: {
     fetch?: typeof globalThis.fetch;
+    /** Tests: one model for every task (e.g. a scripted fake). */
     llm?: LlmProvider;
+    /** Tests: these model instances replace key-based providers (routing still applies). */
+    llmProviders?: LlmProvider[];
     calendarFor?: (tx: Tx, tenantId: string) => Promise<CalendarProvider | null>;
   } = {},
 ) {
@@ -41,9 +44,15 @@ export function createAppContext(
   const mockMode = env.ALLOW_FAKE_CHANNEL ?? env.NODE_ENV !== 'production';
   // Mock mode runs on a clock the demo can fast-forward; production on real time.
   const clock: Clock = clockOverride ?? (mockMode ? new OffsetClock() : systemClock);
-  if (!env.ANTHROPIC_API_KEY && !mockMode)
+  const llmKeys = {
+    anthropic: env.ANTHROPIC_API_KEY,
+    openai: env.OPENAI_API_KEY,
+    gemini: env.GEMINI_API_KEY,
+    xai: env.XAI_API_KEY,
+  };
+  if (!Object.values(llmKeys).some(Boolean) && !mockMode)
     throw new Error(
-      'ANTHROPIC_API_KEY is required outside mock mode (set ALLOW_FAKE_CHANNEL=true for a demo)',
+      'An AI provider key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY) is required outside mock mode (set ALLOW_FAKE_CHANNEL=true for a demo)',
     );
 
   // Email: Resend when configured; mock mode records in memory; otherwise sends fail loudly.
@@ -85,9 +94,12 @@ export function createAppContext(
     allowFakeChannel: mockMode,
     /** Outside production, webhooks may target localhost / private hosts (testing receivers). */
     allowPrivateWebhooks: env.NODE_ENV !== 'production',
-    llm:
-      overrides.llm ??
-      (env.ANTHROPIC_API_KEY ? createAnthropicProvider({ apiKey: env.ANTHROPIC_API_KEY }) : createFakeLlm()),
+    /** Picks the model(s) for each AI task per tenant: routing, allowed providers, failover order. */
+    router: createLlmRouter({
+      keys: llmKeys,
+      fake: overrides.llm ?? createFakeLlm(),
+      providers: overrides.llm ? [overrides.llm] : overrides.llmProviders,
+    }),
     llmCostCapUsd: env.LLM_COST_CAP_USD_PER_LEAD,
     email,
     googleOAuth,

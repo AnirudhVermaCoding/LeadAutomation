@@ -1,5 +1,5 @@
 import type { TenantConfig } from '@instantlead/config';
-import type { Anthropic } from '@instantlead/integrations';
+import type { ToolSpec } from '@instantlead/integrations';
 import { z } from 'zod';
 
 /** Tool input schemas. The LLM's arguments are untrusted: every call is validated with these. */
@@ -64,15 +64,18 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   cancel: 'Cancel their existing appointment, only after they clearly asked to cancel.',
 };
 
-export function buildTools(config: TenantConfig): Anthropic.Tool[] {
-  return Object.entries(toolSchemas(config)).map(([name, schema]) => {
-    const { $schema: _ignored, ...input_schema } = z.toJSONSchema(schema) as Record<string, unknown>;
-    return {
-      name,
-      description: DESCRIPTIONS[name as ToolName],
-      input_schema: input_schema as Anthropic.Tool.InputSchema,
-    };
-  });
+export function buildTools(config: TenantConfig): ToolSpec[] {
+  return Object.entries(toolSchemas(config)).map(([name, schema]) => ({
+    name,
+    description: DESCRIPTIONS[name as ToolName],
+    inputSchema: jsonSchema(schema),
+  }));
+}
+
+/** zod -> plain JSON Schema object (no $schema key) for tool inputs and structured outputs. */
+export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
+  const { $schema: _ignored, ...rest } = z.toJSONSchema(schema) as Record<string, unknown>;
+  return rest;
 }
 
 /**

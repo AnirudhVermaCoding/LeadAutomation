@@ -367,8 +367,13 @@ export const llmRuns = pgTable(
     id: uuid().primaryKey().defaultRandom(),
     tenantId: tenantId(),
     leadId: uuid().references(() => leads.id, { onDelete: 'set null' }),
-    provider: text({ enum: ['anthropic', 'fake'] }).notNull(),
+    provider: text({ enum: ['anthropic', 'openai', 'gemini', 'xai', 'fake'] }).notNull(),
     model: text().notNull(),
+    /** What the call was for (agent_reply, intent_classify, …); routing is per task. */
+    task: text().notNull().default('agent_reply'),
+    promptVersion: text(),
+    /** True when an earlier model in the task's chain failed and this one stood in. */
+    fallbackUsed: boolean().notNull().default(false),
     inputTokens: integer().notNull().default(0),
     outputTokens: integer().notNull().default(0),
     cacheReadTokens: integer().notNull().default(0),

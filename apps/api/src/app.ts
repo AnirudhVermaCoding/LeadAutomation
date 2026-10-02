@@ -6,6 +6,8 @@ const REDACT = [
   'req.headers.authorization',
   'req.headers.cookie',
   'req.headers["x-api-key"]',
+  'apiKey',
+  '*.apiKey',
   'password',
   '*.password',
   'token',

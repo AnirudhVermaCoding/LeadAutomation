@@ -1,4 +1,11 @@
-import { PRESETS, TEMPLATE_KEYS, TEMPLATE_LANGUAGES, TEMPLATES, type PresetKey } from '@instantlead/config';
+import {
+  DEFAULT_AI_SETTINGS,
+  PRESETS,
+  TEMPLATE_KEYS,
+  TEMPLATE_LANGUAGES,
+  TEMPLATES,
+  type PresetKey,
+} from '@instantlead/config';
 import type { Clock } from '@instantlead/core';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { generateApiKey, hashApiKey } from '../api-keys.ts';
@@ -140,6 +147,8 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         messages_out: string;
         whatsapp_inr: string;
         llm_usd: string;
+        llm_cap_usd: string;
+        llm_providers: string;
         bookings: string;
       }>(sql`
         select t.id, t.name, t.slug,
@@ -150,6 +159,10 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
              and m.status in ('sent', 'delivered', 'read') and m.occurred_at >= ${since}) as whatsapp_inr,
           (select coalesce(sum(r.cost_usd), 0) from llm_runs r
              where r.tenant_id = t.id and r.occurred_at >= ${since}) as llm_usd,
+          coalesce((select (c.config->'ai'->>'monthly_cost_cap_usd')::numeric from tenant_configs c
+             where c.tenant_id = t.id order by c.revision desc limit 1), ${DEFAULT_AI_SETTINGS.monthly_cost_cap_usd}) as llm_cap_usd,
+          (select coalesce(string_agg(distinct r.provider, ', '), '') from llm_runs r
+             where r.tenant_id = t.id and r.occurred_at >= ${since}) as llm_providers,
           (select count(*) from appointments a where a.tenant_id = t.id and a.status <> 'cancelled'
              and a.created_at >= ${since}) as bookings
         from tenants t
@@ -162,6 +175,8 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         messagesOut: Number(r.messages_out),
         whatsappInr: Number(r.whatsapp_inr),
         llmUsd: Number(r.llm_usd),
+        llmCapUsd: Number(r.llm_cap_usd),
+        llmProviders: r.llm_providers,
         bookings: Number(r.bookings),
       }));
     },
@@ -236,6 +251,16 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
           group by m.tenant_id, t.name
           having count(*) filter (where m.status in ('delivered', 'read')) = 0
              and min(m.created_at) < now() - interval '1 hour'`),
+        // This month's AI spend at or above 80% of the tenant's cap (config ai.monthly_cost_cap_usd).
+        aiBudget: await rows<{ tenant_id: string; name: string; spend: string; cap: string }>(sql`
+          select * from (
+            select t.id as tenant_id, t.name,
+              (select coalesce(sum(r.cost_usd), 0) from llm_runs r
+                 where r.tenant_id = t.id and r.occurred_at >= date_trunc('month', now())) as spend,
+              coalesce((select (c.config->'ai'->>'monthly_cost_cap_usd')::numeric from tenant_configs c
+             where c.tenant_id = t.id order by c.revision desc limit 1), ${DEFAULT_AI_SETTINGS.monthly_cost_cap_usd}) as cap
+            from tenants t) x
+          where x.cap > 0 and x.spend >= 0.8 * x.cap`),
         backlog: Number(
           (
             await rows<{ n: string }>(sql`

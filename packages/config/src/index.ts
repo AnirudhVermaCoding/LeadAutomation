@@ -2,6 +2,7 @@ import { clinicPreset } from './presets/clinic.ts';
 import { realEstatePreset } from './presets/real-estate.ts';
 import type { TenantConfig } from './schema.ts';
 
+export * from './llm.ts';
 export * from './schema.ts';
 export * from './templates.ts';
 export * from './validate.ts';

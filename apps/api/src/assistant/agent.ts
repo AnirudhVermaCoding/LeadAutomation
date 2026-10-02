@@ -1,10 +1,17 @@
 import { fillVariables, parseButtonPayload } from '@instantlead/config';
 import { detectLanguage, displayStatus, formatSlot, matchesEmergency, scoreLead } from '@instantlead/core';
-import { Anthropic, llmCostUsd, type LlmProvider, type LlmRequest } from '@instantlead/integrations';
+import { LlmError, type LlmProvider, type LlmRequest, type Turn } from '@instantlead/integrations';
 import { asc, eq, sum } from 'drizzle-orm';
 import { getActiveConfig } from '../config-store.ts';
 import { withTenant } from '../db/client.ts';
 import { leads, llmRuns, messages } from '../db/schema.ts';
+import {
+  aiSettings,
+  loggedCall,
+  monthSpendUsd,
+  NoModelAvailableError,
+  type LlmRouter,
+} from '../llm-router.ts';
 import { sendToLead, type MessagingDeps } from '../outbound.ts';
 import type { TurnHints } from './fake-llm.ts';
 import { buildSystemPrompt, buildTools, stateMessage } from './prompt.ts';
@@ -12,13 +19,15 @@ import { activeAppointment, BookingError, updateAppointment } from '../booking.t
 import { escalate, loadAnswers, runTool } from './tools.ts';
 
 export interface AssistantDeps extends MessagingDeps {
-  llm: LlmProvider;
+  router: LlmRouter;
   /** Per-lead LLM spend ceiling; above it the conversation goes to staff. */
   llmCostCapUsd: number;
 }
 
 const MAX_STEPS = 6; // model calls per turn
 const HISTORY = 40; // messages of context
+/** Logged on every model call, so evals and incidents can be tied to the prompt that produced them. */
+export const PROMPT_VERSION = 'agent-v1';
 
 const HOLDING = {
   en: 'Thanks for your message! A member of our team will get back to you shortly.',
@@ -39,6 +48,8 @@ export async function runAssistantTurn(
   deps: AssistantDeps,
   tenantId: string,
   leadId: string,
+  /** The job's last attempt: never throw for a retry; the lead gets the holding reply instead. */
+  opts: { finalAttempt?: boolean } = {},
 ): Promise<TurnResult> {
   const ctx = await withTenant(deps.db, tenantId, async (tx) => {
     const [lead] = await tx.select().from(leads).where(eq(leads.id, leadId));
@@ -55,6 +66,7 @@ export async function runAssistantTurn(
       .select({ total: sum(llmRuns.costUsd) })
       .from(llmRuns)
       .where(eq(llmRuns.leadId, leadId));
+    const tenantSpendUsd = await monthSpendUsd(tx, deps.clock.now());
     const answers = await loadAnswers(tx, leadId);
     const appt = await activeAppointment(tx, leadId);
     const appointment = appt && {
@@ -78,6 +90,7 @@ export async function runAssistantTurn(
       inboundText,
       answers,
       spentUsd: Number(spend?.total ?? 0),
+      tenantSpendUsd,
       appointment,
       appointmentId: appt?.id ?? null,
     };
@@ -150,161 +163,136 @@ export async function runAssistantTurn(
     }
   }
 
-  if (ctx.spentUsd >= deps.llmCostCapUsd) {
-    await escalate(tool, 'LLM cost cap reached');
+  const handover = async (reason: string): Promise<TurnResult> => {
+    await escalate(tool, reason);
     await reply(holding, 'holding');
-    return { status: 'escalated', reason: 'cost cap' };
+    return { status: 'escalated', reason };
+  };
+
+  if (ctx.spentUsd >= deps.llmCostCapUsd) return handover('cost cap');
+  const cap = aiSettings(config).monthly_cost_cap_usd;
+  if (cap > 0 && ctx.tenantSpendUsd >= cap) return handover('monthly AI budget reached');
+
+  let chain: LlmProvider[];
+  try {
+    chain = deps.router.chain('agent_reply', config);
+  } catch (err) {
+    if (err instanceof NoModelAvailableError) return handover('no AI model available');
+    throw err;
   }
 
   const scored = scoreLead(config.qualification, ctx.answers);
-  const request: LlmRequest = {
-    max_tokens: 1024,
-    // Sonnet 5.5: no extended thinking, low effort — short, fast WhatsApp replies.
-    thinking: { type: 'between_tools' },
-    output_config: { effort: 'low' },
-    system: [{ type: 'text', text: buildSystemPrompt(config), cache_control: { type: 'ephemeral' } }],
-    tools: buildTools(config),
-    messages: [
-      ...toConversation(ctx.history),
-      {
-        role: 'system',
-        content: stateMessage({
-          now: deps.clock.now().toLocaleString('en-IN', { timeZone: config.locale.timezone }),
-          name: lead.name,
-          language: lead.language,
-          answers: ctx.answers,
-          missing: scored.status === 'incomplete' ? scored.missing : [],
-          status: displayStatus(lead),
-          appointment: ctx.appointment?.label ?? null,
-        }),
-      } as unknown as Anthropic.MessageParam,
-    ],
+  const system = buildSystemPrompt(config);
+  const tools = buildTools(config);
+  const state: Turn = {
+    role: 'system',
+    text: stateMessage({
+      now: deps.clock.now().toLocaleString('en-IN', { timeZone: config.locale.timezone }),
+      name: lead.name,
+      language: lead.language,
+      answers: ctx.answers,
+      missing: scored.status === 'incomplete' ? scored.missing : [],
+      status: displayStatus(lead),
+      appointment: ctx.appointment?.label ?? null,
+    }),
   };
 
-  try {
+  /** One model drives the whole turn (bounded tool loop). Throws LlmError to fail over. */
+  const converse = async (llm: LlmProvider, fallbackUsed: boolean): Promise<TurnResult> => {
+    const request: LlmRequest = {
+      task: 'agent_reply',
+      system,
+      tools,
+      turns: [...toConversation(ctx.history), state],
+      maxTokens: 1024,
+      effort: 'low', // short, fast WhatsApp replies
+    };
     let answers = ctx.answers;
+    let invalidCalls = 0;
     for (let step = 0; step < MAX_STEPS; step++) {
+      const sc = scoreLead(config.qualification, answers);
       const hints: TurnHints = {
         config,
         answers,
-        missing: (() => {
-          const s = scoreLead(config.qualification, answers);
-          return s.status === 'incomplete' ? s.missing : [];
-        })(),
+        missing: sc.status === 'incomplete' ? sc.missing : [],
         lastInbound: ctx.inboundText,
         status: displayStatus(lead),
         appointment: ctx.appointment,
       };
-      const response = await callModel(deps, tenantId, leadId, request, hints);
+      const response = await loggedCall(
+        deps,
+        llm,
+        request,
+        { tenantId, leadId, task: 'agent_reply', promptVersion: PROMPT_VERSION, fallbackUsed },
+        hints,
+      );
 
-      if (response.stop_reason === 'refusal') {
-        await escalate(tool, `model declined (${response.stop_details?.category ?? 'unknown'})`);
-        await reply(holding, 'holding');
-        return { status: 'escalated', reason: 'refusal' };
-      }
+      if (response.stop === 'refusal')
+        return handover(`model declined (${response.refusalCategory ?? 'unknown'})`);
 
-      const calls = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
-      if (response.stop_reason !== 'tool_use' || !calls.length) {
-        const body = response.content
-          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-          .map((b) => b.text.trim())
-          .join('\n')
-          .trim();
+      if (response.stop !== 'tool_use' || !response.toolCalls.length) {
+        if (!response.text) throw new LlmError('invalid_output', `${llm.model} returned no text`);
         const fresh = await withTenant(deps.db, tenantId, (tx) =>
           tx.select().from(leads).where(eq(leads.id, leadId)),
         );
-        if (!body) return { status: 'skipped', reason: 'model returned no text' };
-        const sent = await reply(body);
+        const sent = await reply(response.text);
         return {
           status: fresh[0]?.aiPaused ? 'escalated' : 'replied',
           messageId: 'messageId' in sent ? sent.messageId : undefined,
         };
       }
 
-      // Append-only: the assistant turn goes back unchanged (thinking blocks included), then all results in one message.
-      request.messages.push({ role: 'assistant', content: response.content });
-      const results: Anthropic.ToolResultBlockParam[] = [];
-      for (const call of calls) {
+      // Append-only: the assistant turn goes back unchanged (raw keeps provider extras), then all results.
+      request.turns.push({
+        role: 'assistant',
+        text: response.text,
+        toolCalls: response.toolCalls,
+        raw: response.raw,
+      });
+      const results: { id: string; content: string; isError?: boolean }[] = [];
+      for (const call of response.toolCalls) {
         const out = await runTool(tool, call.name, call.input);
-        results.push({
-          type: 'tool_result',
-          tool_use_id: call.id,
-          content: out.content,
-          is_error: out.isError,
-        });
+        if (out.invalidArguments) invalidCalls++;
+        results.push({ id: call.id, content: out.content, isError: out.isError });
       }
-      request.messages.push({ role: 'user', content: results });
+      // One bad call is fed back so the model can correct itself; a second means this model is unreliable here.
+      if (invalidCalls >= 2)
+        throw new LlmError('invalid_output', `${llm.model}: repeated invalid tool arguments`);
+      request.turns.push({ role: 'tool_results', results });
       answers = await withTenant(deps.db, tenantId, (tx) => loadAnswers(tx, leadId));
     }
-    await escalate(tool, 'assistant did not finish within the step limit');
-    await reply(holding, 'holding');
-    return { status: 'escalated', reason: 'step limit' };
-  } catch (err) {
-    // Requests that will never succeed (bad request, auth): hand to staff instead of retrying.
-    if (
-      err instanceof Anthropic.APIError &&
-      err.status !== undefined &&
-      err.status >= 400 &&
-      err.status < 500 &&
-      err.status !== 408 &&
-      err.status !== 429
-    ) {
-      await escalate(tool, `assistant error ${err.status}`);
-      await reply(holding, 'holding');
-      return { status: 'escalated', reason: `api error ${err.status}` };
+    return handover('assistant did not finish within the step limit');
+  };
+
+  // Failover: on an outage or bad output, the next model in the chain redoes the turn from the stored conversation.
+  let lastError: unknown;
+  for (const [i, llm] of chain.entries()) {
+    try {
+      return await converse(llm, i > 0);
+    } catch (err) {
+      if (!(err instanceof LlmError)) throw err;
+      lastError = err;
+      if (!err.failover) break;
     }
-    throw err; // transient: the job retries
   }
+  // The whole chain failed. A transient outage is retried by the job, unless this is the last attempt.
+  if (lastError instanceof LlmError && lastError.retryable && !opts.finalAttempt) throw lastError;
+  const why = lastError instanceof Error ? lastError.message.slice(0, 120) : 'unknown';
+  return handover(`all AI models failed (${why})`);
 }
 
-/** Stored messages -> alternating user/assistant turns (the API needs a user turn first). */
-function toConversation(history: { direction: 'in' | 'out'; body: string }[]): Anthropic.MessageParam[] {
-  const turns: Anthropic.MessageParam[] = [];
+/** Stored messages -> alternating user/assistant turns (providers need a user turn first). */
+function toConversation(history: { direction: 'in' | 'out'; body: string }[]): Turn[] {
+  const turns: Turn[] = [];
   for (const m of history) {
-    const role = m.direction === 'in' ? 'user' : 'assistant';
     const prev = turns.at(-1);
-    if (prev?.role === role) prev.content = `${String(prev.content)}\n${m.body}`;
-    else turns.push({ role, content: m.body });
+    if (m.direction === 'in') {
+      if (prev?.role === 'user') prev.text += `\n${m.body}`;
+      else turns.push({ role: 'user', text: m.body });
+    } else if (prev?.role === 'assistant') prev.text += `\n${m.body}`;
+    else turns.push({ role: 'assistant', text: m.body, toolCalls: [] });
   }
   if (turns[0]?.role === 'assistant')
-    turns.unshift({ role: 'user', content: '(The customer submitted an enquiry form.)' });
+    turns.unshift({ role: 'user', text: '(The customer submitted an enquiry form.)' });
   return turns;
-}
-
-async function callModel(
-  deps: AssistantDeps,
-  tenantId: string,
-  leadId: string,
-  request: LlmRequest,
-  hints: TurnHints,
-) {
-  const started = performance.now();
-  const record = (fields: Partial<typeof llmRuns.$inferInsert>) =>
-    withTenant(deps.db, tenantId, (tx) =>
-      tx.insert(llmRuns).values({
-        leadId,
-        provider: deps.llm.name,
-        model: deps.llm.model,
-        latencyMs: Math.round(performance.now() - started),
-        occurredAt: deps.clock.now(),
-        ...fields,
-      }),
-    );
-  try {
-    const response = await deps.llm.complete(request, hints);
-    const u = response.usage;
-    await record({
-      inputTokens: u.input_tokens,
-      outputTokens: u.output_tokens,
-      cacheReadTokens: u.cache_read_input_tokens ?? 0,
-      cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-      costUsd: llmCostUsd(deps.llm.model, u),
-      stopReason: response.stop_reason,
-      providerRequestId: response.id,
-    });
-    return response;
-  } catch (err) {
-    await record({ error: err instanceof Error ? err.message.slice(0, 500) : String(err) });
-    throw err;
-  }
 }

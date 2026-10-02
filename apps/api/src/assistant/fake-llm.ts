@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { TenantConfig } from '@instantlead/config';
-import type { Anthropic, LlmProvider, LlmRequest } from '@instantlead/integrations';
+import type { LlmProvider, LlmRequest, LlmResponse, ToolCall } from '@instantlead/integrations';
 
 /** What the agent passes the fake provider instead of making it parse prompts. */
 export interface TurnHints {
@@ -71,25 +71,17 @@ function ask(config: TenantConfig, key: string) {
   return `Could you tell me: ${q.hint.toLowerCase()}${options}?`;
 }
 
-function message(content: unknown[], stop: Anthropic.StopReason): Anthropic.Message {
+function message(text: string, toolCalls: ToolCall[] = []): LlmResponse {
   return {
-    id: `fake_${randomUUID()}`,
-    type: 'message',
-    role: 'assistant',
-    model: 'fake',
-    content,
-    stop_reason: stop,
-    stop_sequence: null,
-    usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-  } as unknown as Anthropic.Message;
+    text,
+    toolCalls,
+    stop: toolCalls.length ? 'tool_use' : 'end',
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    raw: { provider: 'fake', model: 'fake', data: null },
+    requestId: `fake_${randomUUID()}`,
+  };
 }
-const text = (t: string) => ({ type: 'text', text: t, citations: null });
-const toolUse = (name: string, input: object) => ({
-  type: 'tool_use',
-  id: `toolu_${randomUUID()}`,
-  name,
-  input,
-});
+const toolUse = (name: string, input: object): ToolCall => ({ id: `toolu_${randomUUID()}`, name, input });
 
 const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth'];
 const HINDI_ORDINALS = ['pehla', 'doosra', 'teesra'];
@@ -123,8 +115,8 @@ const parse = <T>(s: string): T | null => {
     return null;
   }
 };
-const reply = (t: string) => Promise.resolve(message([text(t)], 'end_turn'));
-const call = (name: string, input: object) => Promise.resolve(message([toolUse(name, input)], 'tool_use'));
+const reply = (t: string) => Promise.resolve(message(t));
+const call = (name: string, input: object) => Promise.resolve(message('', [toolUse(name, input)]));
 
 /**
  * Mock-mode assistant: a rule-based receptionist that drives the same tools as the real model,
@@ -132,28 +124,23 @@ const call = (name: string, input: object) => Promise.resolve(message([toolUse(n
  */
 export function createFakeLlm(): LlmProvider {
   return {
-    name: 'fake',
+    provider: 'fake',
     model: 'fake',
     complete(request: LlmRequest, rawHints?: unknown) {
       const h = rawHints as TurnHints;
       const inbound = h.lastInbound;
       const choice = choiceIndex(inbound);
       const picking = choice !== null && (h.status === 'booking_offered' || h.appointment !== null);
-      const nonSystem = request.messages.filter((m) => (m.role as string) !== 'system');
-      const last = nonSystem.at(-1);
-      const toolResults = Array.isArray(last?.content)
-        ? last.content.filter((b): b is Anthropic.ToolResultBlockParam => b.type === 'tool_result')
-        : [];
+      const turns = request.turns.filter((t) => t.role !== 'system');
+      const last = turns.at(-1);
+      const toolResults = last?.role === 'tool_results' ? last.results : [];
 
       // Second step of a turn: tools ran, now act on their results.
       if (toolResults.length) {
-        const prev = nonSystem.at(-2);
-        const calls = Array.isArray(prev?.content)
-          ? prev.content.filter((b): b is Anthropic.ToolUseBlockParam => b.type === 'tool_use')
-          : [];
-        const names = calls.map((c) => c.name);
-        const results = toolResults.map((r) => (typeof r.content === 'string' ? r.content : ''));
-        const failed = toolResults.some((r) => r.is_error);
+        const prev = turns.at(-2);
+        const names = prev?.role === 'assistant' ? prev.toolCalls.map((c) => c.name) : [];
+        const results = toolResults.map((r) => r.content);
+        const failed = toolResults.some((r) => r.isError);
 
         if (names.includes('escalate_to_human'))
           return reply('Sure — a member of our team will reply to you here shortly.');
@@ -223,8 +210,8 @@ export function createFakeLlm(): LlmProvider {
       if (records.length)
         return Promise.resolve(
           message(
+            '',
             records.map((r) => toolUse('record_answer', { key: r.q.key, value: r.value })),
-            'tool_use',
           ),
         );
 

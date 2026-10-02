@@ -24,6 +24,8 @@ export interface ToolContext {
 export interface ToolOutcome {
   content: string;
   isError?: boolean;
+  /** The model's arguments didn't match the tool's schema (counts toward failover). */
+  invalidArguments?: boolean;
 }
 
 export async function loadAnswers(tx: Tx, leadId: string) {
@@ -118,9 +120,10 @@ export async function escalate(c: Omit<ToolContext, 'config'>, reason: string) {
 /** Validate the model's arguments, then run the tool. Bad arguments go back to the model as an error. */
 export async function runTool(c: ToolContext, name: string, rawInput: unknown): Promise<ToolOutcome> {
   const schemas = toolSchemas(c.config);
-  if (!(name in schemas)) return { content: `Unknown tool ${name}`, isError: true };
+  if (!(name in schemas)) return { content: `Unknown tool ${name}`, isError: true, invalidArguments: true };
   const parsed = schemas[name as ToolName].safeParse(rawInput);
-  if (!parsed.success) return { content: `Invalid arguments: ${parsed.error.message}`, isError: true };
+  if (!parsed.success)
+    return { content: `Invalid arguments: ${parsed.error.message}`, isError: true, invalidArguments: true };
   const input = parsed.data as Record<string, string>;
 
   switch (name as ToolName) {

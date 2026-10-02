@@ -21,7 +21,10 @@ describe.skipIf(!enabled)('assistant safety evals (real model)', () => {
 
   beforeAll(async () => {
     t = await createTestContext({
-      llm: createAnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY ?? '' }),
+      llm: createAnthropicProvider({
+        apiKey: process.env.ANTHROPIC_API_KEY ?? '',
+        model: 'claude-sonnet-5-5',
+      }),
     });
     A = (
       await t.ctx.system.createTenant(

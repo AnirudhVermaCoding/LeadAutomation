@@ -1,4 +1,4 @@
-import type { Anthropic, LlmProvider, LlmRequest } from '@instantlead/integrations';
+import type { LlmProvider, LlmRequest, LlmResponse, ToolCall } from '@instantlead/integrations';
 import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { createTestContext, PASSWORD, type TestContext } from '../../test/context.ts';
@@ -8,28 +8,27 @@ import { createFakeLlm } from './fake-llm.ts';
 
 // The fake receptionist by default; individual tests can script the model's responses.
 const fake = createFakeLlm();
-let script: ((req: LlmRequest) => Anthropic.Message) | null = null;
+let script: ((req: LlmRequest) => LlmResponse) | null = null;
 const seen: LlmRequest[] = [];
 const llm: LlmProvider = {
-  name: 'fake',
+  provider: 'fake',
   model: 'fake',
   complete(req, hints) {
     seen.push(structuredClone(req));
     return script ? Promise.resolve(script(req)) : fake.complete(req, hints);
   },
 };
-const reply = (content: object[], stop: Anthropic.StopReason, extra: object = {}) =>
-  ({
-    id: 'msg_test',
-    type: 'message',
-    role: 'assistant',
-    model: 'fake',
-    content,
-    stop_reason: stop,
-    stop_sequence: null,
-    usage: { input_tokens: 10, output_tokens: 5 },
-    ...extra,
-  }) as unknown as Anthropic.Message;
+const reply = (
+  text: string,
+  toolCalls: ToolCall[] = [],
+  stop: LlmResponse['stop'] = toolCalls.length ? 'tool_use' : 'end',
+): LlmResponse => ({
+  text,
+  toolCalls,
+  stop,
+  usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  raw: { provider: 'fake', model: 'fake', data: null },
+});
 
 let t: TestContext;
 let A: string;
@@ -98,14 +97,14 @@ describe('qualification conversation (mock-mode assistant)', () => {
     expect((await outbound(l.id)).at(-1)).toMatch(/I have these times free: 1\) /);
   });
 
-  test('the request keeps a cacheable prefix: stable system + tools, per-turn state as a trailing system message', async () => {
+  test('the request keeps a cacheable prefix: stable system + tools, per-turn state as a trailing system turn', async () => {
     const last = seen.at(-1)!;
-    expect(last.system).toEqual([expect.objectContaining({ cache_control: { type: 'ephemeral' } })]);
-    expect(JSON.stringify(last.system)).not.toMatch(/Local time/);
-    expect(last.thinking).toEqual({ type: 'between_tools' });
-    const systemMsg = last.messages.find((m) => (m.role as string) === 'system');
-    expect(String(systemMsg?.content)).toMatch(/Local time/);
-    expect(last.messages[0]?.role).toBe('user');
+    expect(last.task).toBe('agent_reply');
+    expect(last.system).not.toMatch(/Local time/);
+    expect(last.tools?.map((t) => t.name)).toContain('book_slot');
+    const state = last.turns.find((t) => t.role === 'system');
+    expect(state && 'text' in state ? state.text : '').toMatch(/Local time/);
+    expect(last.turns[0]?.role).toBe('user');
   });
 
   test('a burst of messages becomes one turn and one reply', async () => {
@@ -120,7 +119,14 @@ describe('qualification conversation (mock-mode assistant)', () => {
   test('every model call is logged with tokens and cost', async () => {
     const runs = await withTenant(t.ctx.db, A, (tx) => tx.select().from(llmRuns));
     expect(runs.length).toBeGreaterThan(0);
-    expect(runs[0]).toMatchObject({ provider: 'fake', latencyMs: expect.any(Number), costUsd: 0 });
+    expect(runs[0]).toMatchObject({
+      provider: 'fake',
+      task: 'agent_reply',
+      promptVersion: expect.stringMatching(/^agent-v/),
+      fallbackUsed: false,
+      latencyMs: expect.any(Number),
+      costUsd: 0,
+    });
   });
 });
 
@@ -150,23 +156,15 @@ describe('safety', () => {
     script = (req) => {
       call++;
       if (call === 1)
-        return reply(
-          [
-            {
-              type: 'tool_use',
-              id: 'tu1',
-              name: 'record_answer',
-              input: { key: 'urgency', value: 'yesterday' },
-            },
-          ],
-          'tool_use',
-        );
-      const results = req.messages.at(-1)?.content as Anthropic.ToolResultBlockParam[];
-      expect(results[0]).toMatchObject({ is_error: true, content: expect.stringMatching(/not an option/) });
-      return reply(
-        [{ type: 'text', text: 'How soon would you like to come in?', citations: null }],
-        'end_turn',
-      );
+        return reply('', [
+          { id: 'tu1', name: 'record_answer', input: { key: 'urgency', value: 'yesterday' } },
+        ]);
+      const last = req.turns.at(-1);
+      expect(last?.role === 'tool_results' && last.results[0]).toMatchObject({
+        isError: true,
+        content: expect.stringMatching(/not an option/),
+      });
+      return reply('How soon would you like to come in?');
     };
     await say('9800000005', 'yesterday');
     await t.drainAssistant();
@@ -178,12 +176,11 @@ describe('safety', () => {
   });
 
   test('a model refusal hands over to staff with a polite holding message', async () => {
-    script = () =>
-      reply([], 'refusal', {
-        stop_details: { type: 'refusal', category: 'general_harms', explanation: null },
-      });
+    script = () => ({ ...reply('', [], 'refusal'), refusalCategory: 'general_harms' });
     await say('9800000006', 'something odd');
-    expect(await t.drainAssistant()).toMatchObject([{ status: 'escalated', reason: 'refusal' }]);
+    expect(await t.drainAssistant()).toMatchObject([
+      { status: 'escalated', reason: 'model declined (general_harms)' },
+    ]);
     script = null;
     const l = await lead('+919800000006');
     expect(l.aiPaused).toBe(true);
@@ -209,7 +206,7 @@ describe('safety', () => {
   });
 
   test('the reply language follows the lead (Hindi holding message)', async () => {
-    script = () => reply([], 'refusal', { stop_details: null });
+    script = () => reply('', [], 'refusal');
     await say('9800000008', 'मुझे कल दांत दिखाना है');
     await t.drainAssistant();
     script = null;

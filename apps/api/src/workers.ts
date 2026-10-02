@@ -10,7 +10,7 @@ import { ChannelError, fetchMetaLead } from '@instantlead/integrations';
 import type { FastifyBaseLogger } from 'fastify';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant } from './db/client.ts';
-import { QUEUES, type JobData } from './jobs.ts';
+import { ASSISTANT_RETRY_LIMIT, QUEUES, type JobData } from './jobs.ts';
 import { emit, intakeLead, transitionLeadIfAllowed } from './leads.ts';
 import { sendToLead, type MessagingDeps } from './outbound.ts';
 import { getTenantSecret } from './secrets.ts';
@@ -156,7 +156,9 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
     async (jobs) => {
       for (const job of jobs)
         await runJob(log, QUEUES.assistantTurn, () =>
-          runAssistantTurn(ctx, job.data.tenantId, job.data.leadId),
+          runAssistantTurn(ctx, job.data.tenantId, job.data.leadId, {
+            finalAttempt: job.retryCount >= ASSISTANT_RETRY_LIMIT,
+          }),
         );
     },
   );

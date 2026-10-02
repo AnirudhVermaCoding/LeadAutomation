@@ -56,6 +56,18 @@ export async function runMonitor(deps: {
   ];
 
   const toSend: string[] = [];
+  for (const r of s.aiBudget) {
+    const pct = Math.round((Number(r.spend) / Number(r.cap)) * 100);
+    found.push({
+      key: `ai_budget:${r.tenant_id}:${pct >= 100 ? 'over' : 'warn'}`,
+      tenantId: r.tenant_id,
+      kind: 'ai_budget',
+      message:
+        pct >= 100
+          ? `${r.name}: AI budget used up ($${Number(r.spend).toFixed(2)} of $${Number(r.cap)}). New conversations go to staff until next month or a higher cap.`
+          : `${r.name}: ${pct}% of this month's AI budget used ($${Number(r.spend).toFixed(2)} of $${Number(r.cap)}).`,
+    });
+  }
   for (const a of found) if (await deps.system.raiseAlert({ ...a, now: deps.now() })) toSend.push(a.message);
   if (toSend.length && deps.alertEmail)
     await deps.email.send({

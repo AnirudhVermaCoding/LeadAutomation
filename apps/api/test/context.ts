@@ -49,6 +49,7 @@ export async function createTestContext(
     fetch?: typeof globalThis.fetch;
     allowFakeChannel?: boolean;
     llm?: LlmProvider;
+    llmProviders?: LlmProvider[];
     calendarFor?: (tx: Tx, tenantId: string) => Promise<CalendarProvider | null>;
   } = {},
 ) {
@@ -72,6 +73,7 @@ export async function createTestContext(
   const ctx = createAppContext(env, clock, {
     fetch: opts.fetch,
     llm: opts.llm,
+    llmProviders: opts.llmProviders,
     calendarFor: opts.calendarFor,
   });
   const app = buildApp({ logLevel: 'silent', checkDb: ctx.checkDb });

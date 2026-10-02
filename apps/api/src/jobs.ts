@@ -43,6 +43,9 @@ const RETRY = {
   deadLetter: QUEUES.deadLetter,
 };
 
+/** Assistant turns retry a few times on AI outages; the last attempt sends a holding reply instead. */
+export const ASSISTANT_RETRY_LIMIT = 3;
+
 /** pg-boss runs on the owner connection; it owns the `pgboss` schema. */
 export const createBoss = (ownerUrl: string) => new PgBoss({ connectionString: ownerUrl, schema: 'pgboss' });
 
@@ -63,7 +66,7 @@ export async function ensureQueues(boss: PgBoss) {
   // of messages becomes one reply and two turns never race. Short retries: it's a live chat.
   await boss.createQueue(QUEUES.assistantTurn, {
     policy: 'stately',
-    retryLimit: 3,
+    retryLimit: ASSISTANT_RETRY_LIMIT,
     retryDelay: 5,
     retryBackoff: true,
     deadLetter: QUEUES.deadLetter,

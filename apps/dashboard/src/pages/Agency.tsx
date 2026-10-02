@@ -3,7 +3,19 @@ import { ArrowRight } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { api } from '../api.ts';
 import { navigate } from '../router.ts';
-import { Button, Card, Empty, ErrorState, Field, fmt, Input, Loading, PageHeader, Select } from '../ui.tsx';
+import {
+  Button,
+  Card,
+  cx,
+  Empty,
+  ErrorState,
+  Field,
+  fmt,
+  Input,
+  Loading,
+  PageHeader,
+  Select,
+} from '../ui.tsx';
 
 interface Usage {
   since: string;
@@ -15,6 +27,8 @@ interface Usage {
     messagesOut: number;
     whatsappInr: number;
     llmUsd: number;
+    llmCapUsd: number;
+    llmProviders: string;
     bookings: number;
   }[];
 }
@@ -94,6 +108,7 @@ export function Agency({ onSwitch }: { onSwitch: (tenantId: string) => void }) {
                   <th className="px-2 py-2 text-right font-medium">WhatsApp sent</th>
                   <th className="px-2 py-2 text-right font-medium">WhatsApp cost</th>
                   <th className="px-2 py-2 text-right font-medium">AI cost</th>
+                  <th className="px-2 py-2 text-right font-medium">AI budget</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
@@ -110,6 +125,17 @@ export function Agency({ onSwitch }: { onSwitch: (tenantId: string) => void }) {
                     <td className="px-2 py-2 text-right">{fmt.inr(t.whatsappInr)}</td>
                     <td className="px-2 py-2 text-right" title={`$${t.llmUsd.toFixed(2)}`}>
                       {fmt.inr(t.llmUsd * USD_TO_INR)}
+                    </td>
+                    <td
+                      className={cx(
+                        'px-2 py-2 text-right',
+                        t.llmCapUsd > 0 && t.llmUsd >= 0.8 * t.llmCapUsd && 'font-semibold text-amber-700',
+                      )}
+                      title={t.llmProviders ? `Providers: ${t.llmProviders}` : 'No AI calls yet'}
+                    >
+                      {t.llmCapUsd > 0
+                        ? `${Math.round((t.llmUsd / t.llmCapUsd) * 100)}% of ${t.llmCapUsd}`
+                        : 'no cap'}
                     </td>
                     <td className="px-4 py-2 text-right">
                       <Button
