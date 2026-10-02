@@ -139,18 +139,28 @@ export async function findSlots(
     limit?: number | undefined;
     /** false = every free slot (dashboard); true = a few spread-out offers (chat). */
     spread?: boolean;
+    /** Only this doctor / agent. */
+    resource?: string | undefined;
   },
 ) {
   return withTenant(deps.db, tenantId, async (tx) => {
     const config = (await getActiveConfig(tx))?.config;
     if (!config) throw new Error('tenant has no config');
     const tz = config.locale.timezone;
-    const all = await slotsFor(tx, deps, config, q.service, q.date, q.date ? 1 : SEARCH_DAYS);
+    const all = (await slotsFor(tx, deps, config, q.service, q.date, q.date ? 1 : SEARCH_DAYS)).filter(
+      (s) => !q.resource || s.resources.includes(q.resource),
+    );
     const offers =
       q.spread === false
         ? all.slice(0, q.limit ?? 200)
         : pickOffers(all, q.limit ?? config.booking.offer_slots, { timeZone: tz, prefer: q.prefer });
-    return { timeZone: tz, slots: offers.map((s) => describeSlot(s, tz)) };
+    return {
+      timeZone: tz,
+      slots: offers.map((s) => {
+        const d = describeSlot(s, tz);
+        return q.resource ? { ...d, resource: q.resource, label: `${d.label} with ${q.resource}` } : d;
+      }),
+    };
   });
 }
 
@@ -228,6 +238,8 @@ export async function bookSlot(
     time: string;
     source: 'assistant' | 'staff';
     replaceAppointmentId?: string;
+    /** A specific doctor / agent the person asked for (remembered for rebooking). */
+    resource?: string | undefined;
   },
 ) {
   for (let attempt = 1; ; attempt++) {
@@ -258,9 +270,25 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
     const start = zonedTimeToUtc(input.date, input.time, tz);
     const slot = (
       await slotsFor(tx, deps, config, service.name, input.date, 1, input.replaceAppointmentId)
-    ).find((s) => s.start.getTime() === start.getTime());
+    ).find(
+      (s) =>
+        s.start.getTime() === start.getTime() && (!input.resource || s.resources.includes(input.resource)),
+    );
     if (!slot)
-      throw new BookingError('unavailable', `${formatSlot(start, tz)} is not available for ${service.name}`);
+      throw new BookingError(
+        'unavailable',
+        `${formatSlot(start, tz)} is not available for ${service.name}${input.resource ? ` with ${input.resource}` : ''}`,
+      );
+    if (input.resource)
+      await tx
+        .insert(answers)
+        .values({
+          leadId: input.leadId,
+          key: PREFERRED_RESOURCE,
+          value: input.resource,
+          answeredAt: deps.clock.now(),
+        })
+        .onConflictDoUpdate({ target: [answers.leadId, answers.key], set: { value: input.resource } });
 
     if (input.replaceAppointmentId)
       await tx
@@ -274,7 +302,7 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
       .values({
         leadId: input.leadId,
         service: service.name,
-        resource: slot.resources[0] ?? 'default',
+        resource: input.resource ?? slot.resources[0] ?? 'default',
         startsAt: slot.start,
         endsAt: slot.end,
         busyUntil: new Date(slot.end.getTime() + config.booking.buffer_minutes * MINUTE),
@@ -298,7 +326,19 @@ export async function rescheduleLeadAppointment(
 ) {
   const current = await withTenant(deps.db, tenantId, (tx) => activeAppointment(tx, input.leadId));
   if (!current) throw new BookingError('no_appointment', 'There is no upcoming appointment to reschedule');
-  return bookSlot(deps, tenantId, { ...input, service: current.service, replaceAppointmentId: current.id });
+  // Someone who asked for a specific doctor stays with them when they reschedule.
+  const [pref] = await withTenant(deps.db, tenantId, (tx) =>
+    tx
+      .select({ value: answers.value })
+      .from(answers)
+      .where(and(eq(answers.leadId, input.leadId), eq(answers.key, PREFERRED_RESOURCE))),
+  );
+  return bookSlot(deps, tenantId, {
+    ...input,
+    service: current.service,
+    replaceAppointmentId: current.id,
+    resource: pref?.value === current.resource ? current.resource : undefined,
+  });
 }
 
 const NEXT: Partial<

@@ -18,7 +18,7 @@ import { and, asc, eq, gte, sum } from 'drizzle-orm';
 import { z } from 'zod';
 import { getActiveConfig } from '../config-store.ts';
 import { withTenant } from '../db/client.ts';
-import { conversations, leads, llmRuns, messages } from '../db/schema.ts';
+import { availabilityRules, conversations, leads, llmRuns, messages } from '../db/schema.ts';
 import { emit, transitionLeadIfAllowed } from '../leads.ts';
 import {
   aiSettings,
@@ -104,6 +104,11 @@ export async function runAssistantTurn(
       .from(llmRuns)
       .where(eq(llmRuns.leadId, leadId));
     const tenantSpendUsd = await monthSpendUsd(tx, deps.clock.now());
+    const resources = [
+      ...new Set(
+        (await tx.select({ r: availabilityRules.resource }).from(availabilityRules)).map((x) => x.r),
+      ),
+    ];
     const answers = await loadAnswers(tx, leadId);
     const appt = await activeAppointment(tx, leadId);
     const appointment = appt && {
@@ -148,6 +153,7 @@ export async function runAssistantTurn(
       answers,
       spentUsd: Number(spend?.total ?? 0),
       tenantSpendUsd,
+      resources,
       appointment,
       appointmentId: appt?.id ?? null,
     };
@@ -160,7 +166,7 @@ export async function runAssistantTurn(
   const lastInbound = unanswered.at(-1);
   if (!lastInbound) return { status: 'skipped', reason: 'nothing to answer' };
 
-  const tool = { deps, tenantId, leadId, config };
+  const tool = { deps, tenantId, leadId, config, resources: ctx.resources };
   const reply = (body: string, suffix = 'reply') =>
     sendToLead(deps, tenantId, {
       leadId,
@@ -310,7 +316,7 @@ export async function runAssistantTurn(
 
   const scored = scoreLead(config.qualification, ctx.answers);
   const system = buildSystemPrompt(config);
-  const tools = buildTools(config);
+  const tools = buildTools(config, ctx.resources);
   const state: Turn = {
     role: 'system',
     text: stateMessage({
@@ -322,6 +328,7 @@ export async function runAssistantTurn(
       missing: scored.status === 'incomplete' ? scored.missing : [],
       status: displayStatus(lead),
       appointment: ctx.appointment?.label ?? null,
+      resources: ctx.resources,
     }),
   };
 
@@ -353,6 +360,7 @@ export async function runAssistantTurn(
         lastInbound: ctx.inboundText,
         status: displayStatus(lead),
         appointment: ctx.appointment,
+        resources: ctx.resources,
       };
       const response = await loggedCall(
         deps,

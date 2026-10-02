@@ -12,6 +12,8 @@ export interface TurnHints {
   /** Lead display status at the start of the turn (e.g. booking_offered, booked). */
   status: string;
   appointment: { service: string; label: string } | null;
+  /** Bookable doctors / agents. */
+  resources?: readonly string[];
 }
 
 // A few Hindi/Hinglish synonyms so the demo understands common replies.
@@ -151,6 +153,24 @@ function serviceForConcern(config: TenantConfig, text: string): string | null {
   }
   return best?.name ?? null;
 }
+/** A doctor / agent the customer named anywhere in the conversation ("Dr Rao", "rao"). */
+function requestedResource(h: TurnHints, request: LlmRequest): string | undefined {
+  const text = request.turns
+    .filter((t) => t.role === 'user')
+    .map((t) => (t.role === 'user' ? t.text : ''))
+    .join(' ')
+    .toLowerCase();
+  return (h.resources ?? [])
+    .filter((r) => r !== 'default')
+    .find((r) => {
+      const last = r.toLowerCase().split(/\s+/).at(-1) ?? '';
+      return last.length > 2 && text.includes(last);
+    });
+}
+const withResource = (h: TurnHints, request: LlmRequest) => {
+  const r = requestedResource(h, request);
+  return r ? { resource: r } : {};
+};
 const lastAssistantText = (request: LlmRequest) => {
   const t = request.turns.filter((x) => x.role === 'assistant').at(-1);
   return t?.role === 'assistant' ? t.text : '';
@@ -274,7 +294,12 @@ export function createFakeLlm(): LlmProvider {
           if (chosen)
             return h.appointment
               ? call('reschedule', { date: chosen.date, time: chosen.time })
-              : call('book_slot', { service: serviceFor(h), date: chosen.date, time: chosen.time });
+              : call('book_slot', {
+                  service: serviceFor(h),
+                  date: chosen.date,
+                  time: chosen.time,
+                  ...withResource(h, request),
+                });
           return reply(
             `I have these times free: ${slots.map((s, i) => `${i + 1}) ${s.label}`).join(', ')}. Which one suits you?`,
           );
@@ -303,7 +328,7 @@ export function createFakeLlm(): LlmProvider {
             `${info}${info ? '' : SYMPTOM.test(inbound) ? 'Sorry to hear that — our doctor can take a proper look. ' : 'Thanks! '}${ask(h.config, next)}`,
           );
         if (state?.status === 'qualified' && !h.appointment)
-          return call('get_available_slots', { service: serviceFor(h) });
+          return call('get_available_slots', { service: serviceFor(h), ...withResource(h, request) });
         return reply(
           h.appointment
             ? `${info}Anything else I can help with before your visit?`
@@ -322,7 +347,10 @@ export function createFakeLlm(): LlmProvider {
       const offered = /find you a (.+?) slot/i.exec(lastAssistantText(request));
       if (offered && YES.test(inbound.trim()) && !h.appointment) {
         const svc = h.config.booking.services.find((x) => x.name.toLowerCase() === offered[1]!.toLowerCase());
-        return call('get_available_slots', { service: svc?.name ?? serviceFor(h) });
+        return call('get_available_slots', {
+          service: svc?.name ?? serviceFor(h),
+          ...withResource(h, request),
+        });
       }
       // A problem in their own words: empathy, no diagnosis, the right service, an offer to book.
       // Older configs have no suitable_for: the first service (usually the general consultation) is the safe default.
@@ -335,8 +363,12 @@ export function createFakeLlm(): LlmProvider {
         );
       if (h.appointment && CANCEL.test(inbound)) return call('cancel', {});
       if (h.appointment && RESCHEDULE.test(inbound))
-        return call('get_available_slots', { service: h.appointment.service });
-      if (picking) return call('get_available_slots', { service: h.appointment?.service ?? serviceFor(h) });
+        return call('get_available_slots', { service: h.appointment.service, ...withResource(h, request) });
+      if (picking)
+        return call('get_available_slots', {
+          service: h.appointment?.service ?? serviceFor(h),
+          ...withResource(h, request),
+        });
       const facts = FACTS.filter(([re]) => re.test(inbound)).map(([, q]) => q);
       if (facts.length) return call('lookup_knowledge', { query: facts.join(' ') });
 
@@ -357,7 +389,7 @@ export function createFakeLlm(): LlmProvider {
 
       const next = h.missing[0];
       if (!next && !h.appointment && (BOOK.test(inbound) || h.status === 'qualified'))
-        return call('get_available_slots', { service: serviceFor(h) });
+        return call('get_available_slots', { service: serviceFor(h), ...withResource(h, request) });
       if (h.appointment)
         return reply(`You're booked for ${h.appointment.label}. Anything else I can help with?`);
       const greeted = request.turns.some((t) => t.role === 'assistant');

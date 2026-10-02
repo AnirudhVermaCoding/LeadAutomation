@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { createTestContext, PASSWORD, type TestContext } from '../test/context.ts';
 import { bookSlot } from './booking.ts';
@@ -200,5 +200,54 @@ describe('running late', () => {
       ((await call('POST', '/v1/appointments/running-late', { minutes: 45 })).json() as { notified: number })
         .notified,
     ).toBe(1);
+  });
+});
+
+describe('a specific doctor', () => {
+  test('"I want Dr Rao": only his times, booked with him, remembered; an unknown doctor is rejected', async () => {
+    t.clock.set('2026-10-19T04:30:00Z'); // Mon 10:00, both doctors bookable (set above)
+    const phone = `98762${String(++n).padStart(5, '0')}`;
+    const say = async (text: string) => {
+      await call('POST', '/v1/dev/whatsapp/inbound', { from: phone, text });
+      await t.drainAssistant();
+      await t.drainJobs();
+    };
+    await say('I want a cleaning, preferably with Rao'); // ("Dr" alone makes the mock look up doctors first)
+    await say('this week');
+    const [lead] = await withTenant(t.ctx.db, A, (tx) =>
+      tx
+        .select()
+        .from(leads)
+        .where(eq(leads.phoneE164, `+91${phone}`)),
+    );
+    const offer = (await out(lead!.id)).at(-1)!.body;
+    expect(offer).toMatch(/1\) .* with Dr Rao/);
+    await say('1');
+    const [a] = await withTenant(t.ctx.db, A, (tx) =>
+      tx.select().from(appointments).where(eq(appointments.leadId, lead!.id)),
+    );
+    expect(a?.resource).toBe('Dr Rao');
+    const prefs = await withTenant(t.ctx.db, A, (tx) =>
+      tx.execute<{ value: string }>(
+        sql`select value from answers where lead_id = ${lead!.id} and key = 'preferred_resource'`,
+      ),
+    );
+    expect(prefs.rows).toEqual([{ value: 'Dr Rao' }]);
+
+    const { runTool } = await import('./assistant/tools.ts');
+    const config = await withTenant(
+      t.ctx.db,
+      A,
+      async (tx) => (await (await import('./config-store.ts')).getActiveConfig(tx))!.config,
+    );
+    const r = await runTool(
+      { deps: t.ctx, tenantId: A, leadId: lead!.id, config, resources: ['Dr Mehta', 'Dr Rao'] },
+      'get_available_slots',
+      {
+        service: 'Consultation',
+        resource: 'Dr Who',
+      },
+    );
+    expect(r).toMatchObject({ isError: true, invalidArguments: true });
   });
 });

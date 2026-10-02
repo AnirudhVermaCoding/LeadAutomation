@@ -4,7 +4,18 @@ import type { ToolSpec } from '@instantlead/integrations';
 import { z } from 'zod';
 
 /** Tool input schemas. The LLM's arguments are untrusted: every call is validated with these. */
-export function toolSchemas(config: TenantConfig) {
+/** `resources`: the tenant's doctors / agents (from availability rules); offered to the model only when there are several. */
+export function toolSchemas(config: TenantConfig, resources: readonly string[] = []) {
+  const named = resources.filter((r) => r !== 'default');
+  const resource =
+    named.length > 1
+      ? {
+          resource: z
+            .enum(named as [string, ...string[]])
+            .optional()
+            .describe('Only this doctor / agent, when the person asked for one'),
+        }
+      : {};
   const keys = config.qualification.questions.map((q) => q.key) as [string, ...string[]];
   const services = config.booking.services.map((x) => x.name) as [string, ...string[]];
   const date = z
@@ -39,8 +50,9 @@ export function toolSchemas(config: TenantConfig) {
         .optional()
         .describe('Only this local date (YYYY-MM-DD), if the person asked for a specific day'),
       part_of_day: z.enum(['morning', 'afternoon', 'evening']).optional(),
+      ...resource,
     }),
-    book_slot: z.strictObject({ service: z.enum(services), date, time }),
+    book_slot: z.strictObject({ service: z.enum(services), date, time, ...resource }),
     reschedule: z.strictObject({ date, time }),
     cancel: z.strictObject({}),
   };
@@ -65,8 +77,8 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   cancel: 'Cancel their existing appointment, only after they clearly asked to cancel.',
 };
 
-export function buildTools(config: TenantConfig): ToolSpec[] {
-  return Object.entries(toolSchemas(config)).map(([name, schema]) => ({
+export function buildTools(config: TenantConfig, resources: readonly string[] = []): ToolSpec[] {
+  return Object.entries(toolSchemas(config, resources)).map(([name, schema]) => ({
     name,
     description: DESCRIPTIONS[name as ToolName],
     inputSchema: jsonSchema(schema),
@@ -169,6 +181,7 @@ Tools
 - Booking: once the required questions are answered, or whenever they want to book, call get_available_slots for the best-matching service and offer the times by their labels. When they choose, call book_slot with exactly that date and time. Never offer or confirm a time that did not come from get_available_slots. A confirmation message is sent automatically, so just say it's done (or that the team will confirm, if the result says pending).
 - After answering a question, if they haven't booked, gently offer the next step — but if they say no or "later", respect it.
 - To change or cancel an existing appointment use reschedule or cancel.
+- If they ask for a specific doctor or person (see "Bookable people" in the CRM state), pass resource to get_available_slots and book_slot and only offer that person's times. Otherwise don't ask; any free one is fine.
 
 EXAMPLES (the voice to aim for; adapt, don't copy)
 ${examples(config)}
@@ -196,6 +209,7 @@ export function stateMessage(s: {
   missing: string[];
   status: string;
   appointment: string | null;
+  resources?: readonly string[];
 }): string {
   return [
     'CRM state for this conversation (from our database, not from the customer):',
@@ -207,6 +221,9 @@ export function stateMessage(s: {
     `- Required questions still to ask: ${s.missing.length ? s.missing.join(', ') : 'none — all answered'}`,
     `- Lead status: ${s.status}`,
     `- Upcoming appointment: ${s.appointment ?? 'none'}`,
+    ...((s.resources ?? []).filter((r) => r !== 'default').length > 1
+      ? [`- Bookable people: ${(s.resources ?? []).filter((r) => r !== 'default').join(', ')}`]
+      : []),
   ].join('\n');
 }
 

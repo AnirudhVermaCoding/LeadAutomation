@@ -20,6 +20,8 @@ export interface ToolContext {
   tenantId: string;
   leadId: string;
   config: TenantConfig;
+  /** Doctors / agents (availability rule resources). */
+  resources?: readonly string[];
 }
 
 export interface ToolOutcome {
@@ -137,7 +139,7 @@ export function alertStaff(tx: TenantTx, deps: LeadDeps, tenantId: string, leadI
 
 /** Validate the model's arguments, then run the tool. Bad arguments go back to the model as an error. */
 export async function runTool(c: ToolContext, name: string, rawInput: unknown): Promise<ToolOutcome> {
-  const schemas = toolSchemas(c.config);
+  const schemas = toolSchemas(c.config, c.resources);
   if (!(name in schemas)) return { content: `Unknown tool ${name}`, isError: true, invalidArguments: true };
   const parsed = schemas[name as ToolName].safeParse(rawInput);
   if (!parsed.success)
@@ -190,6 +192,7 @@ async function booking(
         service: input.service ?? '',
         date: input.date,
         prefer: input.part_of_day as 'morning' | 'afternoon' | 'evening' | undefined,
+        resource: input.resource,
       });
       if (slots.length)
         await withTenant(deps.db, tenantId, (tx) =>
@@ -206,9 +209,10 @@ async function booking(
         date: input.date ?? '',
         time: input.time ?? '',
         source: 'assistant',
+        resource: input.resource,
       });
       return {
-        booked: r.label,
+        booked: input.resource ? `${r.label} with ${input.resource}` : r.label,
         status: r.pending ? 'pending staff confirmation' : 'confirmed',
         note: 'Confirmation sent automatically.',
       };
