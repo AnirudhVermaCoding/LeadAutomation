@@ -49,6 +49,8 @@ export default async function setup(project: TestProject) {
     persistent: false,
     // Same as production: UTF-8 (Windows would otherwise default to WIN1252 and reject Hindi text).
     initdbFlags: ['--encoding=UTF8', '--locale=C'],
+    // Each test file opens several pools; the default 100 slots flaked ("remaining connection slots").
+    postgresFlags: ['-c', 'max_connections=500'],
     onLog: () => undefined,
   });
   await server.initialise();
