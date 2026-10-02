@@ -216,7 +216,8 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   await ctx.boss.schedule(QUEUES.maintenanceCron, '30 2 * * *'); // daily, quiet time
   await ctx.boss.work<JobData['assistant-turn']>(
     QUEUES.assistantTurn,
-    { localConcurrency: 4 },
+    // I/O-bound (a model call): many turns in flight, polled fast like the other per-item queues.
+    { localConcurrency: 16, pollingIntervalSeconds: 0.5 },
     async (jobs) => {
       for (const job of jobs)
         await runJob(log, QUEUES.assistantTurn, () =>

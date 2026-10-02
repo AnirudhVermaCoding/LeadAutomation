@@ -2,7 +2,7 @@
  * pnpm loadtest [--leads 100] [--seconds 20] [--mix]
  *
  * --mix adds the rest of a real day: 60 customers chatting at once (assistant turn latency, mock
- * assistant: real models add their own latency) and a 09:00-style reminder burst (5 clinics x 40
+ * assistant: real models add their own latency) and a 09:00-style reminder burst (12 clinics x ~14
  * booked appointments, every 24 h reminder coming due at the same instant).
  *
  * Sends a burst of form leads to a running app (mock WhatsApp) and measures time to the first
@@ -12,6 +12,7 @@
 import { randomBytes } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
+import { zonedTimeToUtc } from '@instantlead/core';
 import { client, randomPhone, waitFor, type Thread } from './client.ts';
 
 const { values } = parseArgs({
@@ -116,9 +117,10 @@ if (values.mix) {
   ok &&= chatOk;
 
   // ---- reminder burst: everything due at once ----
-  console.log('building 5 clinics x 40 booked appointments…');
+  console.log('building 12 clinics x ~14 booked appointments…');
   const bookedLeads: { client: ReturnType<typeof client>; id: string }[] = [];
-  for (let k = 0; k < 5; k++) {
+  let lastVisit = new Date(0);
+  for (let k = 0; k < 12; k++) {
     const sl = `burst-${randomBytes(3).toString('hex')}`;
     const pw = `load-${randomBytes(9).toString('hex')}`;
     await agency.post('/v1/admin/tenants', {
@@ -135,10 +137,8 @@ if (values.mix) {
     const { slots } = await cc.get<{ slots: { date: string; time: string }[] }>(
       `/v1/slots?service=Consultation&date=${day}&limit=50`,
     );
-    const usable = slots
-      .filter((x) => x.date === day)
-      .filter((_, i) => i % 1 === 0)
-      .slice(0, 40);
+    // 30-minute visits + 5-minute buffer on a 15-minute grid: every third slot is bookable back to back.
+    const usable = slots.filter((x) => x.date === day).filter((_, i) => i % 3 === 0);
     for (const slot of usable) {
       const { lead_id } = await cc.post<{ lead_id: string }>('/v1/leads', {
         phone: randomPhone(),
@@ -152,11 +152,18 @@ if (values.mix) {
         time: slot.time,
       });
       bookedLeads.push({ client: cc, id: lead_id });
+      const at = zonedTimeToUtc(slot.date, slot.time, 'Asia/Kolkata');
+      if (at > lastVisit) lastVisit = at;
     }
   }
   console.log(`${bookedLeads.length} appointments booked; letting their reminders all come due…`);
   const t0 = Date.now();
-  await bookedLeads[0]!.client.post('/v1/dev/clock/advance', { hours: 24 * 3 + 6 }); // past the last 24 h reminder time
+  const clockNow = new Date((await bookedLeads[0]!.client.get<{ now: string }>('/v1/dev/clock')).now);
+  // One hour after the LAST visit's 24 h reminder time: all of them are due, and it is not quiet hours.
+  const due = new Date(lastVisit.getTime() - 23 * 3_600_000);
+  await bookedLeads[0]!.client.post('/v1/dev/clock/advance', {
+    hours: Math.max(1, (due.getTime() - clockNow.getTime()) / 3_600_000),
+  }); // past the last 24 h reminder time
   await Promise.all(
     bookedLeads.map(({ client: cc, id }) =>
       waitFor(
