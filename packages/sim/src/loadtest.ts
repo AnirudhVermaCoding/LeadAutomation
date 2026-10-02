@@ -1,5 +1,9 @@
 /**
- * pnpm loadtest [--leads 100] [--seconds 20]
+ * pnpm loadtest [--leads 100] [--seconds 20] [--mix]
+ *
+ * --mix adds the rest of a real day: 60 customers chatting at once (assistant turn latency, mock
+ * assistant: real models add their own latency) and a 09:00-style reminder burst (5 clinics x 40
+ * booked appointments, every 24 h reminder coming due at the same instant).
  *
  * Sends a burst of form leads to a running app (mock WhatsApp) and measures time to the first
  * WhatsApp reply per lead, server-side (first sent message − lead received). Pass: p95 < 60 s.
@@ -11,7 +15,11 @@ import { parseArgs } from 'node:util';
 import { client, randomPhone, waitFor, type Thread } from './client.ts';
 
 const { values } = parseArgs({
-  options: { leads: { type: 'string', default: '100' }, seconds: { type: 'string', default: '20' } },
+  options: {
+    leads: { type: 'string', default: '100' },
+    seconds: { type: 'string', default: '20' },
+    mix: { type: 'boolean', default: false },
+  },
 });
 const total = Number(values.leads);
 const spreadMs = Number(values.seconds) * 1000;
@@ -69,6 +77,104 @@ const pct = (p: number) =>
 console.log(
   `first reply: p50 ${pct(50).toFixed(2)} s · p95 ${pct(95).toFixed(2)} s · max ${pct(100).toFixed(2)} s`,
 );
-const ok = pct(95) < 60;
-console.log(ok ? 'PASS (p95 < 60 s)' : 'FAIL (p95 ≥ 60 s)');
+let ok = pct(95) < 60;
+console.log(ok ? 'PASS first reply (p95 < 60 s)' : 'FAIL first reply (p95 ≥ 60 s)');
+
+if (values.mix) {
+  // ---- 60 customers chatting at once ----
+  const chatters = ids.slice(0, 60);
+  const turn: number[] = [];
+  const known = await c.get<{ id: string; phoneE164: string }[]>('/v1/leads');
+  const leadPhones = chatters.map((id) => known.find((l) => l.id === id)!.phoneE164);
+  console.log('60 customers chatting at once…');
+  await Promise.all(
+    chatters.map(async (id, i) => {
+      for (const text of ['Hi, I want teeth whitening', 'this week please', 'how much is it?']) {
+        const before = (await c.get<Thread>(`/v1/leads/${id}/messages`)).messages.filter(
+          (m) => m.direction === 'out',
+        ).length;
+        const sent = Date.now();
+        await c.post('/v1/dev/whatsapp/inbound', { from: leadPhones[i], text });
+        await waitFor(
+          'a reply',
+          async () =>
+            (await c.get<Thread>(`/v1/leads/${id}/messages`)).messages.filter((m) => m.direction === 'out')
+              .length > before,
+          60_000,
+        );
+        turn.push((Date.now() - sent) / 1000);
+      }
+    }),
+  );
+  turn.sort((a, b) => a - b);
+  const tp = (p: number) => turn[Math.min(turn.length - 1, Math.ceil((p / 100) * turn.length) - 1)]!;
+  console.log(
+    `assistant turn (message -> reply): p50 ${tp(50).toFixed(2)} s · p95 ${tp(95).toFixed(2)} s · n=${turn.length}`,
+  );
+  const chatOk = tp(95) < 15;
+  console.log(chatOk ? 'PASS chat (p95 < 15 s on the mock assistant)' : 'FAIL chat');
+  ok &&= chatOk;
+
+  // ---- reminder burst: everything due at once ----
+  console.log('building 5 clinics x 40 booked appointments…');
+  const bookedLeads: { client: ReturnType<typeof client>; id: string }[] = [];
+  for (let k = 0; k < 5; k++) {
+    const sl = `burst-${randomBytes(3).toString('hex')}`;
+    const pw = `load-${randomBytes(9).toString('hex')}`;
+    await agency.post('/v1/admin/tenants', {
+      slug: sl,
+      name: `Burst ${k}`,
+      preset: 'clinic_dental',
+      admin: { email: `admin@${sl}.test`, name: 'B', password: pw },
+    });
+    const cc = client(base);
+    await cc.signIn(`admin@${sl}.test`, pw);
+    const now = new Date((await cc.get<{ now: string }>('/v1/dev/clock')).now);
+    // three days ahead, so the 24 h reminders are not due yet
+    const day = new Date(now.getTime() + 3 * 86_400_000).toISOString().slice(0, 10);
+    const { slots } = await cc.get<{ slots: { date: string; time: string }[] }>(
+      `/v1/slots?service=Consultation&date=${day}&limit=50`,
+    );
+    const usable = slots
+      .filter((x) => x.date === day)
+      .filter((_, i) => i % 1 === 0)
+      .slice(0, 40);
+    for (const slot of usable) {
+      const { lead_id } = await cc.post<{ lead_id: string }>('/v1/leads', {
+        phone: randomPhone(),
+        name: 'Burst',
+        consent: { granted: true },
+      });
+      await cc.post('/v1/appointments', {
+        lead_id,
+        service: 'Consultation',
+        date: slot.date,
+        time: slot.time,
+      });
+      bookedLeads.push({ client: cc, id: lead_id });
+    }
+  }
+  console.log(`${bookedLeads.length} appointments booked; letting their reminders all come due…`);
+  const t0 = Date.now();
+  await bookedLeads[0]!.client.post('/v1/dev/clock/advance', { hours: 24 * 3 + 6 }); // past the last 24 h reminder time
+  await Promise.all(
+    bookedLeads.map(({ client: cc, id }) =>
+      waitFor(
+        'reminder',
+        async () =>
+          (await cc.get<Thread>(`/v1/leads/${id}/messages`)).messages.some(
+            (m) => m.templateKey === 'reminder_24h' && m.status !== 'queued',
+          ),
+        120_000,
+      ),
+    ),
+  );
+  const burst = (Date.now() - t0) / 1000;
+  console.log(
+    `reminder burst: ${bookedLeads.length} reminders delivered ${burst.toFixed(1)} s after they came due`,
+  );
+  const burstOk = burst < 60;
+  console.log(burstOk ? 'PASS reminder burst (< 60 s)' : 'FAIL reminder burst');
+  ok &&= burstOk;
+}
 process.exit(ok ? 0 : 1);

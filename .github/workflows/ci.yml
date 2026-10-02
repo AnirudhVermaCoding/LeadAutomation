@@ -4,6 +4,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -15,6 +18,50 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm build
+
+  # The real thing: build the image, start the stack with Docker, drive it over HTTP, then take a backup and
+  # restore it into a scratch database and verify row-level security survived. This is the only place the
+  # Dockerfile, the compose files, the migrate step, backup.sh and restore.sh are exercised end to end.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - name: Build and start (db, migrate, app)
+        run: docker compose up -d --build
+      - name: Wait for the app to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:3000/readyz && exit 0
+            sleep 2
+          done
+          docker compose logs --tail 100
+          exit 1
+      - name: Seed demo tenants
+        run: docker compose exec -T app node apps/api/src/system/seed.ts
+      - name: Acceptance scenarios against the container
+        run: pnpm demo
+      - name: Backup
+        run: |
+          export COMPOSE_FILES='-f docker-compose.yml'
+          BACKUP_DIR="$RUNNER_TEMP/backups" deploy/backup.sh --label ci
+          ls -l "$RUNNER_TEMP/backups"
+      - name: Restore into a scratch database and verify
+        run: |
+          export COMPOSE_FILES='-f docker-compose.yml'
+          deploy/restore.sh "$(ls "$RUNNER_TEMP"/backups/*.dump | head -1)"
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail 200

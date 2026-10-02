@@ -84,6 +84,15 @@ const EnvSchema = z
       BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
       SECRETS_KEY: Buffer.from(env.SECRETS_KEY, 'base64').toString('latin1'),
     };
+    // The database passwords from .env.example / docker-compose defaults.
+    for (const name of ['DATABASE_URL', 'DATABASE_OWNER_URL'] as const)
+      if (/instantlead_dev|app_dev_pw/.test(env[name]))
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message:
+            'uses the dev database password from .env.example; set POSTGRES_PASSWORD / APP_DB_PASSWORD to real secrets',
+        });
     for (const [name, value] of Object.entries(devOnly))
       if (value.startsWith('dev-only'))
         ctx.addIssue({

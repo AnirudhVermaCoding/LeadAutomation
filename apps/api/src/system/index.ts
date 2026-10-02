@@ -46,7 +46,8 @@ export interface NewUser {
 /** Cross-tenant operations. Everything here runs on the owner connection (no RLS). */
 export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Auth; clock: Clock }) {
   async function createUser(u: NewUser) {
-    if (u.password.length < MIN_PASSWORD) throw new Error(`Password must be at least ${MIN_PASSWORD} characters`);
+    if (u.password.length < MIN_PASSWORD)
+      throw new Error(`Password must be at least ${MIN_PASSWORD} characters`);
     const { user } = await auth.api.createUser({
       body: {
         email: u.email,
@@ -177,6 +178,16 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
       return res.rows.map((r) => ({ stepId: r.id, tenantId: r.tenant_id }));
     },
 
+    /** Pause (stop sends and AI; leads are still recorded) or re-activate a client, e.g. for non-payment. */
+    async setTenantStatus(id: string, status: 'active' | 'paused') {
+      const rows = await systemDb
+        .update(tenants)
+        .set({ status })
+        .where(eq(tenants.id, id))
+        .returning({ id: tenants.id });
+      return rows.length > 0;
+    },
+
     /** Webhook routing: which tenant's calendar link owns this Google push channel? */
     async findCalendarChannel(channelId: string) {
       const [row] = await systemDb
@@ -207,12 +218,13 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         );
     },
 
-    /** Agency view: per-tenant volume and running costs since `since` (protects margin). */
-    async usageSince(since: Date) {
+    /** Agency view: per-tenant volume and running costs in [since, until) (protects margin; invoicing). */
+    async usageBetween(since: Date, until: Date) {
       const res = await systemDb.execute<{
         id: string;
         name: string;
         slug: string;
+        status: string;
         leads: string;
         messages_out: string;
         whatsapp_inr: string;
@@ -221,26 +233,27 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         llm_providers: string;
         bookings: string;
       }>(sql`
-        select t.id, t.name, t.slug,
-          (select count(*) from leads l where l.tenant_id = t.id and l.received_at >= ${since}) as leads,
+        select t.id, t.name, t.slug, t.status,
+          (select count(*) from leads l where l.tenant_id = t.id and l.received_at >= ${since} and l.received_at < ${until}) as leads,
           (select count(*) from messages m where m.tenant_id = t.id and m.direction = 'out'
-             and m.status in ('sent', 'delivered', 'read') and m.occurred_at >= ${since}) as messages_out,
+             and m.status in ('sent', 'delivered', 'read') and m.occurred_at >= ${since} and m.occurred_at < ${until}) as messages_out,
           (select coalesce(sum(m.est_cost_inr), 0) from messages m where m.tenant_id = t.id
-             and m.status in ('sent', 'delivered', 'read') and m.occurred_at >= ${since}) as whatsapp_inr,
+             and m.status in ('sent', 'delivered', 'read') and m.occurred_at >= ${since} and m.occurred_at < ${until}) as whatsapp_inr,
           (select coalesce(sum(r.cost_usd), 0) from llm_runs r
-             where r.tenant_id = t.id and r.occurred_at >= ${since}) as llm_usd,
+             where r.tenant_id = t.id and r.occurred_at >= ${since} and r.occurred_at < ${until}) as llm_usd,
           coalesce((select (c.config->'ai'->>'monthly_cost_cap_usd')::numeric from tenant_configs c
              where c.tenant_id = t.id order by c.revision desc limit 1), ${DEFAULT_AI_SETTINGS.monthly_cost_cap_usd}) as llm_cap_usd,
           (select coalesce(string_agg(distinct r.provider, ', '), '') from llm_runs r
-             where r.tenant_id = t.id and r.occurred_at >= ${since}) as llm_providers,
+             where r.tenant_id = t.id and r.occurred_at >= ${since} and r.occurred_at < ${until}) as llm_providers,
           (select count(*) from appointments a where a.tenant_id = t.id and a.status <> 'cancelled'
-             and a.created_at >= ${since}) as bookings
+             and a.created_at >= ${since} and a.created_at < ${until}) as bookings
         from tenants t
         order by t.name`);
       return res.rows.map((r) => ({
         tenantId: r.id,
         name: r.name,
         slug: r.slug,
+        status: r.status,
         leads: Number(r.leads),
         messagesOut: Number(r.messages_out),
         whatsappInr: Number(r.whatsapp_inr),

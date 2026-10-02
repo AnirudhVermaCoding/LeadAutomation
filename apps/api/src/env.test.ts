@@ -21,3 +21,14 @@ test('dev-only secrets from .env.example are refused in production', () => {
   const devKey = Buffer.from('dev-only-secrets-key-32-bytes!!!').toString('base64');
   expect(() => loadEnv({ ...valid, SECRETS_KEY: devKey, NODE_ENV: 'production' })).toThrow(/SECRETS_KEY/);
 });
+
+test('the dev database passwords are refused in production', () => {
+  const prod = { ...valid, NODE_ENV: 'production' };
+  expect(() =>
+    loadEnv({ ...prod, DATABASE_OWNER_URL: 'postgres://instantlead:instantlead_dev@db/x' }),
+  ).toThrow(/DATABASE_OWNER_URL/);
+  expect(() => loadEnv({ ...prod, DATABASE_URL: 'postgres://instantlead_app:app_dev_pw@db/x' })).toThrow(
+    /DATABASE_URL/,
+  );
+  expect(loadEnv(prod).NODE_ENV).toBe('production');
+});

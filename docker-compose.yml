@@ -1,6 +1,13 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
+
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: instantlead
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-instantlead_dev}
@@ -11,24 +18,48 @@ services:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U instantlead -d instantlead']
-      interval: 2s
+      interval: 5s
       timeout: 3s
       retries: 30
+    logging: *logging
 
-  app:
+  # One-off: roles, migrations, queues, grants. Runs (and must succeed) before the app starts, so the app
+  # container never migrates and a deploy can run it while the old app is still serving.
+  migrate:
+    image: instantlead:${IMAGE_TAG:-local}
     build: .
     env_file: .env
-    environment:
+    environment: &dbenv
       # Same credentials as .env, but the database host is the compose service.
       DATABASE_OWNER_URL: postgres://instantlead:${POSTGRES_PASSWORD:-instantlead_dev}@db:5432/instantlead
       DATABASE_URL: postgres://instantlead_app:${APP_DB_PASSWORD:-app_dev_pw}@db:5432/instantlead
-    command: ['sh', '-c', 'node apps/api/src/db/migrate.ts && exec node apps/api/src/main.ts']
-    ports:
-      - '3000:3000'
+    command: ['node', 'apps/api/src/db/migrate.ts']
+    restart: 'no'
     depends_on:
       db:
         condition: service_healthy
+    logging: *logging
+
+  app:
+    image: instantlead:${IMAGE_TAG:-local}
+    env_file: .env
+    environment: *dbenv
+    command: ['node', 'apps/api/src/main.ts']
+    ports:
+      - '3000:3000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
+    # Finish in-flight requests and jobs (the app's own watchdog is 25 s).
+    stop_grace_period: 30s
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    logging: *logging
 
 volumes:
   pgdata:

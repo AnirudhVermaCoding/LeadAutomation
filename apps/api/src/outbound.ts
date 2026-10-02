@@ -111,6 +111,10 @@ export async function sendToLead(
     )
       return { kind: 'skip', reason: 'opted out' } as const;
 
+    // A paused account (the agency stopped service, e.g. non-payment) sends nothing; leads are still recorded.
+    const [account] = await tx.select({ status: tenants.status }).from(tenants);
+    if (account?.status === 'paused') return { kind: 'skip', reason: 'account paused' } as const;
+
     const [previous] = await tx
       .select({ id: messages.id, status: messages.status })
       .from(messages)

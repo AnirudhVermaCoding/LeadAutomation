@@ -1,6 +1,14 @@
-# Production overlay: TLS via Caddy, the app reachable only through it.
-#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+# Production overlay: TLS via Caddy, the app reachable only through it, real passwords required.
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d      (or just: deploy/deploy.sh)
 services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+
+  migrate:
+    environment:
+      NODE_ENV: production
+
   app:
     ports: !override []
     environment:
@@ -10,6 +18,8 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in .env (the public hostname)}
     ports:
       - '80:80'
       - '443:443'
@@ -19,6 +29,16 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on: [app]
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:2019/config/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
 
 volumes:
   caddy_data:

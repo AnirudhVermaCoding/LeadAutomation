@@ -30,7 +30,16 @@ export async function migrate(ownerUrl: string, appUrl: string): Promise<void> {
       `${exists.rowCount ? 'alter' : 'create'} role ${r} login nosuperuser nobypassrls password ${password}`,
     );
 
-    await runMigrations(drizzle({ client }), { migrationsFolder });
+    // One migrator at a time (two containers starting together, a deploy script plus a restart), and never
+    // wait on a table lock for ever: a migration that can't get its lock fails fast instead of queueing every query behind it.
+    await client.query('select pg_advisory_lock(727274)');
+    await client.query(`set lock_timeout = '10s'`);
+    try {
+      await runMigrations(drizzle({ client }), { migrationsFolder });
+    } finally {
+      await client.query('reset lock_timeout');
+      await client.query('select pg_advisory_unlock(727274)');
+    }
 
     // Template keys added in a release reach existing clinics too (never overwriting their approval status).
     for (const key of TEMPLATE_KEYS)

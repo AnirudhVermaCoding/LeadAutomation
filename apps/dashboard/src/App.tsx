@@ -73,7 +73,7 @@ function Shell({ me }: { me: Me }) {
   });
   const config = useQuery({
     queryKey: ['config', tenant],
-    queryFn: () => api<{ config: TenantConfig; revision: number }>('/v1/config'),
+    queryFn: () => api<{ config: TenantConfig; revision: number; tenant_status?: string }>('/v1/config'),
     enabled: Boolean(tenant),
   });
 
@@ -161,6 +161,12 @@ function Shell({ me }: { me: Me }) {
             {config.data?.config.brand.business_name ?? ''}
           </span>
         </header>
+        {config.data?.tenant_status === 'paused' && (
+          <div className="bg-amber-50 px-4 py-2 text-sm text-amber-900 md:px-8" role="alert">
+            This account is paused: new messages are not being sent and the assistant is not replying. Contact
+            your provider to resume.
+          </div>
+        )}
         {google.data?.connected && google.data.status === 'reauth_needed' && (
           <div className="bg-red-50 px-4 py-2 text-sm text-red-800 md:px-8" role="alert">
             Google Calendar access was lost, so bookings are not syncing and Google busy time may be out of

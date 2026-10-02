@@ -283,10 +283,70 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
   });
 
   // Agency admin: volume and running cost per tenant this month (protects margin).
-  app.get('/v1/admin/usage', { preHandler: agency }, async () => {
+  // Usage per client for any month (default: this one): what to invoice, and what each client costs you.
+  app.get('/v1/admin/usage', { preHandler: agency }, async (req, reply) => {
+    const q = z
+      .object({
+        month: z
+          .string()
+          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+          .optional(),
+        format: z.enum(['json', 'csv']).default('json'),
+      })
+      .parse(req.query);
     const now = ctx.clock.now();
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    return { since: monthStart.toISOString(), tenants: await ctx.system.usageSince(monthStart) };
+    const [y, m] = q.month
+      ? (q.month.split('-').map(Number) as [number, number])
+      : ([now.getUTCFullYear(), now.getUTCMonth() + 1] as [number, number]);
+    const since = new Date(Date.UTC(y, m - 1, 1));
+    const until = new Date(Date.UTC(y, m, 1));
+    const tenants = await ctx.system.usageBetween(since, until);
+    if (q.format === 'csv') {
+      const head = [
+        'month',
+        'client',
+        'slug',
+        'status',
+        'leads',
+        'bookings',
+        'whatsapp_messages_sent',
+        'whatsapp_cost_inr',
+        'ai_cost_usd',
+        'ai_providers',
+      ];
+      const cell = (v: string | number) =>
+        /[",\n]/.test(String(v)) ? `"${String(v).replaceAll('"', '""')}"` : String(v);
+      const rows = tenants.map((t) =>
+        [
+          `${y}-${String(m).padStart(2, '0')}`,
+          t.name,
+          t.slug,
+          t.status,
+          t.leads,
+          t.bookings,
+          t.messagesOut,
+          t.whatsappInr.toFixed(2),
+          t.llmUsd.toFixed(4),
+          t.llmProviders,
+        ]
+          .map(cell)
+          .join(','),
+      );
+      return reply
+        .type('text/csv')
+        .header('content-disposition', `attachment; filename="usage-${y}-${m}.csv"`)
+        .send([head.join(','), ...rows].join('\n'));
+    }
+    return { since: since.toISOString(), until: until.toISOString(), tenants };
+  });
+
+  // Pause or re-activate a client (stops sends and the AI; leads are still recorded and staff can still read everything).
+  app.post('/v1/admin/tenants/:id/status', { preHandler: agency }, async (req, reply) => {
+    const { id } = z.object({ id: z.uuid() }).parse(req.params);
+    const { status } = z.strictObject({ status: z.enum(['active', 'paused']) }).parse(req.body);
+    return (await ctx.system.setTenantStatus(id, status))
+      ? { status }
+      : reply.code(404).send({ error: 'not_found' });
   });
 
   // API keys for the client's website/CRM (shown once on creation; only the hash is stored).

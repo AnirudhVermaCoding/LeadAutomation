@@ -240,7 +240,7 @@ describe('monthly AI budget', () => {
       reason: 'monthly AI budget reached',
     });
     expect(sonnet.calls).toBe(before);
-    const usage = await t.ctx.system.usageSince(new Date(0));
+    const usage = await t.ctx.system.usageBetween(new Date(0), new Date('2100-01-01'));
     expect(usage.find((u) => u.tenantId === A)).toMatchObject({
       llmCapUsd: 1,
       llmProviders: expect.stringContaining('anthropic'),

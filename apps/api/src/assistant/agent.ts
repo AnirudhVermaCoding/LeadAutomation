@@ -26,6 +26,7 @@ import {
   leads,
   llmRuns,
   messages,
+  tenants,
 } from '../db/schema.ts';
 import { emit, transitionLeadIfAllowed } from '../leads.ts';
 import {
@@ -116,6 +117,7 @@ export async function runAssistantTurn(
         (await tx.select({ r: availabilityRules.resource }).from(availabilityRules)).map((x) => x.r),
       ),
     ];
+    const [account] = await tx.select({ status: tenants.status }).from(tenants);
     const answers = await loadAnswers(tx, leadId);
     // Returning customers: how old are the answers, and what happened at past visits?
     const sixtyDaysAgo = deps.clock.now().getTime() - 60 * 86_400_000;
@@ -194,6 +196,7 @@ export async function runAssistantTurn(
       spentUsd: Number(spend?.total ?? 0),
       tenantSpendUsd,
       resources,
+      paused: account?.status === 'paused',
       appointment,
       appointments: apptList,
       staleAnswers,
@@ -203,6 +206,7 @@ export async function runAssistantTurn(
   });
 
   if (!ctx) return { status: 'skipped', reason: 'lead or config not found' };
+  if (ctx.paused) return { status: 'skipped', reason: 'account paused' };
   const { lead, config, unanswered } = ctx;
   if (lead.state === 'opted_out') return { status: 'skipped', reason: 'opted out' };
   if (lead.aiPaused) return { status: 'skipped', reason: 'human takeover' };

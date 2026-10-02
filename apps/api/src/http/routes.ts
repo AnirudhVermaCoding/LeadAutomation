@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { audit, type Actor } from '../audit.ts';
 import { getActiveConfig, saveConfig } from '../config-store.ts';
 import { withTenant } from '../db/client.ts';
-import { conversations, leads, messages, templates } from '../db/schema.ts';
+import { conversations, leads, messages, templates, tenants } from '../db/schema.ts';
 import { QUEUES } from '../jobs.ts';
 import { getTenantSecret, setTenantSecret } from '../secrets.ts';
 import type { AppContext } from '../system/context.ts';
@@ -55,7 +55,14 @@ export function registerRoutes(app: FastifyInstance, ctx: AppContext) {
 
   app.get('/v1/config', { preHandler: tenantUsers }, async (req, reply) => {
     const active = await withTenant(ctx.db, tenantOf(req), getActiveConfig);
-    return active ?? reply.code(404).send({ error: 'not_found' });
+    if (!active) return reply.code(404).send({ error: 'not_found' });
+    // `tenant_status`: the dashboard shows a banner when the account is paused.
+    const tenantStatus = await withTenant(
+      ctx.db,
+      tenantOf(req),
+      async (tx) => (await tx.select({ status: tenants.status }).from(tenants))[0]?.status ?? 'active',
+    );
+    return { ...active, tenant_status: tenantStatus };
   });
 
   // Same JSON document as GET: this is also the import path.

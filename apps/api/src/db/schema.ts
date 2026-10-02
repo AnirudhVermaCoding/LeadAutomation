@@ -3,6 +3,7 @@ import { LEAD_STATES, TIERS } from '@instantlead/core';
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  index,
   integer,
   jsonb,
   numeric,
@@ -235,7 +236,11 @@ export const leads = pgTable(
     receivedAt: ts().notNull(),
     ...timestamps,
   },
-  (t) => [unique().on(t.tenantId, t.phoneE164), tenantScoped()],
+  (t) => [
+    unique().on(t.tenantId, t.phoneE164),
+    index('leads_tenant_received').on(t.tenantId, t.receivedAt.desc()),
+    tenantScoped(),
+  ],
 );
 
 /** Evidence of consent: exact notice text shown, when, where. One row per grant. */
@@ -325,7 +330,11 @@ export const messages = pgTable(
     occurredAt: ts().notNull(),
     ...timestamps,
   },
-  (t) => [unique().on(t.tenantId, t.idempotencyKey), tenantScoped()],
+  (t) => [
+    unique().on(t.tenantId, t.idempotencyKey),
+    index('messages_lead_occurred').on(t.leadId, t.occurredAt),
+    tenantScoped(),
+  ],
 );
 
 /** Per-tenant approval status / provider names for the templates in packages/config. */
@@ -363,7 +372,7 @@ export const events = pgTable(
     webhookDispatchedAt: ts(),
     ...timestamps,
   },
-  () => [tenantScoped()],
+  (t) => [index('events_tenant_type_occurred').on(t.tenantId, t.type, t.occurredAt), tenantScoped()],
 );
 
 // ---- M3: AI assistant ----
@@ -413,7 +422,11 @@ export const llmRuns = pgTable(
     occurredAt: ts().notNull(),
     ...timestamps,
   },
-  () => [tenantScoped()],
+  (t) => [
+    index('llm_runs_tenant_occurred').on(t.tenantId, t.occurredAt),
+    index('llm_runs_lead').on(t.leadId),
+    tenantScoped(),
+  ],
 );
 
 // ---- M4: booking ----
@@ -608,7 +621,7 @@ export const enrollments = pgTable(
     startedAt: ts().notNull(),
     ...timestamps,
   },
-  () => [tenantScoped()],
+  (t) => [index('enrollments_lead').on(t.leadId), tenantScoped()],
 );
 
 /**
