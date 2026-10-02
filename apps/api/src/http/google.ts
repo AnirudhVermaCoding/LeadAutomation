@@ -100,6 +100,8 @@ export function registerGoogleRoutes(app: FastifyInstance, ctx: AppContext) {
       const now = ctx.clock.now().getTime();
       return {
         available: available(),
+        /** No Google client configured: the in-memory demo Google (mock mode). */
+        mock: ctx.googleOAuth === null,
         connected: Boolean(conn) || hasSecret,
         status: conn?.status ?? (hasSecret ? 'ok' : null),
         last_error: conn?.lastError ?? null,

@@ -101,7 +101,7 @@ async function appointmentOf(c: Client, leadId: string) {
 }
 async function staffBook(c: Client, leadId: string, date: string, after = '12:00') {
   const { slots } = await c.get<{ slots: { date: string; time: string }[] }>(
-    `/v1/slots?service=Consultation&date=${date}&limit=20`,
+    `/v1/slots?service=Consultation&date=${date}&limit=50`,
   );
   const slot = slots.find((s) => s.date === date && s.time >= after);
   if (!slot) throw new Error(`no free slot on ${date}`);
@@ -281,7 +281,67 @@ async function realEstateAgentAway(agency: Client) {
   );
 }
 
-const SCENARIOS = { happyPath, silentLead, noShow, weeklyReport, realEstateAgentAway };
+async function staffBlocksTimeInGoogle(agency: Client) {
+  const c = await newClinic(agency, 'gcal');
+  await advanceTo(c, 'mon', '10:00');
+  step('the clinic connects Google Calendar (demo Google)');
+  await c.post('/v1/dev/google/connect');
+  await waitFor('the first Google sync', async () => {
+    const g = await c.get<{ links: { last_synced_at: string | null }[] }>('/v1/integrations/google');
+    return g.links.length > 0 && g.links.every((l) => l.last_synced_at) && g;
+  });
+  check(true, 'Google connected and the first sync done');
+
+  step('a patient is booked for tomorrow afternoon');
+  const date = addDays(localParts(await now(c), TZ).date, 1);
+  const { leadId } = await newLead(c, 'Anita Desai');
+  const booked = await staffBook(c, leadId, date, '15:00');
+  const start = new Date(booked.startsAt);
+  const day = localParts(start, TZ).date;
+  const slotTimes = async () =>
+    (
+      await c.get<{ slots: { date: string; time: string }[] }>(
+        `/v1/slots?service=Consultation&date=${day}&limit=50`,
+      )
+    ).slots
+      .filter((s) => s.date === day)
+      .map((s) => s.time);
+
+  step('staff block 3-5 pm in Google Calendar (not in InstantLead)');
+  await waitForOut(c, leadId, 'the booking confirmation', (k) => k.includes('booking_confirmed'));
+  const before = outKeys(await thread(c, leadId)).length;
+  await c.post('/v1/dev/google/external-event', {
+    starts_at: zonedTimeToUtc(day, '15:00', TZ).toISOString(),
+    ends_at: zonedTimeToUtc(day, '17:00', TZ).toISOString(),
+  });
+  const avail = await waitFor('the Google block', async () => {
+    const a = await c.get<{ blocked: { id: string; source: string; affected: { id: string }[] }[] }>(
+      '/v1/availability',
+    );
+    return a.blocked.some((b) => b.source === 'google') && a;
+  });
+  const block = avail.blocked.find((b) => b.source === 'google')!;
+  check(
+    !(await slotTimes()).some((t) => t >= '15:00' && t < '17:00'),
+    'the assistant no longer offers 3-5 pm',
+  );
+  check(block.affected.length === 1, 'the existing booking inside it is flagged');
+  check(outKeys(await thread(c, leadId)).length === before, 'nobody was messaged automatically');
+
+  step('staff choose to tell the patient');
+  await c.post(`/v1/blocked-times/${block.id}/notify`);
+  await waitForOut(c, leadId, 'the change notice', (k) => k.includes('appointment_change'));
+  check(true, 'patient told, with new times on offer');
+}
+
+const SCENARIOS = {
+  happyPath,
+  silentLead,
+  noShow,
+  weeklyReport,
+  realEstateAgentAway,
+  staffBlocksTimeInGoogle,
+};
 
 const agency = client(base);
 const email = process.env.AGENCY_ADMIN_EMAIL;

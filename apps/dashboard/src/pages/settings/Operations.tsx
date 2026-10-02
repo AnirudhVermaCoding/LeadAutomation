@@ -24,6 +24,7 @@ interface Blocked {
   endsAt: string;
   resource: string | null;
   reason: string | null;
+  source: 'manual' | 'google';
   /** Bookings still inside this block: they haven't been told yet. */
   affected: Affected[];
 }
@@ -183,9 +184,13 @@ export function Availability({ canEdit }: { canEdit: boolean }) {
               <div className="flex items-center justify-between gap-2">
                 <span>
                   {fmt.dateTime(b.startsAt)} – {fmt.dateTime(b.endsAt)} · {b.resource ?? 'everyone'}{' '}
-                  {b.reason && <Badge>{b.reason}</Badge>}
+                  {b.source === 'google' ? (
+                    <Badge tone="bg-sky-50 text-sky-700 ring-sky-200">from Google Calendar</Badge>
+                  ) : (
+                    b.reason && <Badge>{b.reason}</Badge>
+                  )}
                 </span>
-                {canEdit && (
+                {canEdit && b.source === 'manual' && (
                   <Button
                     variant="ghost"
                     size="sm"

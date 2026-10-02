@@ -41,7 +41,9 @@ export function SettingsPage({
   const { search } = useLocation();
   const canEdit = role !== 'client_staff';
   const [tab, setTab] = useState<Tab>(() =>
-    new URLSearchParams(search).get('google') ? 'integrations' : 'business',
+    new URLSearchParams(search).get('google') || new URLSearchParams(search).get('tab') === 'integrations'
+      ? 'integrations'
+      : 'business',
   );
   const [draft, setDraft] = useState(config);
   const [errors, setErrors] = useState<string[]>([]);

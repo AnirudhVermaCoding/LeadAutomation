@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, CircleDashed, Copy, KeyRound } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../../api.ts';
-import { useLocation } from '../../router.ts';
+import { GoogleCard } from './GoogleCard.tsx';
 import { Badge, Button, Card, ErrorState, Field, fmt, Input, Loading } from '../../ui.tsx';
 
 interface Status {
@@ -25,8 +25,6 @@ const Dot = ({ ok, label }: { ok: boolean; label: string }) => (
 
 export function Integrations({ canEdit }: { canEdit: boolean }) {
   const qc = useQueryClient();
-  const { search } = useLocation();
-  const google = new URLSearchParams(search).get('google');
   const status = useQuery({ queryKey: ['integrations'], queryFn: () => api<Status>('/v1/integrations') });
   const refresh = () =>
     Promise.all([
@@ -36,10 +34,6 @@ export function Integrations({ canEdit }: { canEdit: boolean }) {
   const test = useMutation({
     mutationFn: (kind: 'whatsapp' | 'email') =>
       api<{ ok: boolean; message: string }>('/v1/integrations/test', { body: { kind } }),
-  });
-  const connectGoogle = useMutation({
-    mutationFn: () => api<{ url: string }>('/v1/integrations/google/start'),
-    onSuccess: ({ url }) => window.location.assign(url),
   });
 
   if (status.isPending) return <Loading />;
@@ -116,28 +110,7 @@ export function Integrations({ canEdit }: { canEdit: boolean }) {
         </div>
       )}
 
-      <Card title="Google Calendar (optional)">
-        <p className="mb-3 text-sm text-slate-600">
-          Bookings are copied to the clinic's Google Calendar (one-way).
-        </p>
-        {google === 'connected' && <p className="mb-3 text-sm text-brand-700">Google Calendar connected.</p>}
-        {google && google !== 'connected' && (
-          <p className="mb-3 text-sm text-red-700">
-            Google Calendar was not connected ({google.replaceAll('_', ' ')}).
-          </p>
-        )}
-        {canEdit && (
-          <Button
-            size="sm"
-            variant="secondary"
-            loading={connectGoogle.isPending}
-            onClick={() => connectGoogle.mutate()}
-          >
-            Connect Google Calendar
-          </Button>
-        )}
-        {connectGoogle.error && <p className="mt-2 text-sm text-red-700">{connectGoogle.error.message}</p>}
-      </Card>
+      <GoogleCard canEdit={canEdit} />
 
       {s.form_url && <FormEmbed url={s.form_url} />}
       {canEdit && <ApiKeys />}

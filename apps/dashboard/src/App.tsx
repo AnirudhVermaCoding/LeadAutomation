@@ -18,6 +18,7 @@ import { Login } from './pages/Login.tsx';
 import { ReportsPage } from './pages/Reports.tsx';
 import { Sandbox } from './pages/Sandbox.tsx';
 import { SettingsPage } from './pages/Settings.tsx';
+import { googleKey, type GoogleState } from './pages/settings/GoogleCard.tsx';
 import { Today } from './pages/Today.tsx';
 import { navigate, useLocation } from './router.ts';
 import { Button, cx, ErrorState, Loading, Select } from './ui.tsx';
@@ -64,6 +65,12 @@ function Shell({ me }: { me: Me }) {
     setTenant(id);
     void qc.invalidateQueries({ predicate: (q) => !['me', 'tenants'].includes(String(q.queryKey[0])) });
   };
+  const google = useQuery({
+    queryKey: googleKey,
+    queryFn: () => api<GoogleState>('/v1/integrations/google'),
+    enabled: Boolean(tenant),
+    refetchInterval: 60_000,
+  });
   const config = useQuery({
     queryKey: ['config', tenant],
     queryFn: () => api<{ config: TenantConfig; revision: number }>('/v1/config'),
@@ -154,6 +161,15 @@ function Shell({ me }: { me: Me }) {
             {config.data?.config.brand.business_name ?? ''}
           </span>
         </header>
+        {google.data?.connected && google.data.status === 'reauth_needed' && (
+          <div className="bg-red-50 px-4 py-2 text-sm text-red-800 md:px-8" role="alert">
+            Google Calendar access was lost, so bookings are not syncing and Google busy time may be out of
+            date.{' '}
+            <a className="font-medium underline" href="/settings?tab=integrations">
+              Reconnect Google
+            </a>
+          </div>
+        )}
         <main className="mx-auto max-w-6xl p-4 md:p-8">{page}</main>
       </div>
     </div>
