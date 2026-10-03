@@ -16,7 +16,7 @@ const ACTIONS: [Action, string, string][] = [
   ['reschedule', 'Reschedule appointments', 'Approval: your team handles each request'],
   ['cancel', 'Cancel appointments', 'Approval: your team handles each request'],
   ['remind', 'Send appointment reminders', ''],
-  ['follow_up', 'Follow up stalled treatments', 'Uses your approved treatment_followup template'],
+  ['follow_up', 'Send follow-ups', 'Unanswered enquiries, missed visits and stalled treatments'],
   ['waitlist_offer', 'Offer freed slots to the waitlist', ''],
   [
     'reactivate',

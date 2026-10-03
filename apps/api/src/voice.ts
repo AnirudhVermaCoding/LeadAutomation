@@ -165,8 +165,8 @@ export async function handleVoiceEvent(
     case 'transcript': {
       // Emergency phrases on a call: escalate at once, in code, whatever the vendor's model does next.
       const keywords = config.qualification.safety.emergency_keywords;
-      if (!call.escalated && keywords.length && matchesEmergency(event.text, keywords)) {
-        await flagCall(deps, tenantId, call.id, { escalated: true });
+      if (call.outcome !== 'emergency' && keywords.length && matchesEmergency(event.text, keywords)) {
+        await flagCall(deps, tenantId, call.id, { escalated: true, outcome: 'emergency' });
         if (tool) await escalate(tool, 'emergency keywords on a phone call', 'clinical');
         await withTenant(deps.db, tenantId, (tx) =>
           emit(tx, deps.clock, 'call.emergency', { leadId, callId: call.id, channel: 'phone' }),
@@ -203,7 +203,7 @@ export async function handleVoiceEvent(
           continue;
         }
         let result: string;
-        if (call.escalated) result = SAY_EMERGENCY(config);
+        if (call.outcome === 'emergency') result = SAY_EMERGENCY(config);
         else if (overCap) {
           result =
             'The phone assistant has used its monthly minutes. Do not book or change anything: use transferCall to connect the caller to the clinic, or take a message.';

@@ -94,7 +94,8 @@ export function registerRecoveryRoutes(app: FastifyInstance, ctx: AppContext) {
     const done = await withTenant(ctx.db, tenantId, async (tx) => {
       const [o] = await tx.select().from(opportunities).where(eq(opportunities.id, id)).for('update');
       if (!o) return 'missing' as const;
-      if (!['open', 'needs_approval'].includes(o.status) || !o.leadId) return 'not_actionable' as const;
+      if (!['open', 'needs_approval'].includes(o.status) || (!o.leadId && o.kind !== 'EMPTY_SLOT'))
+        return 'not_actionable' as const;
       if (o.kind === 'EMPTY_SLOT')
         await ctx.enqueue(
           tx,

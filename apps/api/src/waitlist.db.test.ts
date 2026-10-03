@@ -289,3 +289,23 @@ describe('cancellation → waitlist recovery', () => {
     expect(l?.state).toBe('booked');
   });
 });
+
+describe('waitlist offers need staff approval', () => {
+  test('the freed slot waits under Recovery; approving it sends the offers', async () => {
+    await clearWaitlist();
+    await setConfig((c) => ({ ...c, autonomy: { waitlist_offer: 'approval' } }));
+    const w = await newLead('Approve Me');
+    await wait(w.leadId);
+    const owner = await newLead('Owner 6');
+    const appt = await bookWed(owner.leadId, 18);
+    await updateAppointment(t.ctx, A, appt.id, 'cancelled', { cancelReason: 'staff' });
+    await t.drainJobs();
+    const opp = (await slotOpp(appt.id))!;
+    expect(opp.status).toBe('needs_approval');
+    expect(await offersFor(opp.id)).toEqual([]);
+    expect((await api('POST', `/v1/opportunities/${opp.id}/approve`)).statusCode).toBe(200);
+    await t.drainJobs();
+    expect((await offersFor(opp.id)).map((o) => o.leadId)).toEqual([w.leadId]);
+    await setConfig((c) => ({ ...c, autonomy: {} }));
+  });
+});

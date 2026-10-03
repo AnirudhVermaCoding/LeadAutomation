@@ -330,3 +330,17 @@ describe('safety and hand-off', () => {
     });
   });
 });
+
+describe('ordinary escalation is not an emergency', () => {
+  test('after a refund question goes to staff, later tool answers are normal, not the emergency script', async () => {
+    const phone = newPhone();
+    const esc = await toolCall('call-refund', phone, [
+      { id: 'r1', name: 'escalate_to_human', parameters: { reason: 'wants a refund', category: 'refund' } },
+    ]);
+    expect(resultOf(esc)).toMatch(/team member will take over/);
+    const next = await toolCall('call-refund', phone, [
+      { id: 'r2', name: 'lookup_knowledge', parameters: { query: 'opening hours' } },
+    ]);
+    expect(resultOf(next)).not.toMatch(/EMERGENCY/);
+  });
+});

@@ -1,4 +1,11 @@
-import { renderTemplateBody, TEMPLATES, type TemplateKey, type TenantConfig } from '@instantlead/config';
+import {
+  autonomyOf,
+  renderTemplateBody,
+  TEMPLATES,
+  type AutonomyAction,
+  type TemplateKey,
+  type TenantConfig,
+} from '@instantlead/config';
 import {
   formatSlot,
   HOUR,
@@ -19,6 +26,13 @@ import { emit, transitionLeadIfAllowed } from './leads.ts';
 import { sendStaffNote, type NotifyDeps } from './notify.ts';
 import { QUEUES, type Enqueue } from './jobs.ts';
 import { sendToLead } from './outbound.ts';
+
+/** Which autonomy setting governs each patient-facing sequence (staff watches and reviews have none). */
+const SEQUENCE_ACTION: Partial<Record<SequenceKind, AutonomyAction>> = {
+  reminders: 'remind',
+  followup: 'follow_up',
+  no_show_recovery: 'follow_up',
+};
 
 /** After the last follow-up, how long silence lasts before the lead is marked unresponsive. */
 const UNRESPONSIVE_AFTER_LAST_FOLLOWUP = 48 * HOUR;
@@ -256,6 +270,10 @@ export async function runStep(
     // A reminder is only worth sending for an appointment that is still on (not moved, cancelled or done).
     if (enrollment.kind === 'reminders' && !(appt && ['scheduled', 'confirmed'].includes(appt.status)))
       return close('cancelled', `appointment ${appt?.status ?? 'gone'}`);
+    // Clinic autonomy (Settings → AI autonomy): reminders and follow-ups go out only when set to automatic.
+    const action = SEQUENCE_ACTION[enrollment.kind];
+    if (action && autonomyOf(config, action) !== 'auto')
+      return close('skipped', `${action.replace('_', ' ')} is not automatic for this clinic`);
 
     const sendAt = nextSendTime(now, config.locale.timezone, config.locale.quiet_hours);
     if (sendAt > now) {

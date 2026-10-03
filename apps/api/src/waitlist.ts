@@ -161,7 +161,8 @@ export async function runSlotRecovery(
     }
     const mode = autonomyOf(config, 'waitlist_offer');
     if (mode === 'off') return { done: 'waitlist offers are off' };
-    if (mode === 'approval' && !job.approved) {
+    // Once staff approved this slot (status actioned), later rounds of offers need no new approval.
+    if (mode === 'approval' && !job.approved && o.status !== 'actioned') {
       if (o.status === 'open')
         await tx.update(opportunities).set({ status: 'needs_approval' }).where(eq(opportunities.id, o.id));
       return { done: 'waiting for staff approval' };
@@ -275,6 +276,7 @@ export async function runSlotRecovery(
 
   const expiresAt = new Date(now.getTime() + journeysOf(config).waitlist_offer_minutes * MINUTE);
   let sent = 0;
+  let recorded = 0;
   for (const { entry, lead } of chosen) {
     const [offer] = await withTenant(deps.db, tenantId, (tx) =>
       tx
@@ -289,7 +291,8 @@ export async function runSlotRecovery(
         .onConflictDoNothing()
         .returning({ id: slotOffers.id }),
     );
-    if (!offer) continue;
+    if (!offer) continue; // a concurrent run already offered this slot to them
+    recorded++;
     const r = await sendToLead(deps, tenantId, {
       leadId: lead.id,
       idempotencyKey: `offer:${offer.id}`,
@@ -313,6 +316,7 @@ export async function runSlotRecovery(
       await emit(tx, deps.clock, 'slot.offered', { leadId: lead.id, opportunityId: o.id, offerId: offer.id });
     });
   }
+  if (!recorded) return { status: 'already offered' }; // the concurrent run owns this round
   await withTenant(deps.db, tenantId, (tx) =>
     tx
       .update(opportunities)
@@ -407,7 +411,11 @@ export async function answerSlotOffer(
   } catch (err) {
     if (!(err instanceof BookingError)) throw err;
     await withTenant(deps.db, tenantId, (tx) =>
-      tx.update(slotOffers).set({ status: 'expired', respondedAt: now }).where(eq(slotOffers.id, offer.id)),
+      // Only an offer still out: a double tap must not turn the first tap's accepted offer into expired.
+      tx
+        .update(slotOffers)
+        .set({ status: 'expired', respondedAt: now })
+        .where(and(eq(slotOffers.id, offer.id), eq(slotOffers.status, 'sent'))),
     );
     return { status: err.code === 'taken' || err.code === 'unavailable' ? 'taken' : 'expired' };
   }

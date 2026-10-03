@@ -8,6 +8,11 @@ test('clinic admin signs in, plays a customer in the sandbox and gets an instant
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+  // The command center: today's numbers, what needs a person, the assistant's impact (counted, not estimated).
+  await expect(page.getByText('Needs attention')).toBeVisible();
+  await expect(page.getByText(/AI impact, last 30 days/)).toBeVisible();
+  await page.goto('/recovery');
+  await expect(page.getByRole('heading', { name: 'Recovery' })).toBeVisible();
 
   await page.goto('/sandbox');
   await page.getByLabel('Customer message').fill('Hi, I need teeth whitening');

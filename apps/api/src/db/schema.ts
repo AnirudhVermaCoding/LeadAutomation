@@ -780,7 +780,6 @@ export const TREATMENT_PLAN_STATUSES = [
   'completed',
   'declined',
 ] as const;
-export type TreatmentPlanStatus = (typeof TREATMENT_PLAN_STATUSES)[number];
 
 /**
  * A treatment the clinic proposed (entered by staff, never by the AI): the administrative journey only, not a

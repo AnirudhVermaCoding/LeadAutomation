@@ -6,7 +6,7 @@ import { createTestContext, PASSWORD, type TestContext } from '../../test/contex
 import { bookSlot, findSlots } from '../booking.ts';
 import { getActiveConfig, saveConfig } from '../config-store.ts';
 import { withTenant } from '../db/client.ts';
-import { appointments, events, leads, messages } from '../db/schema.ts';
+import { appointments, enrollmentSteps, events, leads, messages } from '../db/schema.ts';
 import { createFakeLlm } from './fake-llm.ts';
 import { checkReply } from './guard.ts';
 import { buildSystemPrompt, buildTools } from './prompt.ts';
@@ -202,5 +202,36 @@ describe('never: clinical actions and invented facts', () => {
     });
     expect(out.sent.some((m) => m.body.includes('99'))).toBe(false);
     expect(out.lead.aiPaused).toBe(true);
+  });
+});
+
+describe('autonomy applies to scheduled messages too', () => {
+  test('reminders set to off: the 24 h / 2 h reminders are skipped, not sent', async () => {
+    await setConfig((c) => ({ ...c, autonomy: { remind: 'off' } }));
+    const leadId = await newLead();
+    const slots = (await findSlots(t.ctx, A, { service: 'Consultation', limit: 200, spread: false })).slots;
+    const later = slots.find((s) => s.date > slots[0]!.date && s.time >= '12:00')!;
+    await bookSlot(t.ctx, A, {
+      leadId,
+      service: 'Consultation',
+      date: later.date,
+      time: later.time,
+      source: 'staff',
+    });
+    await t.drainJobs();
+    // Just past the 24 h reminder's due time, well before the visit (so not skipped for its deadline).
+    const due = (await withTenant(t.ctx.db, A, (tx) => tx.select().from(enrollmentSteps)))
+      .filter((s) => s.templateKey === 'reminder_24h')
+      .at(-1)!;
+    await t.advance((due.dueAt.getTime() - t.clock.now().getTime()) / 3_600_000 + 0.5);
+    const [step] = await withTenant(t.ctx.db, A, (tx) =>
+      tx.select().from(enrollmentSteps).where(eq(enrollmentSteps.id, due.id)),
+    );
+    expect(step).toMatchObject({ status: 'skipped', lastError: 'remind is not automatic for this clinic' });
+    const sent = await withTenant(t.ctx.db, A, (tx) =>
+      tx.select({ key: messages.templateKey }).from(messages).where(eq(messages.leadId, leadId)),
+    );
+    expect(sent.map((m) => m.key)).not.toContain('reminder_24h');
+    await setConfig((c) => ({ ...c, autonomy: {} }));
   });
 });
