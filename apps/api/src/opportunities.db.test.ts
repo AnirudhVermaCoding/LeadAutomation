@@ -332,3 +332,32 @@ describe('instalment follow-ups', () => {
     await setConfig((c) => ({ ...c, journeys: JOURNEYS }));
   });
 });
+
+test('a back-dated schedule (3 instalments already overdue) sends one reminder, not three', async () => {
+  await setConfig((c) => ({ ...c, journeys: { ...JOURNEYS, payment_url: 'https://pay.example.in/smile' } }));
+  const leadId = await newLead('Back Dated');
+  const plan = await addPlan(leadId, {
+    title: 'Implant',
+    status: 'in_progress',
+    value_inr: 30000,
+    paid_inr: 0,
+  });
+  const first = new Date(t.clock.now().getTime() - 100 * DAY).toISOString().slice(0, 10);
+  await api(cookieA, 'POST', `/v1/treatment-plans/${plan.id}/installments`, {
+    count: 3,
+    first_due: first,
+    interval_days: 30,
+  });
+  await sweep();
+  await sweep();
+  expect((await oppsOf(leadId)).filter((o) => o.kind === 'PAYMENT_FOLLOWUP')).toHaveLength(1);
+  expect((await templatesSent(leadId)).filter((m) => m.key === 'payment_reminder')).toHaveLength(1);
+  const tiny = await api(cookieA, 'POST', `/v1/treatment-plans/${plan.id}/installments`, {
+    count: 60,
+    first_due: first,
+    interval_days: 30,
+    amount_inr: 0.5,
+  });
+  expect(tiny.statusCode).toBe(400); // amounts below ₹1 are refused by validation
+  await setConfig((c) => ({ ...c, journeys: JOURNEYS }));
+});

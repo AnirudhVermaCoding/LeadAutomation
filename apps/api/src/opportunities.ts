@@ -225,9 +225,13 @@ export async function detectOpportunities(tx: Tx, clock: Clock, config: TenantCo
     .select({ inst: planInstallments, title: treatmentPlans.title, status: treatmentPlans.status })
     .from(planInstallments)
     .innerJoin(treatmentPlans, eq(treatmentPlans.id, planInstallments.planId))
-    .where(and(eq(planInstallments.status, 'pending'), lte(planInstallments.dueAt, now)));
+    .where(and(eq(planInstallments.status, 'pending'), lte(planInstallments.dueAt, now)))
+    .orderBy(asc(planInstallments.dueAt));
+  // One reminder at a time per plan (the earliest overdue): a back-dated schedule must not send several at once.
+  const firstPerPlan = new Set<string>();
   for (const { inst, title, status } of overdue) {
-    if (status === 'declined') continue;
+    if (status === 'declined' || firstPerPlan.has(inst.planId)) continue;
+    firstPerPlan.add(inst.planId);
     await add({
       kind: 'PAYMENT_FOLLOWUP',
       leadId: inst.leadId,

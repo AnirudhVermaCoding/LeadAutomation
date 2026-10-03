@@ -270,6 +270,7 @@ export async function setInstallments(
     const owed = plan.valueInr - (plan.paidInr ?? 0);
     if (owed <= 0) throw new ScheduleError('Nothing is owed on this plan');
     const each = Math.floor(owed / input.count);
+    if (each < 1) throw new ScheduleError(`₹${owed} cannot be split into ${input.count} instalments`);
     amounts = Array.from({ length: input.count }, (_, i) =>
       i === input.count - 1 ? Math.round((owed - each * (input.count - 1)) * 100) / 100 : each,
     );

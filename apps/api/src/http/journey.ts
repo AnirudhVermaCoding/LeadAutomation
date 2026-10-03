@@ -148,7 +148,7 @@ export function registerJourneyRoutes(app: FastifyInstance, ctx: AppContext) {
         count: z.int().min(1).max(60),
         first_due: z.iso.date(),
         interval_days: z.int().min(7).max(365),
-        amount_inr: z.number().positive().max(100_000_000).optional(),
+        amount_inr: z.number().min(1).max(100_000_000).optional(),
       })
       .parse(req.body);
     try {
