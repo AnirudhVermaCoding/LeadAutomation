@@ -27,6 +27,15 @@ interface Plan {
   paidInr: number | null;
   notes: string | null;
 }
+interface Installment {
+  id: string;
+  planId: string;
+  seq: number;
+  amountInr: number;
+  dueAt: string;
+  status: 'pending' | 'paid' | 'waived';
+  paidAt: string | null;
+}
 
 const STAGE_TONE: Record<string, string> = {
   booking: 'bg-brand-50 text-brand-700 ring-brand-100',
@@ -56,7 +65,10 @@ export function Journey({ leadId, config }: { leadId: string; config: TenantConf
   const tz = config.locale.timezone;
   const q = useQuery({
     queryKey: ['timeline', leadId],
-    queryFn: () => api<{ entries: TimelineEntry[]; plans: Plan[] }>(`/v1/leads/${leadId}/timeline`),
+    queryFn: () =>
+      api<{ entries: TimelineEntry[]; plans: Plan[]; installments: Installment[] }>(
+        `/v1/leads/${leadId}/timeline`,
+      ),
     refetchInterval: 15_000,
   });
   const [showComms, setShowComms] = useState(false);
@@ -84,7 +96,14 @@ export function Journey({ leadId, config }: { leadId: string; config: TenantConf
         )}
         <ul className="space-y-2">
           {q.data.plans.map((p) => (
-            <PlanRow key={p.id} plan={p} leadId={leadId} config={config} tz={tz} />
+            <PlanRow
+              key={p.id}
+              plan={p}
+              installments={q.data.installments.filter((i) => i.planId === p.id)}
+              leadId={leadId}
+              config={config}
+              tz={tz}
+            />
           ))}
         </ul>
       </section>
@@ -132,11 +151,13 @@ export function Journey({ leadId, config }: { leadId: string; config: TenantConf
 
 function PlanRow({
   plan,
+  installments,
   leadId,
   config,
   tz,
 }: {
   plan: Plan;
+  installments: Installment[];
   leadId: string;
   config: TenantConfig;
   tz: string;
@@ -163,10 +184,168 @@ function PlanRow({
         {plan.valueInr !== null ? ` · ${fmt.inr(plan.valueInr)} total` : ''}
         {due !== null ? ` · ${due > 0 ? `${fmt.inr(due)} pending` : 'paid'}` : ''}
       </p>
+      <Schedule plan={plan} installments={installments} leadId={leadId} config={config} tz={tz} />
     </li>
   );
 }
 
+/** The plan's payment schedule (braces, implants): set up or re-plan, and record each payment. */
+function Schedule({
+  plan,
+  installments,
+  leadId,
+  config,
+  tz,
+}: {
+  plan: Plan;
+  installments: Installment[];
+  leadId: string;
+  config: TenantConfig;
+  tz: string;
+}) {
+  const qc = useQueryClient();
+  const tpl = config.treatment_templates?.find((t) => t.name === plan.title)?.installments;
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({
+    count: String(tpl?.count ?? 6),
+    first_due: '',
+    interval_days: String(tpl?.interval_days ?? 30),
+    amount_inr: '',
+  });
+  const refresh = () => qc.invalidateQueries({ queryKey: ['timeline', leadId] });
+  const create = useMutation({
+    mutationFn: () =>
+      api(`/v1/treatment-plans/${plan.id}/installments`, {
+        body: {
+          count: Number(f.count),
+          first_due: f.first_due,
+          interval_days: Number(f.interval_days),
+          ...(f.amount_inr ? { amount_inr: Number(f.amount_inr) } : {}),
+        },
+      }),
+    onSuccess: async () => {
+      setOpen(false);
+      await refresh();
+    },
+  });
+  const mark = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: Installment['status'] }) =>
+      api(`/v1/installments/${id}`, { method: 'PATCH', body: { status } }),
+    onSettled: refresh,
+  });
+  const now = Date.now();
+  const next = installments.find((i) => i.status === 'pending');
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
+    setF((x) => ({ ...x, [k]: e.target.value }));
+
+  return (
+    <div className="mt-2 border-t border-slate-100 pt-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-medium text-slate-700">Payment schedule</span>
+        {installments.length > 0 && (
+          <span className="text-slate-500">
+            {installments.filter((i) => i.status === 'paid').length} of {installments.length} paid
+            {next ? ` · next ${fmt.inr(next.amountInr)} due ${shortDate(next.dueAt, tz)}` : ''}
+          </span>
+        )}
+        <button className="ml-auto text-brand-700 hover:underline" onClick={() => setOpen((v) => !v)}>
+          {installments.length ? 'Re-plan' : 'Set up instalments'}
+        </button>
+      </div>
+      {open && (
+        <form
+          className="mt-2 grid gap-2 sm:grid-cols-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            create.mutate();
+          }}
+        >
+          <Field label="Instalments">
+            <Input type="number" min={1} max={60} required value={f.count} onChange={set('count')} />
+          </Field>
+          <Field label="First due">
+            <Input type="date" required value={f.first_due} onChange={set('first_due')} />
+          </Field>
+          <Field label="Every (days)">
+            <Input
+              type="number"
+              min={7}
+              max={365}
+              required
+              value={f.interval_days}
+              onChange={set('interval_days')}
+            />
+          </Field>
+          <Field label="₹ each (optional)" hint="Empty: what is owed, split evenly">
+            <Input type="number" min={1} value={f.amount_inr} onChange={set('amount_inr')} />
+          </Field>
+          <div className="flex items-center justify-end gap-2 sm:col-span-4">
+            {installments.some((i) => i.status !== 'pending') && (
+              <span className="mr-auto text-xs text-slate-500">Paid instalments are kept.</span>
+            )}
+            {create.error && <span className="text-xs text-red-700">{create.error.message}</span>}
+            <Button size="sm" type="submit" loading={create.isPending}>
+              Save schedule
+            </Button>
+          </div>
+        </form>
+      )}
+      {installments.length > 0 && (
+        <ul className="mt-2 divide-y divide-slate-100 text-xs">
+          {installments.map((i) => {
+            const overdue = i.status === 'pending' && new Date(i.dueAt).getTime() < now;
+            return (
+              <li key={i.id} className={cx('flex items-center gap-2 py-1', overdue && 'text-red-700')}>
+                <span className="w-6 tabular-nums text-slate-400">{i.seq}</span>
+                <span className="w-20 font-medium tabular-nums">{fmt.inr(i.amountInr)}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {i.status === 'paid'
+                    ? `paid ${i.paidAt ? shortDate(i.paidAt, tz) : ''}`
+                    : i.status === 'waived'
+                      ? 'waived'
+                      : `${overdue ? 'overdue since' : 'due'} ${shortDate(i.dueAt, tz)}`}
+                </span>
+                {i.status === 'pending' ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => mark.mutate({ id: i.id, status: 'paid' })}
+                    >
+                      Paid
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => mark.mutate({ id: i.id, status: 'waived' })}
+                    >
+                      Waive
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => mark.mutate({ id: i.id, status: 'pending' })}
+                  >
+                    Undo
+                  </Button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {mark.error && <p className="text-xs text-red-700">{mark.error.message}</p>}
+    </div>
+  );
+}
+
+/** "20 Oct 26": fits a phone row next to the buttons. */
+const shortDate = (iso: string, tz: string) =>
+  new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: '2-digit', timeZone: tz }).format(
+    new Date(iso),
+  );
 const iso = (d: string) => (d ? new Date(`${d}T09:00:00+05:30`).toISOString() : null);
 const dateOf = (s: string | null) => (s ? s.slice(0, 10) : '');
 const numOrNull = (v: string) => (v.trim() === '' ? null : Number(v));
@@ -231,6 +410,32 @@ function PlanForm({
       onSubmit={submit}
       className={cx('mb-3 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3')}
     >
+      {!plan && (config.treatment_templates?.length ?? 0) > 0 && (
+        <Field label="Start from a template (optional)">
+          <Select
+            defaultValue=""
+            onChange={(e) => {
+              const t = config.treatment_templates?.find((x) => x.name === e.target.value);
+              if (t)
+                setF((x) => ({
+                  ...x,
+                  title: t.name,
+                  service: t.service ?? '',
+                  visits_planned: t.visits_planned?.toString() ?? '',
+                  visit_interval_days: t.visit_interval_days?.toString() ?? '',
+                  value_inr: t.value_inr?.toString() ?? x.value_inr,
+                }));
+            }}
+          >
+            <option value="">— type your own —</option>
+            {config.treatment_templates?.map((t) => (
+              <option key={t.name} value={t.name}>
+                {t.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Treatment (your wording)">
           <Input

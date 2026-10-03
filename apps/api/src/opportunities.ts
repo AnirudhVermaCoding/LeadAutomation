@@ -163,7 +163,9 @@ export async function detectOpportunities(tx: Tx, clock: Clock, config: TenantCo
     .where(inArray(treatmentPlans.status, ['accepted', 'in_progress', 'completed']));
   // Plans with a payment schedule are followed up per overdue instalment (below), not on the whole balance.
   const scheduled = new Set(
-    (await tx.selectDistinct({ planId: planInstallments.planId }).from(planInstallments)).map((r) => r.planId),
+    (await tx.selectDistinct({ planId: planInstallments.planId }).from(planInstallments)).map(
+      (r) => r.planId,
+    ),
   );
   for (const p of plans) {
     const booked = has(p.leadId, p.attendeeName);
@@ -285,7 +287,8 @@ export async function resolveOutcomes(tx: Tx, clock: Clock) {
         .from(planInstallments)
         .where(eq(planInstallments.id, o.subjectKey.slice(5)));
       if (inst?.status === 'paid') outcome = { status: 'won', text: 'instalment paid' };
-      else if (!inst || inst.status === 'waived') outcome = { status: 'lost', text: 'instalment waived or removed' };
+      else if (!inst || inst.status === 'waived')
+        outcome = { status: 'lost', text: 'instalment waived or removed' };
     } else if (o.kind === 'PAYMENT_FOLLOWUP') {
       if (plan && plan.valueInr !== null && (plan.paidInr ?? 0) >= plan.valueInr)
         outcome = { status: 'won', text: 'balance paid' };

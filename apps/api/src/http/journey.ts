@@ -170,7 +170,8 @@ export function registerJourneyRoutes(app: FastifyInstance, ctx: AppContext) {
       });
       return rows ? reply.code(201).send(rows) : reply.code(404).send({ error: 'not_found' });
     } catch (err) {
-      if (err instanceof ScheduleError) return reply.code(422).send({ error: 'invalid_schedule', message: err.message });
+      if (err instanceof ScheduleError)
+        return reply.code(422).send({ error: 'invalid_schedule', message: err.message });
       throw err;
     }
   });

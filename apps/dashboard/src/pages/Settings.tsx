@@ -6,7 +6,7 @@ import { useLocation } from '../router.ts';
 import { Button, Card, cx, PageHeader } from '../ui.tsx';
 import { Integrations } from './settings/Integrations.tsx';
 import { Availability, Templates } from './settings/Operations.tsx';
-import { AutonomySection, PhoneAgentSection } from './settings/OpsSections.tsx';
+import { AutonomySection, PhoneAgentSection, TreatmentTemplatesSection } from './settings/OpsSections.tsx';
 import {
   AiPrivacySection,
   BookingPolicySection,
@@ -27,6 +27,7 @@ const TABS = [
   ['booking', 'Booking'],
   ['messages', 'Messages'],
   ['reports', 'Reports'],
+  ['treatments', 'Treatments'],
   ['autonomy', 'AI autonomy'],
   ['phone', 'Phone agent'],
   ['ai', 'AI & data'],
@@ -165,6 +166,7 @@ export function SettingsPage({
           </>
         )}
         {tab === 'reports' && <ReportsSection draft={draft} edit={edit} />}
+        {tab === 'treatments' && <TreatmentTemplatesSection draft={draft} edit={edit} />}
         {tab === 'autonomy' && <AutonomySection draft={draft} edit={edit} />}
         {tab === 'phone' && <PhoneAgentSection draft={draft} edit={edit} canEdit={canEdit} />}
         {tab === 'ai' && <AiPrivacySection draft={draft} edit={edit} />}

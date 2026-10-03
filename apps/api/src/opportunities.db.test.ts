@@ -287,7 +287,10 @@ describe('command center', () => {
 
 describe('instalment follow-ups', () => {
   test('nothing before the due date; an overdue instalment gets one reminder for exactly its amount; paying it wins', async () => {
-    await setConfig((c) => ({ ...c, journeys: { ...JOURNEYS, payment_url: 'https://pay.example.in/smile' } }));
+    await setConfig((c) => ({
+      ...c,
+      journeys: { ...JOURNEYS, payment_url: 'https://pay.example.in/smile' },
+    }));
     const leadId = await newLead('Tara');
     const plan = await addPlan(leadId, {
       title: 'Braces (metal)',
@@ -311,7 +314,11 @@ describe('instalment follow-ups', () => {
     await sweep();
     const pays = (await oppsOf(leadId)).filter((o) => o.kind === 'PAYMENT_FOLLOWUP');
     expect(pays).toHaveLength(1);
-    expect(pays[0]).toMatchObject({ status: 'actioned', valueInr: 6000, subjectKey: expect.stringMatching(/^inst:/) });
+    expect(pays[0]).toMatchObject({
+      status: 'actioned',
+      valueInr: 6000,
+      subjectKey: expect.stringMatching(/^inst:/),
+    });
     const reminders = (await templatesSent(leadId)).filter((m) => m.key === 'payment_reminder');
     expect(reminders).toHaveLength(1);
     expect(reminders[0]!.body).toContain('Rs. 6,000');

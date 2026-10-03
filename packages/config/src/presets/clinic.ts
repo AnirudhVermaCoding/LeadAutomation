@@ -13,7 +13,12 @@ const SAMPLE = 'SAMPLE — replace during onboarding.';
 
 /** Starting points for staff (Settings → Treatment templates). No prices: each clinic enters its own. */
 const DENTAL_TEMPLATES: NonNullable<TenantConfig['treatment_templates']> = [
-  { name: 'Root canal treatment (RCT)', service: 'Treatment visit', visits_planned: 3, visit_interval_days: 7 },
+  {
+    name: 'Root canal treatment (RCT)',
+    service: 'Treatment visit',
+    visits_planned: 3,
+    visit_interval_days: 7,
+  },
   {
     name: 'Braces (metal)',
     service: 'Braces adjustment',

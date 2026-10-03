@@ -51,7 +51,7 @@ export function InboxPage({ config, role }: { config: TenantConfig; role: Role }
   return (
     <>
       <PageHeader title="Inbox" subtitle="Every lead and every WhatsApp conversation" />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <div className={cx(selected && 'hidden lg:block')}>
           <div className="mb-3 flex flex-wrap gap-1.5">
             {FILTERS.map((f) => (

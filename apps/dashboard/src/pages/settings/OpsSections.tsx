@@ -1,11 +1,146 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, KeyRound, ShieldCheck } from 'lucide-react';
+import { Copy, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { api, type TenantConfig } from '../../api.ts';
 import { Button, Card, ErrorState, Field, Input, Loading, Select, Textarea } from '../../ui.tsx';
 import type { Edit } from '../Settings.tsx';
 
 type Props = { draft: TenantConfig; edit: Edit };
+type Template = NonNullable<TenantConfig['treatment_templates']>[number];
+const optNum = (v: string) => (v === '' ? undefined : Number(v));
+
+/** One-click starting points for treatment plans (staff can still change every field on the plan). */
+export function TreatmentTemplatesSection({ draft, edit }: Props) {
+  const list = draft.treatment_templates ?? [];
+  const change = (i: number, patch: Partial<Template>) =>
+    edit((d) => {
+      const next = [...(d.treatment_templates ?? [])];
+      const merged = { ...next[i]!, ...patch };
+      for (const k of Object.keys(merged) as (keyof Template)[])
+        if (merged[k] === undefined || merged[k] === '') delete merged[k];
+      next[i] = merged as Template;
+      d.treatment_templates = next;
+    });
+  return (
+    <Card
+      title="Treatment templates"
+      actions={
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() =>
+            edit((d) => {
+              d.treatment_templates = [...(d.treatment_templates ?? []), { name: 'New treatment' }];
+            })
+          }
+        >
+          <Plus className="size-3.5" aria-hidden /> Add template
+        </Button>
+      }
+    >
+      <p className="mb-3 text-sm text-slate-600">
+        Staff pick one when adding a plan to a patient (Inbox → Journey & treatment). Prices are optional;
+        leave them empty if they vary.
+      </p>
+      {!list.length && <p className="text-sm text-slate-500">No templates yet.</p>}
+      <div className="space-y-3">
+        {list.map((t, i) => (
+          <div key={i} className="grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-6">
+            <div className="sm:col-span-2">
+              <Field label="Name">
+                <Input value={t.name} onChange={(e) => change(i, { name: e.target.value })} />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <Field label="Service for each visit">
+                <Select
+                  value={t.service ?? ''}
+                  onChange={(e) => change(i, { service: e.target.value || undefined })}
+                >
+                  <option value="">—</option>
+                  {draft.booking.services.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <Field label="Visits">
+              <Input
+                type="number"
+                min={1}
+                max={50}
+                value={t.visits_planned ?? ''}
+                onChange={(e) => change(i, { visits_planned: optNum(e.target.value) })}
+              />
+            </Field>
+            <Field label="Every (days)">
+              <Input
+                type="number"
+                min={1}
+                max={365}
+                value={t.visit_interval_days ?? ''}
+                onChange={(e) => change(i, { visit_interval_days: optNum(e.target.value) })}
+              />
+            </Field>
+            <Field label="Usual price ₹ (optional)">
+              <Input
+                type="number"
+                min={0}
+                value={t.value_inr ?? ''}
+                onChange={(e) => change(i, { value_inr: optNum(e.target.value) })}
+              />
+            </Field>
+            <Field label="Instalments (optional)">
+              <Input
+                type="number"
+                min={2}
+                max={60}
+                value={t.installments?.count ?? ''}
+                onChange={(e) =>
+                  change(i, {
+                    installments: e.target.value
+                      ? { count: Number(e.target.value), interval_days: t.installments?.interval_days ?? 30 }
+                      : undefined,
+                  })
+                }
+              />
+            </Field>
+            <Field label="Instalment every (days)">
+              <Input
+                type="number"
+                min={7}
+                max={365}
+                disabled={!t.installments}
+                value={t.installments?.interval_days ?? ''}
+                onChange={(e) =>
+                  t.installments &&
+                  change(i, { installments: { ...t.installments, interval_days: Number(e.target.value) } })
+                }
+              />
+            </Field>
+            <div className="flex items-end justify-end sm:col-span-3">
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={`Remove ${t.name}`}
+                onClick={() =>
+                  edit((d) => {
+                    d.treatment_templates = (d.treatment_templates ?? []).filter((_, j) => j !== i);
+                  })
+                }
+              >
+                <Trash2 className="size-3.5" aria-hidden /> Remove
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 type Mode = 'auto' | 'approval' | 'off';
 type Action = NonNullable<keyof NonNullable<TenantConfig['autonomy']>>;
 

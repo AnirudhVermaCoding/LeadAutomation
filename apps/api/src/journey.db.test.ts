@@ -218,7 +218,9 @@ describe('payment schedules', () => {
     expect(rows.map((r) => r.amountInr)).toEqual([5833, 5833, 5833, 5833, 5833, 5835]);
     expect(rows.reduce((s, r) => s + r.amountInr, 0)).toBe(35000);
 
-    expect((await api(cookieA, 'PATCH', `/v1/installments/${rows[0]!.id}`, { status: 'paid' })).statusCode).toBe(200);
+    expect(
+      (await api(cookieA, 'PATCH', `/v1/installments/${rows[0]!.id}`, { status: 'paid' })).statusCode,
+    ).toBe(200);
     expect((await timelineOf(leadId)).plans[0]!.paidInr).toBe(15833);
     // Undo, then pay again: the total follows.
     await api(cookieA, 'PATCH', `/v1/installments/${rows[0]!.id}`, { status: 'pending' });
@@ -245,7 +247,10 @@ describe('payment schedules', () => {
   test('no total and no amount: refused with a clear message; clinic B cannot touch A instalments', async () => {
     const leadId = await newLead('Nina');
     const plan = (
-      await api(cookieA, 'POST', `/v1/leads/${leadId}/treatment-plans`, { title: 'Implant', status: 'accepted' })
+      await api(cookieA, 'POST', `/v1/leads/${leadId}/treatment-plans`, {
+        title: 'Implant',
+        status: 'accepted',
+      })
     ).json() as { id: string };
     const bad = await api(cookieA, 'POST', `/v1/treatment-plans/${plan.id}/installments`, {
       count: 3,
@@ -261,10 +266,18 @@ describe('payment schedules', () => {
       amount_inr: 20000,
     });
     const [first] = await schedule(leadId);
-    expect((await api(cookieB, 'PATCH', `/v1/installments/${first!.id}`, { status: 'paid' })).statusCode).toBe(404);
     expect(
-      (await api(cookieB, 'POST', `/v1/treatment-plans/${plan.id}/installments`, { count: 1, first_due: '2026-11-01', interval_days: 30, amount_inr: 1 }))
-        .statusCode,
+      (await api(cookieB, 'PATCH', `/v1/installments/${first!.id}`, { status: 'paid' })).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await api(cookieB, 'POST', `/v1/treatment-plans/${plan.id}/installments`, {
+          count: 1,
+          first_due: '2026-11-01',
+          interval_days: 30,
+          amount_inr: 1,
+        })
+      ).statusCode,
     ).toBe(404);
     expect((await schedule(leadId))[0]!.status).toBe('pending');
   });
