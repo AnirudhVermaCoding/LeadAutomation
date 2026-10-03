@@ -187,7 +187,7 @@ function Opportunities({ tz }: { tz: string }) {
                 )}
                 {o.valueInr !== null && (
                   <span className="text-xs text-slate-600" title="Entered by your team on the treatment plan">
-                    {fmt.inr(o.valueInr)}
+                    {fmt.inr(o.valueInr)} {o.kind === 'PAYMENT_FOLLOWUP' ? 'pending' : 'plan value'}
                   </span>
                 )}
               </div>

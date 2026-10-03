@@ -257,14 +257,16 @@ export async function resolveOutcomes(tx: Tx, clock: Clock) {
       else if (plan && plan.paidInr !== null && `pay:${plan.id}:${plan.paidInr}` !== o.subjectKey)
         outcome = { status: 'won', text: 'part payment recorded' };
     } else {
+      // A booking made after this was found: compared on insert order (created_at), which a fast-forwarded
+      // demo clock cannot reorder, and never the appointment the opportunity is about.
       const [booked] = await tx
-        .select({ id: events.id })
-        .from(events)
+        .select({ id: appointments.id })
+        .from(appointments)
         .where(
           and(
-            eq(events.leadId, o.leadId!),
-            eq(events.type, 'appointment.booked'),
-            gte(events.occurredAt, o.detectedAt),
+            eq(appointments.leadId, o.leadId!),
+            gte(appointments.createdAt, o.createdAt),
+            o.appointmentId ? sql`${appointments.id} <> ${o.appointmentId}` : undefined,
           ),
         )
         .limit(1);

@@ -68,6 +68,13 @@ const EVENT_STAGES: Record<string, [JourneyStage, string]> = {
 };
 
 const RECALL_KINDS = new Set(['RECALL_DUE']);
+const WON_TITLES: Record<string, string> = {
+  NO_SHOW: 'Rebooked after a missed visit',
+  STALLED_TREATMENT: 'Treatment restarted',
+  RECALL_DUE: 'Came back for recall',
+  LOST_LEAD: 'Booked after a reminder',
+  PAYMENT_FOLLOWUP: 'Balance paid',
+};
 const PAYMENT_KINDS = new Set(['PAYMENT_FOLLOWUP']);
 
 /**
@@ -111,6 +118,7 @@ export async function timeline(tx: Tx, leadId: string, limit = 500): Promise<Tim
     if (e.type === 'opportunity.acted' && RECALL_KINDS.has(kind)) mapped = ['recall', 'Recall reminder sent'];
     if (e.type === 'opportunity.acted' && PAYMENT_KINDS.has(kind))
       mapped = ['payment', 'Payment reminder sent'];
+    if (e.type === 'opportunity.won' && WON_TITLES[kind]) mapped = ['follow_up', WON_TITLES[kind]];
     if (!mapped) continue;
     const reason =
       typeof p.reason === 'string' ? p.reason : typeof p.category === 'string' ? p.category : null;

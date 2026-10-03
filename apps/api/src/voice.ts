@@ -1,4 +1,11 @@
-import { autonomyOf, fillVariables, NEVER_ACTIONS, voiceOf, type TenantConfig } from '@instantlead/config';
+import {
+  autonomyOf,
+  DEFAULT_CALL_DISCLOSURE,
+  fillVariables,
+  NEVER_ACTIONS,
+  voiceOf,
+  type TenantConfig,
+} from '@instantlead/config';
 import { localParts, matchesEmergency, toE164, zonedTimeToUtc } from '@instantlead/core';
 import { VOICE_PROVIDERS, type VoiceEvent, type VoiceProvider } from '@instantlead/integrations';
 import { eq, gte, sql } from 'drizzle-orm';
@@ -285,7 +292,7 @@ export function voiceAssistantSetup(
       : '- (The clinic answers questions itself: for any factual question, use escalate_to_human.)';
   const emergency = config.qualification.safety.emergency_keywords;
   const systemPrompt = `You are ${config.brand.assistant_name}, answering the phone for ${config.brand.business_name}. Tone: ${config.brand.tone}.
-Start every call with: "${fillVariables(voice?.call_disclosure ?? '', { business_name: config.brand.business_name })}"
+Start every call with: "${fillVariables(voice?.call_disclosure ?? DEFAULT_CALL_DISCLOSURE, { business_name: config.brand.business_name })}"
 Speak briefly and naturally. Reply in the caller's language: English, Hindi or Hinglish.
 You help with: booking, rescheduling or cancelling appointments, the waitlist, and questions answered by the clinic information below.
 Always use the tools: get_available_slots before offering any time, book_slot / reschedule / cancel to change anything, lookup_knowledge for facts. Never confirm anything a tool did not confirm. If a tool result says not done, say so.

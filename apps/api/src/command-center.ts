@@ -64,11 +64,12 @@ export async function commandCenter(tx: Tx, config: TenantConfig, now: Date) {
       id: string;
       lead_id: string;
       name: string | null;
+      phone: string;
       service: string;
       starts_at: Date;
       status: string;
     }>(sql`
-      select a.id, a.lead_id, l.name, a.service, a.starts_at, a.status
+      select a.id, a.lead_id, l.name, l.phone_e_164 as phone, a.service, a.starts_at, a.status
       from appointments a join leads l on l.id = a.lead_id
       where a.status in ('pending', 'scheduled') and a.starts_at >= ${now} and a.starts_at < ${soon}
       order by a.starts_at limit 20`),
@@ -79,10 +80,11 @@ export async function commandCenter(tx: Tx, config: TenantConfig, now: Date) {
       reason: string;
       lead_id: string | null;
       name: string | null;
+      phone: string | null;
       slot_starts_at: Date | null;
       value_inr: string | null;
     }>(sql`
-      select o.id, o.kind, o.status, o.reason, o.lead_id, l.name, o.slot_starts_at, o.value_inr
+      select o.id, o.kind, o.status, o.reason, o.lead_id, l.name, l.phone_e_164 as phone, o.slot_starts_at, o.value_inr
       from opportunities o left join leads l on l.id = o.lead_id
       where o.status in ('open', 'needs_approval', 'actioned')
         and o.kind in ('STALLED_TREATMENT', 'EMPTY_SLOT', 'PAYMENT_FOLLOWUP')

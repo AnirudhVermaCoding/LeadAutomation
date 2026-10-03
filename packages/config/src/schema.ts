@@ -227,6 +227,10 @@ export const JOURNEY_DEFAULTS: NonNullable<TenantConfig['journeys']> = {
 };
 export const journeysOf = (config: TenantConfig) => ({ ...JOURNEY_DEFAULTS, ...config.journeys });
 
+/** What the phone agent says first when the clinic has not written its own disclosure. */
+export const DEFAULT_CALL_DISCLOSURE =
+  'Hello, you have reached {{business_name}}. I am the virtual assistant and can help with appointments.';
+
 /** The phone agent's settings, or null when it is off (the product then behaves exactly as without it). */
 export const voiceOf = (config: TenantConfig) => (config.voice?.enabled ? config.voice : null);
 export type Language = z.infer<typeof Language>;
