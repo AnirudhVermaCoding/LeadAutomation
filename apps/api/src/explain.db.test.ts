@@ -101,7 +101,15 @@ beforeAll(async () => {
      from leads where tenant_id in ($1, $2)`,
     [A, B],
   );
+  await o(
+    `insert into plan_installments (tenant_id, plan_id, lead_id, seq, amount_inr, due_at, status)
+     select p.tenant_id, p.id, p.lead_id, g, 1000, now() + make_interval(days => g * 30 - 60),
+       case when g < 3 then 'paid' else 'pending' end
+     from treatment_plans p, generate_series(1, 4) g where p.tenant_id in ($1, $2)`,
+    [A, B],
+  );
   for (const table of [
+    'plan_installments',
     'treatment_plans',
     'opportunities',
     'calls',
@@ -214,5 +222,15 @@ test('recovery: open opportunities by priority; plans to check; the waitlist que
       [A],
     ),
     'waitlist_entries',
+  );
+});
+
+test('payment follow-ups: overdue instalments of a tenant', async () => {
+  noSeqScan(
+    await plan(
+      `select * from plan_installments where tenant_id = $1 and status = 'pending' and due_at <= now()`,
+      [A],
+    ),
+    'plan_installments',
   );
 });

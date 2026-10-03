@@ -4,7 +4,14 @@ import { z } from 'zod';
 import { audit } from '../audit.ts';
 import { withTenant } from '../db/client.ts';
 import { leads, TREATMENT_PLAN_STATUSES, treatmentPlans } from '../db/schema.ts';
-import { listPlans, timeline } from '../journey.ts';
+import {
+  listInstallments,
+  listPlans,
+  markInstallment,
+  ScheduleError,
+  setInstallments,
+  timeline,
+} from '../journey.ts';
 import { emit } from '../leads.ts';
 import type { AppContext } from '../system/context.ts';
 import { guard, type Principal } from './auth.ts';
@@ -59,7 +66,11 @@ export function registerJourneyRoutes(app: FastifyInstance, ctx: AppContext) {
     const out = await withTenant(ctx.db, tenantOf(req), async (tx) => {
       const [lead] = await tx.select({ id: leads.id }).from(leads).where(eq(leads.id, id));
       if (!lead) return null;
-      return { entries: await timeline(tx, id), plans: await listPlans(tx, id) };
+      return {
+        entries: await timeline(tx, id),
+        plans: await listPlans(tx, id),
+        installments: await listInstallments(tx, id),
+      };
     });
     return out ?? reply.code(404).send({ error: 'not_found' });
   });
@@ -127,5 +138,56 @@ export function registerJourneyRoutes(app: FastifyInstance, ctx: AppContext) {
       return row!;
     });
     return plan ?? reply.code(404).send({ error: 'not_found' });
+  });
+
+  // Payment schedule (braces, implants): replaces the pending instalments, keeps paid / waived ones.
+  app.post('/v1/treatment-plans/:id/installments', { preHandler: staff }, async (req, reply) => {
+    const id = idParam(req);
+    const b = z
+      .strictObject({
+        count: z.int().min(1).max(60),
+        first_due: z.iso.date(),
+        interval_days: z.int().min(7).max(365),
+        amount_inr: z.number().positive().max(100_000_000).optional(),
+      })
+      .parse(req.body);
+    try {
+      const rows = await withTenant(ctx.db, tenantOf(req), async (tx) => {
+        const r = await setInstallments(tx, ctx.clock, id, {
+          count: b.count,
+          firstDue: new Date(`${b.first_due}T09:00:00+05:30`),
+          intervalDays: b.interval_days,
+          amountInr: b.amount_inr,
+        });
+        if (r)
+          await audit(tx, ctx.clock, actor(req.principal), {
+            action: 'treatment_plan.installments_set',
+            entityType: 'treatment_plan',
+            entityId: id,
+            details: { count: b.count },
+          });
+        return r;
+      });
+      return rows ? reply.code(201).send(rows) : reply.code(404).send({ error: 'not_found' });
+    } catch (err) {
+      if (err instanceof ScheduleError) return reply.code(422).send({ error: 'invalid_schedule', message: err.message });
+      throw err;
+    }
+  });
+
+  app.patch('/v1/installments/:id', { preHandler: staff }, async (req, reply) => {
+    const id = idParam(req);
+    const { status } = z.strictObject({ status: z.enum(['paid', 'waived', 'pending']) }).parse(req.body);
+    const row = await withTenant(ctx.db, tenantOf(req), async (tx) => {
+      const r = await markInstallment(tx, ctx.clock, id, status);
+      if (r)
+        await audit(tx, ctx.clock, actor(req.principal), {
+          action: `installment.${status}`,
+          entityType: 'installment',
+          entityId: id,
+        });
+      return r;
+    });
+    return row ?? reply.code(404).send({ error: 'not_found' });
   });
 }

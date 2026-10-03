@@ -15,6 +15,7 @@ import {
   messages,
   oauthNonces,
   opportunities,
+  planInstallments,
   treatmentPlans,
   waitlistEntries,
 } from './db/schema.ts';
@@ -147,6 +148,7 @@ export async function exportTenantData(tx: Tx) {
     answers: await tx.select().from(answers),
     appointments: await tx.select().from(appointments),
     treatmentPlans: await tx.select().from(treatmentPlans),
+    installments: await tx.select().from(planInstallments),
     calls: await tx.select().from(calls),
     waitlist: await tx.select().from(waitlistEntries),
     opportunities: await tx.select().from(opportunities),

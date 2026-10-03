@@ -112,7 +112,7 @@ export async function commandCenter(tx: Tx, config: TenantConfig, now: Date) {
       (select count(*) from opportunities where kind in ('LOST_LEAD', 'RECALL_DUE') and status = 'won' and outcome_at >= ${monthAgo}) as reactivated,
       (select count(*) from events where type = 'lead.escalated' and occurred_at >= ${monthAgo}) as escalations,
       (select sum(value_inr) from opportunities where status = 'won' and value_source is not null and outcome_at >= ${monthAgo}
-        and (kind = 'STALLED_TREATMENT' or (kind = 'PAYMENT_FOLLOWUP' and outcome = 'balance paid'))) as known_value`)
+        and (kind = 'STALLED_TREATMENT' or (kind = 'PAYMENT_FOLLOWUP' and outcome in ('balance paid', 'instalment paid')))) as known_value`)
   ).rows[0]!;
 
   return {

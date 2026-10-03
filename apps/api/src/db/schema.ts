@@ -978,3 +978,34 @@ export const slotOffers = pgTable(
     tenantScoped(),
   ],
 );
+
+/**
+ * A treatment's payment schedule (braces, implants): what the clinic agreed with the patient, entered by
+ * staff. Paying one adds its amount to the plan's `paid_inr`; an overdue one becomes a payment follow-up.
+ */
+export const planInstallments = pgTable(
+  'plan_installments',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    planId: uuid()
+      .notNull()
+      .references(() => treatmentPlans.id, { onDelete: 'cascade' }),
+    leadId: uuid()
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    seq: integer().notNull(),
+    amountInr: numeric({ precision: 12, scale: 2, mode: 'number' }).notNull(),
+    dueAt: ts().notNull(),
+    status: text({ enum: ['pending', 'paid', 'waived'] })
+      .notNull()
+      .default('pending'),
+    paidAt: ts(),
+    ...timestamps,
+  },
+  (t) => [
+    unique().on(t.planId, t.seq),
+    index('plan_installments_tenant_status_due').on(t.tenantId, t.status, t.dueAt),
+    tenantScoped(),
+  ],
+);

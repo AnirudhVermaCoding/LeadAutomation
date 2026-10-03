@@ -134,6 +134,13 @@ function crossFieldIssues(c: TenantConfig): Issue[] {
   if (q.safety.emergency_keywords.length > 0 && !q.safety.emergency_response.trim())
     add(['qualification', 'safety', 'emergency_response'], 'required when emergency keywords are set');
 
+  const serviceNames = new Set(c.booking.services.map((s) => s.name));
+  (c.treatment_templates ?? []).forEach((tpl, i) => {
+    if (tpl.service && !serviceNames.has(tpl.service))
+      add(['treatment_templates', i, 'service'], `"${tpl.service}" is not one of your booking services`);
+  });
+  for (const dup of duplicates((c.treatment_templates ?? []).map((t) => t.name)))
+    add(['treatment_templates'], `template "${dup}" is listed more than once`);
   for (const dup of duplicates(c.booking.services.map((s) => s.name)))
     add(['booking', 'services'], `service "${dup}" is listed more than once`);
 

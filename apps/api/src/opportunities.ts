@@ -17,7 +17,7 @@ import {
   zonedTimeToUtc,
   type Clock,
 } from '@instantlead/core';
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type TenantTx, type Tx } from './db/client.ts';
 import {
@@ -27,6 +27,7 @@ import {
   events,
   leads,
   opportunities,
+  planInstallments,
   treatmentPlans,
   type OpportunityKind,
 } from './db/schema.ts';
@@ -160,6 +161,10 @@ export async function detectOpportunities(tx: Tx, clock: Clock, config: TenantCo
     .select()
     .from(treatmentPlans)
     .where(inArray(treatmentPlans.status, ['accepted', 'in_progress', 'completed']));
+  // Plans with a payment schedule are followed up per overdue instalment (below), not on the whole balance.
+  const scheduled = new Set(
+    (await tx.selectDistinct({ planId: planInstallments.planId }).from(planInstallments)).map((r) => r.planId),
+  );
   for (const p of plans) {
     const booked = has(p.leadId, p.attendeeName);
     const who = p.attendeeName ? ` for ${p.attendeeName}` : '';
@@ -191,6 +196,7 @@ export async function detectOpportunities(tx: Tx, clock: Clock, config: TenantCo
         recommendedAction: 'Send the recall reminder (recall_due)',
       });
     if (
+      !scheduled.has(p.id) &&
       p.valueInr !== null &&
       p.paidInr !== null &&
       p.valueInr > p.paidInr &&
@@ -210,6 +216,28 @@ export async function detectOpportunities(tx: Tx, clock: Clock, config: TenantCo
         valueSource: 'treatment_plan',
       });
     }
+  }
+
+  // Overdue instalments: one follow-up each, for exactly that amount.
+  const overdue = await tx
+    .select({ inst: planInstallments, title: treatmentPlans.title, status: treatmentPlans.status })
+    .from(planInstallments)
+    .innerJoin(treatmentPlans, eq(treatmentPlans.id, planInstallments.planId))
+    .where(and(eq(planInstallments.status, 'pending'), lte(planInstallments.dueAt, now)));
+  for (const { inst, title, status } of overdue) {
+    if (status === 'declined') continue;
+    await add({
+      kind: 'PAYMENT_FOLLOWUP',
+      leadId: inst.leadId,
+      treatmentPlanId: inst.planId,
+      subjectKey: `inst:${inst.id}`,
+      reason: `Instalment ${inst.seq} (₹${inr(inst.amountInr)}) for "${title}" was due ${inst.dueAt.toISOString().slice(0, 10)}`,
+      recommendedAction: j.payment_url
+        ? 'Send a payment reminder with the clinic payment link'
+        : 'Call about the instalment (add a payment link in Settings to let the assistant remind)',
+      valueInr: inst.amountInr,
+      valueSource: 'treatment_plan',
+    });
   }
 
   // Dormant patients without a plan: last completed visit older than the recall interval, nothing since.
@@ -251,7 +279,14 @@ export async function resolveOutcomes(tx: Tx, clock: Clock) {
   let won = 0;
   for (const { o, plan, leadState } of open) {
     let outcome: { status: 'won' | 'lost'; text: string } | null = null;
-    if (o.kind === 'PAYMENT_FOLLOWUP') {
+    if (o.kind === 'PAYMENT_FOLLOWUP' && o.subjectKey.startsWith('inst:')) {
+      const [inst] = await tx
+        .select({ status: planInstallments.status })
+        .from(planInstallments)
+        .where(eq(planInstallments.id, o.subjectKey.slice(5)));
+      if (inst?.status === 'paid') outcome = { status: 'won', text: 'instalment paid' };
+      else if (!inst || inst.status === 'waived') outcome = { status: 'lost', text: 'instalment waived or removed' };
+    } else if (o.kind === 'PAYMENT_FOLLOWUP') {
       if (plan && plan.valueInr !== null && (plan.paidInr ?? 0) >= plan.valueInr)
         outcome = { status: 'won', text: 'balance paid' };
       else if (plan && plan.paidInr !== null && `pay:${plan.id}:${plan.paidInr}` !== o.subjectKey)

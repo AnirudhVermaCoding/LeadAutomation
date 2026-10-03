@@ -188,6 +188,23 @@ export const TenantConfigSchema = z.strictObject({
       monthly_minutes_cap: z.int().min(0).max(100_000),
     })
     .optional(),
+  /** One-click starting points for treatment plans (staff can change every field). Optional. */
+  treatment_templates: z
+    .array(
+      z.strictObject({
+        name: nonEmpty.max(80),
+        service: nonEmpty.optional(),
+        visits_planned: z.int().min(1).max(50).optional(),
+        visit_interval_days: z.int().min(1).max(365).optional(),
+        /** The clinic's usual price; optional, never guessed. */
+        value_inr: z.number().min(0).max(100_000_000).optional(),
+        installments: z
+          .strictObject({ count: z.int().min(2).max(60), interval_days: z.int().min(7).max(365) })
+          .optional(),
+      }),
+    )
+    .max(30)
+    .optional(),
   reports: z.strictObject({
     weekly_day: Weekday,
     send_to: z.array(z.email('must be an email address')),

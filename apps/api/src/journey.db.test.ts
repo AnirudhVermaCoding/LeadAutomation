@@ -189,3 +189,83 @@ describe('treatment plans', () => {
     expect(seen).toEqual({ plans: [], appts: [] });
   });
 });
+
+describe('payment schedules', () => {
+  type Inst = { id: string; seq: number; amountInr: number; status: string; dueAt: string };
+  const schedule = (leadId: string) =>
+    timelineOf(leadId).then((r) => (r as unknown as { installments: Inst[] }).installments);
+
+  test('a braces plan split into instalments: amounts add up to what is owed; paying moves the plan total; rescheduling keeps paid ones', async () => {
+    const leadId = await newLead('Isha');
+    const plan = (
+      await api(cookieA, 'POST', `/v1/leads/${leadId}/treatment-plans`, {
+        title: 'Braces (metal)',
+        service: 'Braces adjustment',
+        status: 'in_progress',
+        visits_planned: 18,
+        visit_interval_days: 30,
+        value_inr: 45000,
+        paid_inr: 10000,
+      })
+    ).json() as { id: string };
+    const res = await api(cookieA, 'POST', `/v1/treatment-plans/${plan.id}/installments`, {
+      count: 6,
+      first_due: '2026-11-01',
+      interval_days: 30,
+    });
+    expect(res.statusCode).toBe(201);
+    let rows = await schedule(leadId);
+    expect(rows.map((r) => r.amountInr)).toEqual([5833, 5833, 5833, 5833, 5833, 5835]);
+    expect(rows.reduce((s, r) => s + r.amountInr, 0)).toBe(35000);
+
+    expect((await api(cookieA, 'PATCH', `/v1/installments/${rows[0]!.id}`, { status: 'paid' })).statusCode).toBe(200);
+    expect((await timelineOf(leadId)).plans[0]!.paidInr).toBe(15833);
+    // Undo, then pay again: the total follows.
+    await api(cookieA, 'PATCH', `/v1/installments/${rows[0]!.id}`, { status: 'pending' });
+    expect((await timelineOf(leadId)).plans[0]!.paidInr).toBe(10000);
+    await api(cookieA, 'PATCH', `/v1/installments/${rows[0]!.id}`, { status: 'paid' });
+
+    // Re-plan the rest as 2 bigger instalments: the paid one stays, numbering continues.
+    await api(cookieA, 'POST', `/v1/treatment-plans/${plan.id}/installments`, {
+      count: 2,
+      first_due: '2026-12-01',
+      interval_days: 30,
+    });
+    rows = await schedule(leadId);
+    expect(rows.map((r) => [r.seq, r.status, r.amountInr])).toEqual([
+      [1, 'paid', 5833],
+      [2, 'pending', 14583],
+      [3, 'pending', 14584],
+    ]);
+    const titles = (await timelineOf(leadId)).entries.map((e) => e.title);
+    expect(titles).toContain('Payment schedule set');
+    expect(titles).toContain('Payment recorded');
+  });
+
+  test('no total and no amount: refused with a clear message; clinic B cannot touch A instalments', async () => {
+    const leadId = await newLead('Nina');
+    const plan = (
+      await api(cookieA, 'POST', `/v1/leads/${leadId}/treatment-plans`, { title: 'Implant', status: 'accepted' })
+    ).json() as { id: string };
+    const bad = await api(cookieA, 'POST', `/v1/treatment-plans/${plan.id}/installments`, {
+      count: 3,
+      first_due: '2026-11-01',
+      interval_days: 30,
+    });
+    expect(bad.statusCode).toBe(422);
+    expect(bad.json()).toMatchObject({ message: expect.stringMatching(/treatment total/) });
+    await api(cookieA, 'POST', `/v1/treatment-plans/${plan.id}/installments`, {
+      count: 3,
+      first_due: '2026-11-01',
+      interval_days: 30,
+      amount_inr: 20000,
+    });
+    const [first] = await schedule(leadId);
+    expect((await api(cookieB, 'PATCH', `/v1/installments/${first!.id}`, { status: 'paid' })).statusCode).toBe(404);
+    expect(
+      (await api(cookieB, 'POST', `/v1/treatment-plans/${plan.id}/installments`, { count: 1, first_due: '2026-11-01', interval_days: 30, amount_inr: 1 }))
+        .statusCode,
+    ).toBe(404);
+    expect((await schedule(leadId))[0]!.status).toBe('pending');
+  });
+});

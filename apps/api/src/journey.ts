@@ -1,8 +1,8 @@
 import { journeysOf, type TenantConfig } from '@instantlead/config';
 import { DAY, type Clock } from '@instantlead/core';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Tx } from './db/client.ts';
-import { appointments, calls, events, messages, treatmentPlans } from './db/schema.ts';
+import { appointments, calls, events, messages, planInstallments, treatmentPlans } from './db/schema.ts';
 import { emit } from './leads.ts';
 
 /** What one timeline entry is about (the dashboard groups and colours by it). */
@@ -65,6 +65,8 @@ const EVENT_STAGES: Record<string, [JourneyStage, string]> = {
   'slot.offered': ['booking', 'Offered an earlier slot'],
   'slot.recovered': ['booking', 'Took a freed slot'],
   'payment.recorded': ['payment', 'Payment recorded'],
+  'installment.scheduled': ['payment', 'Payment schedule set'],
+  'installment.updated': ['payment', 'Instalment updated'],
 };
 
 const RECALL_KINDS = new Set(['RECALL_DUE']);
@@ -232,4 +234,98 @@ export async function lastAppointmentOrPlan(tx: Tx, leadId: string) {
     .limit(1);
   if (plan?.service) return { service: plan.service, startsAt: last?.startsAt ?? null };
   return last ?? null;
+}
+
+export class ScheduleError extends Error {}
+
+export const listInstallments = (tx: Tx, leadId: string) =>
+  tx
+    .select()
+    .from(planInstallments)
+    .where(eq(planInstallments.leadId, leadId))
+    .orderBy(asc(planInstallments.planId), asc(planInstallments.seq));
+
+/**
+ * (Re)create a plan's payment schedule. Paid and waived instalments are history and stay; only pending
+ * ones are replaced. Default amount = what is still owed, split evenly in whole rupees, the last one
+ * taking the remainder. Amounts come only from the clinic (the plan's value, or the amount staff typed).
+ */
+export async function setInstallments(
+  tx: Tx,
+  clock: Clock,
+  planId: string,
+  input: { count: number; firstDue: Date; intervalDays: number; amountInr?: number | undefined },
+) {
+  const [plan] = await tx.select().from(treatmentPlans).where(eq(treatmentPlans.id, planId)).for('update');
+  if (!plan) return null;
+  const kept = await tx
+    .select()
+    .from(planInstallments)
+    .where(and(eq(planInstallments.planId, planId), inArray(planInstallments.status, ['paid', 'waived'])));
+  let amounts: number[];
+  if (input.amountInr !== undefined) amounts = Array.from({ length: input.count }, () => input.amountInr!);
+  else {
+    if (plan.valueInr === null)
+      throw new ScheduleError('Enter the treatment total on the plan, or an amount per instalment');
+    const owed = plan.valueInr - (plan.paidInr ?? 0);
+    if (owed <= 0) throw new ScheduleError('Nothing is owed on this plan');
+    const each = Math.floor(owed / input.count);
+    amounts = Array.from({ length: input.count }, (_, i) =>
+      i === input.count - 1 ? Math.round((owed - each * (input.count - 1)) * 100) / 100 : each,
+    );
+  }
+  await tx
+    .delete(planInstallments)
+    .where(and(eq(planInstallments.planId, planId), eq(planInstallments.status, 'pending')));
+  const start = Math.max(0, ...kept.map((k) => k.seq));
+  const rows = await tx
+    .insert(planInstallments)
+    .values(
+      amounts.map((amountInr, i) => ({
+        planId,
+        leadId: plan.leadId,
+        seq: start + i + 1,
+        amountInr,
+        dueAt: new Date(input.firstDue.getTime() + i * input.intervalDays * DAY),
+      })),
+    )
+    .returning();
+  await emit(tx, clock, 'installment.scheduled', {
+    leadId: plan.leadId,
+    planId,
+    count: input.count,
+    by: 'staff',
+  });
+  return rows;
+}
+
+/** Staff record a payment (or waive / undo). The plan's paid total moves with it, in the same transaction. */
+export async function markInstallment(
+  tx: Tx,
+  clock: Clock,
+  id: string,
+  status: 'paid' | 'waived' | 'pending',
+) {
+  const [inst] = await tx.select().from(planInstallments).where(eq(planInstallments.id, id)).for('update');
+  if (!inst) return null;
+  if (inst.status === status) return inst;
+  const delta = (status === 'paid' ? inst.amountInr : 0) - (inst.status === 'paid' ? inst.amountInr : 0);
+  const [row] = await tx
+    .update(planInstallments)
+    .set({ status, paidAt: status === 'paid' ? clock.now() : null })
+    .where(eq(planInstallments.id, id))
+    .returning();
+  if (delta !== 0)
+    await tx
+      .update(treatmentPlans)
+      .set({ paidInr: sql`greatest(0, coalesce(${treatmentPlans.paidInr}, 0) + ${delta})` })
+      .where(eq(treatmentPlans.id, inst.planId));
+  await emit(tx, clock, status === 'paid' ? 'payment.recorded' : 'installment.updated', {
+    leadId: inst.leadId,
+    planId: inst.planId,
+    installmentId: id,
+    reason: `instalment ${inst.seq}: ${status}`,
+    by: 'staff',
+  });
+  return row!;
 }

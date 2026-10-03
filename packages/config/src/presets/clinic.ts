@@ -11,6 +11,27 @@ type VariantParts = Pick<TenantConfig['booking'], 'services'> & {
 
 const SAMPLE = 'SAMPLE — replace during onboarding.';
 
+/** Starting points for staff (Settings → Treatment templates). No prices: each clinic enters its own. */
+const DENTAL_TEMPLATES: NonNullable<TenantConfig['treatment_templates']> = [
+  { name: 'Root canal treatment (RCT)', service: 'Treatment visit', visits_planned: 3, visit_interval_days: 7 },
+  {
+    name: 'Braces (metal)',
+    service: 'Braces adjustment',
+    visits_planned: 18,
+    visit_interval_days: 30,
+    installments: { count: 18, interval_days: 30 },
+  },
+  {
+    name: 'Clear aligners',
+    service: 'Braces adjustment',
+    visits_planned: 12,
+    visit_interval_days: 30,
+    installments: { count: 6, interval_days: 30 },
+  },
+  { name: 'Dental implant', service: 'Treatment visit', visits_planned: 3, visit_interval_days: 60 },
+  { name: 'Scaling & polishing', service: 'Cleaning & polishing', visits_planned: 1 },
+];
+
 const VARIANTS: Record<ClinicVariant, VariantParts> = {
   dental: {
     treatments: ['checkup_cleaning', 'tooth_pain', 'root_canal', 'whitening', 'braces_aligners', 'implants'],
@@ -50,6 +71,17 @@ const VARIANTS: Record<ClinicVariant, VariantParts> = {
         name: 'Braces / aligners consultation',
         duration_minutes: 30,
         suitable_for: ['crooked or gapped teeth', 'overbite or underbite', 'braces or clear aligners'],
+      },
+      {
+        // Follow-up visits of a treatment the dentist already planned (RCT sittings, implant stages).
+        name: 'Treatment visit',
+        duration_minutes: 45,
+        suitable_for: ['next sitting of a treatment the dentist already started'],
+      },
+      {
+        name: 'Braces adjustment',
+        duration_minutes: 20,
+        suitable_for: ['already wearing braces: monthly adjustment or wire change'],
       },
     ],
     knowledge: [
@@ -273,6 +305,7 @@ export function clinicPreset(variant: ClinicVariant, businessName = 'Demo Clinic
       },
     },
     privacy: { retention_days: 365, mode: 'anonymize' },
+    ...(variant === 'dental' && { treatment_templates: structuredClone(DENTAL_TEMPLATES) }),
     reports: {
       weekly_day: 'mon',
       send_to: ['owner@example.com'],

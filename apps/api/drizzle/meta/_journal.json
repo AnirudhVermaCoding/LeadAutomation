@@ -127,6 +127,13 @@
       "when": 1791003646862,
       "tag": "0017_ops_employee",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791034362888,
+      "tag": "0018_plan_installments",
+      "breakpoints": true
     }
   ]
 }

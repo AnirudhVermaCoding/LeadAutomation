@@ -90,3 +90,16 @@ describe('AI providers', () => {
     ]);
   });
 });
+
+describe('treatment templates', () => {
+  test('the dental preset ships templates without prices; a template must use a real booking service', () => {
+    expect(clinic().treatment_templates?.map((t) => t.name)).toContain('Braces (metal)');
+    expect(clinic().treatment_templates?.every((t) => t.value_inr === undefined)).toBe(true);
+    expect(
+      errorsFor((c) => c.treatment_templates!.push({ name: 'Veneers', service: 'Veneer fitting' })),
+    ).toEqual(['treatment_templates[5].service: "Veneer fitting" is not one of your booking services']);
+    expect(errorsFor((c) => c.treatment_templates!.push({ name: 'Braces (metal)' }))).toEqual([
+      'treatment_templates: template "Braces (metal)" is listed more than once',
+    ]);
+  });
+});
