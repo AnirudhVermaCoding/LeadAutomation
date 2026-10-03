@@ -1,9 +1,11 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../audit.ts';
 import { withTenant } from '../db/client.ts';
-import { leads, OPPORTUNITY_KINDS, OPPORTUNITY_STATUSES, opportunities } from '../db/schema.ts';
+import { BookingError } from '../booking.ts';
+import { leads, OPPORTUNITY_KINDS, OPPORTUNITY_STATUSES, opportunities, waitlistEntries } from '../db/schema.ts';
+import { joinWaitlist } from '../waitlist.ts';
 import { QUEUES } from '../jobs.ts';
 import { emit } from '../leads.ts';
 import type { AppContext } from '../system/context.ts';
@@ -77,7 +79,12 @@ export function registerRecoveryRoutes(app: FastifyInstance, ctx: AppContext) {
       if (!o) return 'missing' as const;
       if (!['open', 'needs_approval'].includes(o.status) || !o.leadId) return 'not_actionable' as const;
       if (o.kind === 'EMPTY_SLOT')
-        await ctx.enqueue(tx, QUEUES.slotRecovery, { tenantId, opportunityId: id }, { singletonKey: id });
+        await ctx.enqueue(
+          tx,
+          QUEUES.slotRecovery,
+          { tenantId, opportunityId: id, approved: true },
+          { singletonKey: `${id}:approved` },
+        );
       else
         await ctx.enqueue(
           tx,
@@ -95,6 +102,84 @@ export function registerRecoveryRoutes(app: FastifyInstance, ctx: AppContext) {
     if (done === 'missing') return reply.code(404).send({ error: 'not_found' });
     if (done === 'not_actionable') return reply.code(409).send({ error: 'not_actionable' });
     return { queued: true };
+  });
+
+  // ---- Waitlist (staff view; patients join through the assistant) ----
+
+  app.get('/v1/waitlist', { preHandler: staff }, (req) =>
+    withTenant(ctx.db, tenantOf(req), (tx) =>
+      tx
+        .select({
+          id: waitlistEntries.id,
+          leadId: waitlistEntries.leadId,
+          leadName: leads.name,
+          leadPhone: leads.phoneE164,
+          service: waitlistEntries.service,
+          resource: waitlistEntries.resource,
+          attendeeName: waitlistEntries.attendeeName,
+          fromDate: waitlistEntries.fromDate,
+          toDate: waitlistEntries.toDate,
+          partOfDay: waitlistEntries.partOfDay,
+          wantsEarlier: sql<boolean>`${waitlistEntries.appointmentId} is not null`,
+          source: waitlistEntries.source,
+          joinedAt: waitlistEntries.joinedAt,
+        })
+        .from(waitlistEntries)
+        .innerJoin(leads, eq(leads.id, waitlistEntries.leadId))
+        .where(eq(waitlistEntries.status, 'waiting'))
+        .orderBy(asc(waitlistEntries.joinedAt)),
+    ),
+  );
+
+  app.post('/v1/waitlist', { preHandler: staff }, async (req, reply) => {
+    const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
+    const b = z
+      .strictObject({
+        lead_id: z.uuid(),
+        service: z.string().min(1).max(80),
+        from_date: date.optional(),
+        to_date: date.optional(),
+        part_of_day: z.enum(['morning', 'afternoon', 'evening']).optional(),
+        for_name: z.string().trim().min(1).max(60).optional(),
+        resource: z.string().trim().min(1).max(60).optional(),
+      })
+      .parse(req.body);
+    try {
+      const r = await joinWaitlist(ctx, tenantOf(req), {
+        leadId: b.lead_id,
+        service: b.service,
+        fromDate: b.from_date,
+        toDate: b.to_date,
+        partOfDay: b.part_of_day,
+        forName: b.for_name,
+        resource: b.resource,
+        source: 'staff',
+      });
+      return reply.code(201).send(r);
+    } catch (err) {
+      if (err instanceof BookingError)
+        return reply.code(err.code === 'no_appointment' ? 404 : 422).send({ error: err.code, message: err.message });
+      throw err;
+    }
+  });
+
+  app.delete('/v1/waitlist/:id', { preHandler: staff }, async (req, reply) => {
+    const id = idParam(req);
+    const rows = await withTenant(ctx.db, tenantOf(req), async (tx) => {
+      const r = await tx
+        .update(waitlistEntries)
+        .set({ status: 'removed' })
+        .where(and(eq(waitlistEntries.id, id), eq(waitlistEntries.status, 'waiting')))
+        .returning({ id: waitlistEntries.id });
+      if (r.length)
+        await audit(tx, ctx.clock, actor(req.principal), {
+          action: 'waitlist.removed',
+          entityType: 'waitlist_entry',
+          entityId: id,
+        });
+      return r;
+    });
+    return rows.length ? { removed: true } : reply.code(404).send({ error: 'not_found' });
   });
 
   // Staff close it themselves: they called and booked (won), it went nowhere (lost), or it was not worth doing (dismissed).

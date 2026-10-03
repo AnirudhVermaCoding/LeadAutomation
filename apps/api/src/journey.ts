@@ -1,8 +1,8 @@
 import { journeysOf, type TenantConfig } from '@instantlead/config';
 import { DAY, type Clock } from '@instantlead/core';
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Tx } from './db/client.ts';
-import { calls, events, messages, treatmentPlans } from './db/schema.ts';
+import { appointments, calls, events, messages, treatmentPlans } from './db/schema.ts';
 import { emit } from './leads.ts';
 
 /** What one timeline entry is about (the dashboard groups and colours by it). */
@@ -194,4 +194,22 @@ export async function advancePlan(tx: Tx, clock: Clock, config: TenantConfig, pl
     planId,
     visitsDone: done,
   });
+}
+
+/** What to offer when a follow-up's "Book a time" is tapped: the open treatment's service, else their last visit's. */
+export async function lastAppointmentOrPlan(tx: Tx, leadId: string) {
+  const [plan] = await tx
+    .select({ service: treatmentPlans.service })
+    .from(treatmentPlans)
+    .where(and(eq(treatmentPlans.leadId, leadId), inArray(treatmentPlans.status, ['accepted', 'in_progress'])))
+    .orderBy(desc(treatmentPlans.updatedAt))
+    .limit(1);
+  const [last] = await tx
+    .select({ service: appointments.service, startsAt: appointments.startsAt })
+    .from(appointments)
+    .where(eq(appointments.leadId, leadId))
+    .orderBy(desc(appointments.startsAt))
+    .limit(1);
+  if (plan?.service) return { service: plan.service, startsAt: last?.startsAt ?? null };
+  return last ?? null;
 }

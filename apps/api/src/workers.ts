@@ -13,6 +13,7 @@ import { runCalendarSync, sweepCalendars } from './calendar-sync.ts';
 import { runStaffDigest } from './staff-digest.ts';
 import { enrollFollowups, runStep, sweepDueSteps } from './sequences.ts';
 import { actOnOpportunity, sweepOpportunities } from './opportunities.ts';
+import { runSlotRecovery } from './waitlist.ts';
 import { ChannelError, fetchMetaLead } from '@instantlead/integrations';
 import type { FastifyBaseLogger } from 'fastify';
 import { getActiveConfig } from './config-store.ts';
@@ -175,6 +176,7 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   await ctx.boss.schedule(QUEUES.templateSyncCron, '20 4 * * *'); // daily, quiet time
   await workBatched(ctx, log, QUEUES.leadNotice, (d) => sendLeadNotice(ctx, d));
   await workBatched(ctx, log, QUEUES.opportunityAct, (d) => actOnOpportunity(ctx, d));
+  await workBatched(ctx, log, QUEUES.slotRecovery, (d) => runSlotRecovery(ctx, d));
   await ctx.boss.work(QUEUES.opportunitySweep, async () => {
     await runJob(log, QUEUES.opportunitySweep, () => sweepOpportunities(ctx));
   });

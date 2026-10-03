@@ -27,6 +27,7 @@ import {
   type AppointmentStatus,
 } from './db/schema.ts';
 import { advancePlan } from './journey.ts';
+import { recordEmptySlot } from './waitlist.ts';
 import { QUEUES } from './jobs.ts';
 import { emit, transitionLeadIfAllowed, type LeadDeps } from './leads.ts';
 import {
@@ -323,6 +324,8 @@ async function change(
       if (kind === 'completed') await enrollAfterVisit(tx, deps.clock, config, appt, 'review_request');
       if (kind === 'completed' && appt.treatmentPlanId)
         await advancePlan(tx, deps.clock, config, appt.treatmentPlanId, leadId);
+      // A cancelled booking frees its time for the waitlist (not "displaced": the clinic itself is unavailable then).
+      if (kind === 'cancelled') await recordEmptySlot(tx, deps, tenantId, appt);
       if (kind === 'no_show') await enrollAfterVisit(tx, deps.clock, config, appt, 'no_show_recovery');
     }
   }
@@ -455,6 +458,7 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
         'rescheduled',
         input.replaceAppointmentId,
       );
+      if (replaced) await recordEmptySlot(tx, deps, tenantId, replaced);
       // The old slot's calendar event must go too (the new appointment gets its own event).
       await deps.enqueue(tx, QUEUES.appointmentNotify, {
         tenantId,

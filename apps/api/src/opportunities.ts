@@ -302,6 +302,19 @@ export async function scheduleActions(tx: TenantTx, deps: { clock: Clock; enqueu
     .orderBy(desc(opportunities.priority), asc(opportunities.detectedAt))
     .limit(200);
   let queued = 0;
+  // Freed slots still in play: offer again (new waitlist joins, offers deferred by quiet hours, expired offers).
+  const slots = await tx
+    .select({ id: opportunities.id })
+    .from(opportunities)
+    .where(
+      and(
+        eq(opportunities.kind, 'EMPTY_SLOT'),
+        inArray(opportunities.status, ['open', 'actioned']),
+        gte(opportunities.slotStartsAt, now),
+      ),
+    );
+  for (const s of slots)
+    await deps.enqueue(tx, QUEUES.slotRecovery, { tenantId, opportunityId: s.id }, { singletonKey: `${s.id}:sweep` });
   for (const o of open) {
     const action = ACTIONS[o.kind];
     if (!action) continue;

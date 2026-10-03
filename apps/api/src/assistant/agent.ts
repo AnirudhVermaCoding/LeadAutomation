@@ -62,6 +62,8 @@ import {
   updateAppointment,
 } from '../booking.ts';
 import { alertStaff, escalate, loadAnswers, runTool } from './tools.ts';
+import { answerSlotOffer } from '../waitlist.ts';
+import { lastAppointmentOrPlan } from '../journey.ts';
 
 export interface AssistantDeps extends MessagingDeps {
   router: LlmRouter;
@@ -246,14 +248,37 @@ export async function runAssistantTurn(
       await reply('Sure — someone from our team will call you shortly.', 'button');
       return { status: 'escalated', reason: 'call requested' };
     }
+    if (button.key === 'slot_offer' && button.appointmentId) {
+      // Waitlist offer: the payload names the offer. Booking and the "first to accept" race are settled in code.
+      const r = await answerSlotOffer(deps, tenantId, {
+        offerId: button.appointmentId,
+        leadId,
+        accept: button.buttonId === 'accept',
+      });
+      const text =
+        r.status === 'booked'
+          ? `Done! You're booked for ${r.label}. A confirmation is on its way.`
+          : r.status === 'declined'
+            ? "No problem, we'll keep you on the waitlist."
+            : r.status === 'taken'
+              ? "Sorry, someone else just took that time. You're still on the waitlist and we'll message you if another opens up."
+              : 'Sorry, that offer has expired. Reply here if you would like other times.';
+      await reply(text, 'button');
+      return { status: 'replied', reason: `slot offer: ${r.status}` };
+    }
+    const bookButton =
+      button.buttonId === 'book' && ['treatment_followup', 'recall_due', 'lead_reactivation'].includes(button.key);
     if (
       (button.key === 'appointment_change' && button.buttonId === 'times') ||
-      (button.key === 'cancellation' && button.buttonId === 'rebook')
+      (button.key === 'cancellation' && button.buttonId === 'rebook') ||
+      bookButton
     ) {
-      // Rebooking after a cancellation: same service, similar time of day if possible.
-      const old = await withTenant(deps.db, tenantId, (tx) => lastCancelledAppointment(tx, leadId));
+      // Rebooking after a cancellation (or a follow-up's "Book a time"): same service, similar time of day if possible.
+      const old = await withTenant(deps.db, tenantId, (tx) =>
+        bookButton ? lastAppointmentOrPlan(tx, leadId) : lastCancelledAppointment(tx, leadId),
+      );
       const service = old?.service ?? config.booking.services[0]?.name ?? '';
-      const hour = old ? Number(localParts(old.startsAt, config.locale.timezone).time.slice(0, 2)) : 12;
+      const hour = old?.startsAt ? Number(localParts(old.startsAt, config.locale.timezone).time.slice(0, 2)) : 12;
       const prefer = hour < 12 ? 'morning' : hour < 16 ? 'afternoon' : 'evening';
       const { slots } = await findSlots(deps, tenantId, { service, prefer });
       if (!slots.length) {

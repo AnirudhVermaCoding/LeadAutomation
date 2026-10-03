@@ -62,7 +62,7 @@ export interface JobData {
   /** Send the one message a recovery opportunity calls for. `approvedBy` = a staff user approved it. */
   [QUEUES.opportunityAct]: { tenantId: string; opportunityId: string; approvedBy?: string };
   /** Offer a freed slot to the next people on the waitlist (re-queued after each offer window). */
-  [QUEUES.slotRecovery]: { tenantId: string; opportunityId: string };
+  [QUEUES.slotRecovery]: { tenantId: string; opportunityId: string; approved?: boolean };
 }
 export type QueueName = keyof JobData;
 

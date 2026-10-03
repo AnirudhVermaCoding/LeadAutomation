@@ -17,6 +17,7 @@ import { runStep, sweepDueSteps } from '../src/sequences.ts';
 import { importMetaLead, sendFirstReply } from '../src/workers.ts';
 import { deliverWebhook } from '../src/webhooks-out.ts';
 import { actOnOpportunity } from '../src/opportunities.ts';
+import { runSlotRecovery } from '../src/waitlist.ts';
 import type { CalendarProvider } from '@instantlead/integrations';
 import type { Tx } from '../src/db/client.ts';
 import type { LlmProvider } from '@instantlead/integrations';
@@ -111,6 +112,7 @@ export async function createTestContext(
         [QUEUES.calendarSync]: (d: JobData['calendar-sync']) => runCalendarSync(ctx, d),
         [QUEUES.calendarRemove]: (d: JobData['calendar-remove']) => removeCalendarEvents(ctx, d),
         [QUEUES.opportunityAct]: (d: JobData['opportunity-act']) => actOnOpportunity(ctx, d),
+        [QUEUES.slotRecovery]: (d: JobData['slot-recovery']) => runSlotRecovery(ctx, d),
       } as Record<string, (d: never) => Promise<unknown>>;
       for (const [queue, handler] of Object.entries(handlers)) {
         for (;;) {
