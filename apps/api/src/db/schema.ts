@@ -821,7 +821,7 @@ export const calls = pgTable(
     id: uuid().primaryKey().defaultRandom(),
     tenantId: tenantId(),
     leadId: uuid().references(() => leads.id, { onDelete: 'cascade' }),
-    provider: text({ enum: ['vapi', 'fake'] }).notNull(),
+    provider: text({ enum: ['vapi'] }).notNull(),
     /** The vendor's call id: webhooks are retried, so every event upserts on it. */
     providerCallId: text().notNull(),
     direction: text({ enum: ['in', 'out'] })

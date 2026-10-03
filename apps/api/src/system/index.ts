@@ -126,7 +126,7 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
 
     /** Webhook / hosted-form routing: which tenant owns this WhatsApp number, Facebook page or form? */
     async findTenantIdBy(
-      field: 'waPhoneNumberId' | 'metaPageId' | 'formKey' | 'wabaId' | 'emailInKey',
+      field: 'waPhoneNumberId' | 'metaPageId' | 'formKey' | 'wabaId' | 'emailInKey' | 'voiceInKey',
       value: string,
     ) {
       const [row] = await systemDb.select({ id: tenants.id }).from(tenants).where(eq(tenants[field], value));
@@ -139,6 +139,7 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
           waPhoneNumberId: tenants.waPhoneNumberId,
           wabaId: tenants.wabaId,
           emailInKey: tenants.emailInKey,
+          voiceInKey: tenants.voiceInKey,
           metaPageId: tenants.metaPageId,
           formKey: tenants.formKey,
         })
@@ -154,6 +155,7 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
         wabaId?: string | null;
         metaPageId?: string;
         emailInKey?: string | null;
+        voiceInKey?: string | null;
       },
     ) {
       await systemDb.update(tenants).set(routing).where(eq(tenants.id, tenantId));

@@ -17,3 +17,4 @@ export * from './calendar.ts';
 export * from './fake-google.ts';
 export * from './email.ts';
 export * from './lead-email.ts';
+export * from './voice.ts';

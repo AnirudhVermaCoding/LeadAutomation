@@ -11,6 +11,7 @@ import { registerGoogleRoutes } from './google.ts';
 import { registerIntakeRoutes } from './intake.ts';
 import { registerJourneyRoutes } from './journey.ts';
 import { registerRecoveryRoutes } from './recovery.ts';
+import { registerVoiceRoutes } from './voice.ts';
 import { registerPrivacyRoutes } from './privacy.ts';
 import { registerRoutes } from './routes.ts';
 import { registerWebhookRoutes } from './webhooks.ts';
@@ -28,6 +29,7 @@ export async function registerHttp(app: FastifyInstance, ctx: AppContext) {
     timeWindow: '1 minute',
     allowList: (req) =>
       req.url.startsWith('/webhooks/meta') ||
+      req.url.startsWith('/webhooks/voice/') ||
       req.url === '/healthz' ||
       req.url === '/readyz' ||
       (!production && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.ip)),
@@ -59,6 +61,7 @@ export async function registerHttp(app: FastifyInstance, ctx: AppContext) {
   registerDashboardRoutes(app, ctx);
   registerJourneyRoutes(app, ctx);
   registerRecoveryRoutes(app, ctx);
+  registerVoiceRoutes(app, ctx);
   registerPrivacyRoutes(app, ctx);
   await serveDashboard(app);
 }

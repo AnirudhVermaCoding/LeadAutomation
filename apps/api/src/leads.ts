@@ -196,7 +196,8 @@ export async function intakeLead(tx: TenantTx, deps: LeadDeps, tenantId: string,
 
   if (created) {
     await emit(tx, deps.clock, 'lead.created', { leadId, source: input.source });
-    if (!suppressed && input.source !== 'click_to_whatsapp' && input.source !== 'whatsapp')
+    // Leads who messaged or called us are already in a conversation: no template first reply.
+    if (!suppressed && !['click_to_whatsapp', 'whatsapp', 'phone_call'].includes(input.source))
       await deps.enqueue(tx, QUEUES.firstReply, { tenantId, leadId });
   }
   return { leadId, created, suppressed };
