@@ -10,7 +10,7 @@ import { sweepOpportunities } from './opportunities.ts';
 
 let t: TestContext;
 let A: string;
-let B: string;
+
 let cookieA: string;
 let cookieB: string;
 let n = 0;
@@ -32,7 +32,7 @@ beforeAll(async () => {
       )
     ).tenant.id;
   A = await mk('a');
-  B = await mk('b');
+  await mk('b');
   cookieA = await t.signIn('admin@a.test');
   cookieB = await t.signIn('admin@b.test');
   await setConfig((c) => ({ ...c, booking: { ...c.booking, mode: 'auto_confirm' } }));
@@ -58,7 +58,13 @@ async function newLead(name = 'Priya') {
 }
 async function book(leadId: string, service = 'Consultation') {
   const [slot] = (await findSlots(t.ctx, A, { service, limit: 1, spread: false })).slots;
-  const r = await bookSlot(t.ctx, A, { leadId, service, date: slot!.date, time: slot!.time, source: 'staff' });
+  const r = await bookSlot(t.ctx, A, {
+    leadId,
+    service,
+    date: slot!.date,
+    time: slot!.time,
+    source: 'staff',
+  });
   await t.drainJobs();
   return r.appointment;
 }
@@ -77,7 +83,9 @@ const templatesSent = (leadId: string) =>
       .where(and(eq(messages.leadId, leadId), eq(messages.direction, 'out'))),
   ).then((rows) => rows.filter((r) => r.key && r.status === 'sent'));
 const addPlan = (leadId: string, payload: object) =>
-  api(cookieA, 'POST', `/v1/leads/${leadId}/treatment-plans`, payload).then((r) => r.json() as { id: string });
+  api(cookieA, 'POST', `/v1/leads/${leadId}/treatment-plans`, payload).then(
+    (r) => r.json() as { id: string },
+  );
 
 describe('no-show → recovery', () => {
   test('a no-show becomes an opportunity handled by the recovery sequence, and is won when they rebook', async () => {
@@ -98,7 +106,12 @@ describe('no-show → recovery', () => {
 describe('treatment journeys', () => {
   test('a stalled treatment gets one clinic-approved follow-up; sweeping again sends nothing more', async () => {
     const leadId = await newLead('Meera');
-    await addPlan(leadId, { title: 'Root canal, 3 visits', service: 'Root canal consultation', status: 'accepted', visits_planned: 3 });
+    await addPlan(leadId, {
+      title: 'Root canal, 3 visits',
+      service: 'Root canal consultation',
+      status: 'accepted',
+      visits_planned: 3,
+    });
     t.clock.advance(8 * DAY);
     await sweep();
     const [o] = await oppsOf(leadId);
@@ -133,17 +146,31 @@ describe('treatment journeys', () => {
 
   test('payment: only from clinic-recorded amounts; no link = staff call; with a link the reminder carries the exact balance', async () => {
     const leadId = await newLead('Farah');
-    await addPlan(leadId, { title: 'Crown', status: 'in_progress', value_inr: 8000, paid_inr: 3000, visits_done: 1 });
+    await addPlan(leadId, {
+      title: 'Crown',
+      status: 'in_progress',
+      value_inr: 8000,
+      paid_inr: 3000,
+      visits_done: 1,
+    });
     const noValue = await newLead('Gita');
     await addPlan(noValue, { title: 'Crown', status: 'in_progress', visits_done: 1 });
     await sweep();
     let [o] = await oppsOf(leadId);
-    expect(o).toMatchObject({ kind: 'PAYMENT_FOLLOWUP', status: 'open', valueInr: 5000, valueSource: 'treatment_plan' });
+    expect(o).toMatchObject({
+      kind: 'PAYMENT_FOLLOWUP',
+      status: 'open',
+      valueInr: 5000,
+      valueSource: 'treatment_plan',
+    });
     expect(o!.recommendedAction).toMatch(/Call about the balance/);
     expect((await oppsOf(noValue)).filter((x) => x.kind === 'PAYMENT_FOLLOWUP')).toEqual([]);
     expect((await templatesSent(leadId)).map((m) => m.key)).toEqual(['first_reply']);
 
-    await setConfig((c) => ({ ...c, journeys: { ...c.journeys!, ...JOURNEYS, payment_url: 'https://pay.example.in/smile' } }));
+    await setConfig((c) => ({
+      ...c,
+      journeys: { ...c.journeys!, ...JOURNEYS, payment_url: 'https://pay.example.in/smile' },
+    }));
     await sweep();
     [o] = await oppsOf(leadId);
     expect(o?.status).toBe('actioned');
@@ -164,7 +191,9 @@ const JOURNEYS = {
 
 describe('lost leads, approval, caps and opt-out', () => {
   const qualify = (leadId: string, tier: 'hot' | 'warm') =>
-    withTenant(t.ctx.db, A, (tx) => tx.update(leads).set({ state: 'qualified', tier }).where(eq(leads.id, leadId)));
+    withTenant(t.ctx.db, A, (tx) =>
+      tx.update(leads).set({ state: 'qualified', tier }).where(eq(leads.id, leadId)),
+    );
 
   test('approval mode waits for staff; approving sends it; clinic B can neither see nor approve it', async () => {
     await setConfig((c) => ({ ...c, autonomy: { reactivate: 'approval' } }));
@@ -194,7 +223,9 @@ describe('lost leads, approval, caps and opt-out', () => {
     t.clock.advance(3 * DAY);
     await sweep();
     await sweep();
-    const sent = (await Promise.all(ids.map(templatesSent))).flat().filter((m) => m.key === 'lead_reactivation');
+    const sent = (await Promise.all(ids.map(templatesSent)))
+      .flat()
+      .filter((m) => m.key === 'lead_reactivation');
     expect(sent).toHaveLength(1);
     await setConfig((c) => ({ ...c, journeys: JOURNEYS }));
   });
@@ -229,5 +260,27 @@ describe('lost leads, approval, caps and opt-out', () => {
     ).rejects.toThrow(/duplicate key/);
     const [plan] = await withTenant(t.ctx.db, A, (tx) => tx.select().from(treatmentPlans).limit(1));
     expect(plan).toBeDefined();
+  });
+});
+
+describe('command center', () => {
+  test("today's numbers, needs-attention lists and AI impact come from records; money only when the clinic entered it", async () => {
+    const res = await api(cookieA, 'GET', '/v1/command-center');
+    expect(res.statusCode).toBe(200);
+    const cc = res.json() as {
+      today: Record<string, number>;
+      attention: { staff: { lead_id: string }[]; opportunities: { kind: string }[]; needsApproval: number };
+      impact: Record<string, number | null>;
+    };
+    expect(Object.values(cc.today).every((v) => Number.isInteger(v) && v >= 0)).toBe(true);
+    expect(cc.attention.staff.length).toBeGreaterThan(0); // the paused lead from the opt-out test
+    expect(cc.attention.opportunities.some((o) => o.kind === 'STALLED_TREATMENT')).toBe(true);
+    expect(cc.impact.noShowsRecovered).toBeGreaterThanOrEqual(1);
+    // Nothing paid in full and no stalled treatment won yet: value is unavailable, not zero, not an estimate.
+    expect(cc.impact.knownValueInr).toBeNull();
+    // Another clinic sees only its own (empty) picture.
+    const b = (await api(cookieB, 'GET', '/v1/command-center')).json() as typeof cc;
+    expect(b.attention.staff).toEqual([]);
+    expect(b.impact.noShowsRecovered).toBe(0);
   });
 });

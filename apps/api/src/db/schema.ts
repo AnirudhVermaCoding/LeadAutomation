@@ -773,7 +773,13 @@ export const breachLog = pgTable(
 
 // ---- Operations employee: treatment journeys, calls, recovery opportunities, waitlist ----
 
-export const TREATMENT_PLAN_STATUSES = ['proposed', 'accepted', 'in_progress', 'completed', 'declined'] as const;
+export const TREATMENT_PLAN_STATUSES = [
+  'proposed',
+  'accepted',
+  'in_progress',
+  'completed',
+  'declined',
+] as const;
 export type TreatmentPlanStatus = (typeof TREATMENT_PLAN_STATUSES)[number];
 
 /**
@@ -858,7 +864,14 @@ export const OPPORTUNITY_KINDS = [
   'PAYMENT_FOLLOWUP',
 ] as const;
 export type OpportunityKind = (typeof OPPORTUNITY_KINDS)[number];
-export const OPPORTUNITY_STATUSES = ['open', 'needs_approval', 'actioned', 'won', 'lost', 'dismissed'] as const;
+export const OPPORTUNITY_STATUSES = [
+  'open',
+  'needs_approval',
+  'actioned',
+  'won',
+  'lost',
+  'dismissed',
+] as const;
 export type OpportunityStatus = (typeof OPPORTUNITY_STATUSES)[number];
 
 /**

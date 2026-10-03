@@ -165,7 +165,10 @@ export const TenantConfigSchema = z.strictObject({
         .url()
         .refine((u) => u.startsWith('https://'), 'must start with https://')
         .optional(),
-      waitlist_offer_minutes: z.int().min(5).max(24 * 60),
+      waitlist_offer_minutes: z
+        .int()
+        .min(5)
+        .max(24 * 60),
       waitlist_batch: z.int().min(1).max(10),
     })
     .optional(),

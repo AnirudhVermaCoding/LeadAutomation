@@ -1,4 +1,10 @@
-import { autonomyOf, journeysOf, type AutonomyAction, type TemplateKey, type TenantConfig } from '@instantlead/config';
+import {
+  autonomyOf,
+  journeysOf,
+  type AutonomyAction,
+  type TemplateKey,
+  type TenantConfig,
+} from '@instantlead/config';
 import {
   DAY,
   HOUR,
@@ -63,7 +69,9 @@ const upcomingByLead = async (tx: Tx, now: Date) =>
       await tx
         .select({ leadId: appointments.leadId, attendee: appointments.attendeeName })
         .from(appointments)
-        .where(and(inArray(appointments.status, [...ACTIVE_APPOINTMENT_STATUSES]), gte(appointments.endsAt, now)))
+        .where(
+          and(inArray(appointments.status, [...ACTIVE_APPOINTMENT_STATUSES]), gte(appointments.endsAt, now)),
+        )
     ).map((a) => `${a.leadId}:${(a.attendee ?? '').toLowerCase()}`),
   );
 const inr = (v: number) => Math.round(v).toLocaleString('en-IN');
@@ -103,7 +111,9 @@ export async function detectOpportunities(tx: Tx, clock: Clock, config: TenantCo
     .limit(500);
   for (const l of quiet) {
     const last = l.lastInboundAt && l.lastInboundAt > l.receivedAt ? l.lastInboundAt : l.receivedAt;
-    if (!isLostLead({ lastContactAt: last, everBooked: l.booked, tier: l.tier }, now, j.lost_lead_after_hours))
+    if (
+      !isLostLead({ lastContactAt: last, everBooked: l.booked, tier: l.tier }, now, j.lost_lead_after_hours)
+    )
       continue;
     await add({
       kind: 'LOST_LEAD',
@@ -292,13 +302,20 @@ async function actedToday(tx: Tx, now: Date, tz: string) {
  * Decide what happens to open opportunities: allowed + under the daily cap → queue the action;
  * needs approval → shown to staff; off → shown only. Never touches one already attempted.
  */
-export async function scheduleActions(tx: TenantTx, deps: { clock: Clock; enqueue: Enqueue }, tenantId: string, config: TenantConfig) {
+export async function scheduleActions(
+  tx: TenantTx,
+  deps: { clock: Clock; enqueue: Enqueue },
+  tenantId: string,
+  config: TenantConfig,
+) {
   const now = deps.clock.now();
   let budget = journeysOf(config).max_outreach_per_day - (await actedToday(tx, now, config.locale.timezone));
   const open = await tx
     .select()
     .from(opportunities)
-    .where(and(eq(opportunities.status, 'open'), isNull(opportunities.actedAt), isNotNull(opportunities.leadId)))
+    .where(
+      and(eq(opportunities.status, 'open'), isNull(opportunities.actedAt), isNotNull(opportunities.leadId)),
+    )
     .orderBy(desc(opportunities.priority), asc(opportunities.detectedAt))
     .limit(200);
   let queued = 0;
@@ -314,7 +331,12 @@ export async function scheduleActions(tx: TenantTx, deps: { clock: Clock; enqueu
       ),
     );
   for (const s of slots)
-    await deps.enqueue(tx, QUEUES.slotRecovery, { tenantId, opportunityId: s.id }, { singletonKey: `${s.id}:sweep` });
+    await deps.enqueue(
+      tx,
+      QUEUES.slotRecovery,
+      { tenantId, opportunityId: s.id },
+      { singletonKey: `${s.id}:sweep` },
+    );
   for (const o of open) {
     const action = ACTIONS[o.kind];
     if (!action) continue;
@@ -333,9 +355,12 @@ export async function scheduleActions(tx: TenantTx, deps: { clock: Clock; enqueu
 }
 
 /** The per-tenant sweep (cron every 15 minutes, and the demo's fast-forward). */
-export async function sweepOpportunities(
-  deps: { db: MessagingDeps['db']; clock: Clock; enqueue: Enqueue; system: { listTenants(): Promise<{ id: string }[]> } },
-) {
+export async function sweepOpportunities(deps: {
+  db: MessagingDeps['db'];
+  clock: Clock;
+  enqueue: Enqueue;
+  system: { listTenants(): Promise<{ id: string }[]> };
+}) {
   const out = { found: 0, won: 0, queued: 0 };
   for (const { id: tenantId } of await deps.system.listTenants()) {
     await withTenant(deps.db, tenantId, async (tx) => {
@@ -379,7 +404,11 @@ export async function actOnOpportunity(
     const skip = async (reason: string, close = false) => {
       await tx
         .update(opportunities)
-        .set({ actedAt: now, outcome: `Not sent: ${reason}`, ...(close && { status: 'lost' as const, outcomeAt: now }) })
+        .set({
+          actedAt: now,
+          outcome: `Not sent: ${reason}`,
+          ...(close && { status: 'lost' as const, outcomeAt: now }),
+        })
         .where(eq(opportunities.id, o.id));
       return { done: { status: 'skipped', reason } as ActResult };
     };
@@ -393,11 +422,17 @@ export async function actOnOpportunity(
     if (lead.aiPaused) return skip('a team member has taken over this conversation');
     if (lead.notALead) return skip('not a real enquiry', true);
     const upcoming = await upcomingByLead(tx, now);
-    if (upcoming.has(`${lead.id}:${(row.plan?.attendeeName ?? '').toLowerCase()}`) && o.kind !== 'PAYMENT_FOLLOWUP')
+    if (
+      upcoming.has(`${lead.id}:${(row.plan?.attendeeName ?? '').toLowerCase()}`) &&
+      o.kind !== 'PAYMENT_FOLLOWUP'
+    )
       return skip('already booked');
     if (nextSendTime(now, config.locale.timezone, config.locale.quiet_hours) > now)
       return { done: { status: 'deferred', reason: 'quiet hours' } as ActResult }; // the next sweep re-queues it
-    if (!job.approvedBy && (await actedToday(tx, now, config.locale.timezone)) >= journeysOf(config).max_outreach_per_day)
+    if (
+      !job.approvedBy &&
+      (await actedToday(tx, now, config.locale.timezone)) >= journeysOf(config).max_outreach_per_day
+    )
       return { done: { status: 'deferred', reason: 'daily outreach cap reached' } as ActResult };
     const values: Record<string, string> = { business_name: config.brand.business_name };
     if (o.kind === 'STALLED_TREATMENT') values.treatment = row.plan?.title ?? 'your treatment';

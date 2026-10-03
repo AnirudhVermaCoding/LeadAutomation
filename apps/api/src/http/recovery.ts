@@ -4,7 +4,15 @@ import { z } from 'zod';
 import { audit } from '../audit.ts';
 import { withTenant } from '../db/client.ts';
 import { BookingError } from '../booking.ts';
-import { leads, OPPORTUNITY_KINDS, OPPORTUNITY_STATUSES, opportunities, waitlistEntries } from '../db/schema.ts';
+import { commandCenter } from '../command-center.ts';
+import { getActiveConfig } from '../config-store.ts';
+import {
+  leads,
+  OPPORTUNITY_KINDS,
+  OPPORTUNITY_STATUSES,
+  opportunities,
+  waitlistEntries,
+} from '../db/schema.ts';
 import { joinWaitlist } from '../waitlist.ts';
 import { QUEUES } from '../jobs.ts';
 import { emit } from '../leads.ts';
@@ -18,6 +26,15 @@ export function registerRecoveryRoutes(app: FastifyInstance, ctx: AppContext) {
   const staff = guard(ctx, ['client_staff', 'client_admin', 'agency_admin'], { tenant: true });
   const tenantOf = (req: FastifyRequest) => req.tenantId as string;
   const idParam = (req: FastifyRequest) => z.object({ id: z.uuid() }).parse(req.params).id;
+
+  // Today → command center: today's numbers, what needs a person, and the assistant's impact.
+  app.get('/v1/command-center', { preHandler: staff }, (req) =>
+    withTenant(ctx.db, tenantOf(req), async (tx) => {
+      const config = (await getActiveConfig(tx))?.config;
+      if (!config) throw new Error('tenant has no config');
+      return commandCenter(tx, config, ctx.clock.now());
+    }),
+  );
 
   app.get('/v1/opportunities', { preHandler: staff }, (req) => {
     const q = z
@@ -158,7 +175,9 @@ export function registerRecoveryRoutes(app: FastifyInstance, ctx: AppContext) {
       return reply.code(201).send(r);
     } catch (err) {
       if (err instanceof BookingError)
-        return reply.code(err.code === 'no_appointment' ? 404 : 422).send({ error: err.code, message: err.message });
+        return reply
+          .code(err.code === 'no_appointment' ? 404 : 422)
+          .send({ error: err.code, message: err.message });
       throw err;
     }
   });
@@ -184,27 +203,41 @@ export function registerRecoveryRoutes(app: FastifyInstance, ctx: AppContext) {
 
   // Staff close it themselves: they called and booked (won), it went nowhere (lost), or it was not worth doing (dismissed).
   for (const status of ['won', 'lost', 'dismissed'] as const)
-    app.post(`/v1/opportunities/:id/${status === 'dismissed' ? 'dismiss' : status}`, { preHandler: staff }, async (req, reply) => {
-      const id = idParam(req);
-      const { note } = z
-        .strictObject({ note: z.string().trim().max(300).optional() })
-        .parse(req.body ?? {});
-      const row = await withTenant(ctx.db, tenantOf(req), async (tx) => {
-        const [o] = await tx
-          .update(opportunities)
-          .set({ status, outcome: note ?? `marked ${status} by staff`, outcomeAt: ctx.clock.now() })
-          .where(and(eq(opportunities.id, id), inArray(opportunities.status, ['open', 'needs_approval', 'actioned'])))
-          .returning();
-        if (!o) return null;
-        if (status === 'won')
-          await emit(tx, ctx.clock, 'opportunity.won', { leadId: o.leadId, opportunityId: id, kind: o.kind, by: 'staff' });
-        await audit(tx, ctx.clock, actor(req.principal), {
-          action: `opportunity.${status}`,
-          entityType: 'opportunity',
-          entityId: id,
+    app.post(
+      `/v1/opportunities/:id/${status === 'dismissed' ? 'dismiss' : status}`,
+      { preHandler: staff },
+      async (req, reply) => {
+        const id = idParam(req);
+        const { note } = z
+          .strictObject({ note: z.string().trim().max(300).optional() })
+          .parse(req.body ?? {});
+        const row = await withTenant(ctx.db, tenantOf(req), async (tx) => {
+          const [o] = await tx
+            .update(opportunities)
+            .set({ status, outcome: note ?? `marked ${status} by staff`, outcomeAt: ctx.clock.now() })
+            .where(
+              and(
+                eq(opportunities.id, id),
+                inArray(opportunities.status, ['open', 'needs_approval', 'actioned']),
+              ),
+            )
+            .returning();
+          if (!o) return null;
+          if (status === 'won')
+            await emit(tx, ctx.clock, 'opportunity.won', {
+              leadId: o.leadId,
+              opportunityId: id,
+              kind: o.kind,
+              by: 'staff',
+            });
+          await audit(tx, ctx.clock, actor(req.principal), {
+            action: `opportunity.${status}`,
+            entityType: 'opportunity',
+            entityId: id,
+          });
+          return o;
         });
-        return o;
-      });
-      return row ?? reply.code(404).send({ error: 'not_found_or_closed' });
-    });
+        return row ?? reply.code(404).send({ error: 'not_found_or_closed' });
+      },
+    );
 }

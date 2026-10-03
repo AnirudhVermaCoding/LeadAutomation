@@ -17,6 +17,7 @@ import {
   Textarea,
   TierBadge,
 } from '../ui.tsx';
+import { Journey } from './Journey.tsx';
 import { Thread } from './Thread.tsx';
 
 const FILTERS = [
@@ -161,6 +162,7 @@ function Conversation({
     onSettled: refresh,
   });
   const [text, setText] = useState('');
+  const [view, setView] = useState<'chat' | 'journey'>('chat');
   const send = useMutation({
     mutationFn: () => api(`/v1/leads/${leadId}/messages`, { body: { text } }),
     onSuccess: () => setText(''),
@@ -256,72 +258,101 @@ function Conversation({
           )}
         </dl>
       )}
-      <Thread messages={messages} tz={tz} />
-      <form onSubmit={submit} className="mt-4 space-y-2 border-t border-slate-100 pt-4">
-        <Textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={
-            windowOpen
-              ? 'Reply as staff…'
-              : 'The 24-hour WhatsApp window is closed: only approved templates can be sent.'
-          }
-          disabled={!windowOpen || lead.state === 'opted_out'}
-          rows={2}
-        />
-        {send.error && <p className="text-xs text-red-700">{send.error.message}</p>}
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-slate-500">
-            {lead.aiPaused
-              ? 'AI is paused for this lead.'
-              : 'Sending a reply does not pause the AI. Use "Take over" for that.'}
-            {lead.state !== 'opted_out' ? (
-              <button
-                type="button"
-                className="ml-2 text-slate-600 underline-offset-2 hover:underline"
-                onClick={() =>
-                  confirm(
-                    'Record that this person asked us to stop messaging them? Nothing more will be sent to them.',
-                  ) && optOut.mutate()
-                }
-              >
-                Record opt-out
-              </button>
-            ) : (
-              canErase && (
-                <button
-                  type="button"
-                  className="ml-2 text-slate-600 underline-offset-2 hover:underline"
-                  onClick={() => {
-                    const note = prompt(
-                      'How did they ask to be messaged again? (kept as the consent record)',
-                    );
-                    if (note && note.trim().length >= 5) optIn.mutate(note.trim());
-                  }}
-                >
-                  Record opt-in
-                </button>
-              )
+      <div role="tablist" className="mb-3 flex gap-1 border-b border-slate-200">
+        {(
+          [
+            ['chat', 'Conversation'],
+            ['journey', 'Journey & treatment'],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={view === key}
+            onClick={() => setView(key)}
+            className={cx(
+              '-mb-px border-b-2 px-3 py-1.5 text-xs font-medium',
+              view === key
+                ? 'border-brand-700 text-brand-700'
+                : 'border-transparent text-slate-500 hover:text-slate-800',
             )}
-            {canErase && (
-              <button
-                type="button"
-                className="ml-2 text-red-700 underline-offset-2 hover:underline"
-                onClick={() =>
-                  confirm(
-                    'Erase this person and all their messages permanently? Use this for a data deletion request.',
-                  ) && erase.mutate()
-                }
-              >
-                Erase lead
-              </button>
-            )}
-          </p>
-          <Button type="submit" size="sm" loading={send.isPending} disabled={!windowOpen || !text.trim()}>
-            <Send className="size-3.5" aria-hidden /> Send
-          </Button>
-        </div>
-      </form>
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === 'journey' ? (
+        <Journey leadId={leadId} config={config} />
+      ) : (
+        <>
+          <Thread messages={messages} tz={tz} />
+          <form onSubmit={submit} className="mt-4 space-y-2 border-t border-slate-100 pt-4">
+            <Textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={
+                windowOpen
+                  ? 'Reply as staff…'
+                  : 'The 24-hour WhatsApp window is closed: only approved templates can be sent.'
+              }
+              disabled={!windowOpen || lead.state === 'opted_out'}
+              rows={2}
+            />
+            {send.error && <p className="text-xs text-red-700">{send.error.message}</p>}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-slate-500">
+                {lead.aiPaused
+                  ? 'AI is paused for this lead.'
+                  : 'Sending a reply does not pause the AI. Use "Take over" for that.'}
+                {lead.state !== 'opted_out' ? (
+                  <button
+                    type="button"
+                    className="ml-2 text-slate-600 underline-offset-2 hover:underline"
+                    onClick={() =>
+                      confirm(
+                        'Record that this person asked us to stop messaging them? Nothing more will be sent to them.',
+                      ) && optOut.mutate()
+                    }
+                  >
+                    Record opt-out
+                  </button>
+                ) : (
+                  canErase && (
+                    <button
+                      type="button"
+                      className="ml-2 text-slate-600 underline-offset-2 hover:underline"
+                      onClick={() => {
+                        const note = prompt(
+                          'How did they ask to be messaged again? (kept as the consent record)',
+                        );
+                        if (note && note.trim().length >= 5) optIn.mutate(note.trim());
+                      }}
+                    >
+                      Record opt-in
+                    </button>
+                  )
+                )}
+                {canErase && (
+                  <button
+                    type="button"
+                    className="ml-2 text-red-700 underline-offset-2 hover:underline"
+                    onClick={() =>
+                      confirm(
+                        'Erase this person and all their messages permanently? Use this for a data deletion request.',
+                      ) && erase.mutate()
+                    }
+                  >
+                    Erase lead
+                  </button>
+                )}
+              </p>
+              <Button type="submit" size="sm" loading={send.isPending} disabled={!windowOpen || !text.trim()}>
+                <Send className="size-3.5" aria-hidden /> Send
+              </Button>
+            </div>
+          </form>
+        </>
+      )}
     </Card>
   );
 }

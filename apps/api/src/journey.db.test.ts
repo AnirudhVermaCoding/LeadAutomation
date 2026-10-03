@@ -144,7 +144,10 @@ describe('treatment plans', () => {
     const a = await newLead('Asha');
     const b = await newLead('Bina');
     const plan = (
-      await api(cookieA, 'POST', `/v1/leads/${a}/treatment-plans`, { title: 'Braces review', status: 'accepted' })
+      await api(cookieA, 'POST', `/v1/leads/${a}/treatment-plans`, {
+        title: 'Braces review',
+        status: 'accepted',
+      })
     ).json() as { id: string };
     const slot = await firstSlot('Consultation');
     const res = await api(cookieA, 'POST', '/v1/appointments', {
@@ -162,12 +165,15 @@ describe('treatment plans', () => {
   test('clinic B cannot read or change clinic A plans or timelines', async () => {
     const leadId = await newLead('Zoya');
     const plan = (
-      await api(cookieA, 'POST', `/v1/leads/${leadId}/treatment-plans`, { title: 'Implant', status: 'proposed' })
+      await api(cookieA, 'POST', `/v1/leads/${leadId}/treatment-plans`, {
+        title: 'Implant',
+        status: 'proposed',
+      })
     ).json() as { id: string };
     expect((await api(cookieB, 'GET', `/v1/leads/${leadId}/timeline`)).statusCode).toBe(404);
-    expect((await api(cookieB, 'PATCH', `/v1/treatment-plans/${plan.id}`, { status: 'declined' })).statusCode).toBe(
-      404,
-    );
+    expect(
+      (await api(cookieB, 'PATCH', `/v1/treatment-plans/${plan.id}`, { status: 'declined' })).statusCode,
+    ).toBe(404);
     expect(
       (await api(cookieB, 'POST', `/v1/leads/${leadId}/treatment-plans`, { title: 'Steal' })).statusCode,
     ).toBe(404);

@@ -109,9 +109,11 @@ export async function timeline(tx: Tx, leadId: string, limit = 500): Promise<Tim
     const kind = typeof p.kind === 'string' ? p.kind : '';
     let mapped = EVENT_STAGES[e.type];
     if (e.type === 'opportunity.acted' && RECALL_KINDS.has(kind)) mapped = ['recall', 'Recall reminder sent'];
-    if (e.type === 'opportunity.acted' && PAYMENT_KINDS.has(kind)) mapped = ['payment', 'Payment reminder sent'];
+    if (e.type === 'opportunity.acted' && PAYMENT_KINDS.has(kind))
+      mapped = ['payment', 'Payment reminder sent'];
     if (!mapped) continue;
-    const reason = typeof p.reason === 'string' ? p.reason : typeof p.category === 'string' ? p.category : null;
+    const reason =
+      typeof p.reason === 'string' ? p.reason : typeof p.category === 'string' ? p.category : null;
     out.push({
       at: e.at,
       stage: mapped[0],
@@ -165,7 +167,13 @@ export const listPlans = (tx: Tx, leadId: string) =>
  * one is due or close the plan and set the recall date. Clinical content is never inferred: only the
  * counts and intervals the clinic entered are used.
  */
-export async function advancePlan(tx: Tx, clock: Clock, config: TenantConfig, planId: string, leadId: string) {
+export async function advancePlan(
+  tx: Tx,
+  clock: Clock,
+  config: TenantConfig,
+  planId: string,
+  leadId: string,
+) {
   const [plan] = await tx.select().from(treatmentPlans).where(eq(treatmentPlans.id, planId)).for('update');
   if (!plan || plan.status === 'completed' || plan.status === 'declined') return;
   const now = clock.now();
@@ -185,7 +193,9 @@ export async function advancePlan(tx: Tx, clock: Clock, config: TenantConfig, pl
         : {
             visitsDone: done,
             status: 'in_progress',
-            nextVisitDueAt: plan.visitIntervalDays ? new Date(now.getTime() + plan.visitIntervalDays * DAY) : null,
+            nextVisitDueAt: plan.visitIntervalDays
+              ? new Date(now.getTime() + plan.visitIntervalDays * DAY)
+              : null,
           },
     )
     .where(eq(treatmentPlans.id, planId));
@@ -201,7 +211,9 @@ export async function lastAppointmentOrPlan(tx: Tx, leadId: string) {
   const [plan] = await tx
     .select({ service: treatmentPlans.service })
     .from(treatmentPlans)
-    .where(and(eq(treatmentPlans.leadId, leadId), inArray(treatmentPlans.status, ['accepted', 'in_progress'])))
+    .where(
+      and(eq(treatmentPlans.leadId, leadId), inArray(treatmentPlans.status, ['accepted', 'in_progress'])),
+    )
     .orderBy(desc(treatmentPlans.updatedAt))
     .limit(1);
   const [last] = await tx

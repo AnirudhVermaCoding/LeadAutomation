@@ -15,25 +15,24 @@ const actor = (p: Principal | null) =>
 export function registerVoiceRoutes(app: FastifyInstance, ctx: AppContext) {
   const admins = guard(ctx, ['client_admin', 'agency_admin'], { tenant: true });
   const tenantOf = (req: FastifyRequest) => req.tenantId as string;
-  const webhookUrl = (key: string | null | undefined) => (key ? `${ctx.env.APP_URL}/webhooks/voice/${key}` : null);
+  const webhookUrl = (key: string | null | undefined) =>
+    key ? `${ctx.env.APP_URL}/webhooks/voice/${key}` : null;
 
   // The phone agent vendor (Vapi) posts every server message here. The secret path segment finds the
   // clinic; the vendor credential (bearer secret) proves it is them. Off for the clinic = 404, as if absent.
   // Not per-IP rate limited (index.ts): every clinic's calls arrive from the vendor's few IPs.
-  app.post<{ Params: { key: string } }>(
-    '/webhooks/voice/:key',
-    async (req, reply) => {
-      const tenantId = await ctx.system.findTenantIdBy('voiceInKey', req.params.key);
-      if (!tenantId) return reply.code(404).send({ error: 'not_found' });
-      const t = await voiceTenant(ctx, tenantId);
-      if ('error' in t)
-        return t.error === 'disabled'
-          ? reply.code(404).send({ error: 'not_found' })
-          : reply.code(503).send({ error: 'voice_not_configured' });
-      if (!t.provider.authenticate(req.headers, t.secret)) return reply.code(401).send({ error: 'unauthorized' });
-      return handleVoiceEvent(ctx, tenantId, t, t.provider.parse(req.body));
-    },
-  );
+  app.post<{ Params: { key: string } }>('/webhooks/voice/:key', async (req, reply) => {
+    const tenantId = await ctx.system.findTenantIdBy('voiceInKey', req.params.key);
+    if (!tenantId) return reply.code(404).send({ error: 'not_found' });
+    const t = await voiceTenant(ctx, tenantId);
+    if ('error' in t)
+      return t.error === 'disabled'
+        ? reply.code(404).send({ error: 'not_found' })
+        : reply.code(503).send({ error: 'voice_not_configured' });
+    if (!t.provider.authenticate(req.headers, t.secret))
+      return reply.code(401).send({ error: 'unauthorized' });
+    return handleVoiceEvent(ctx, tenantId, t, t.provider.parse(req.body));
+  });
 
   // Settings → Phone agent: what to paste into the vendor console.
   app.get('/v1/voice/setup', { preHandler: admins }, async (req) => {
@@ -43,7 +42,9 @@ export function registerVoiceRoutes(app: FastifyInstance, ctx: AppContext) {
       const config = (await getActiveConfig(tx))?.config;
       if (!config) throw new Error('tenant has no config');
       const resources = [
-        ...new Set((await tx.select({ r: availabilityRules.resource }).from(availabilityRules)).map((x) => x.r)),
+        ...new Set(
+          (await tx.select({ r: availabilityRules.resource }).from(availabilityRules)).map((x) => x.r),
+        ),
       ];
       const hasSecret = Boolean(await getTenantSecret(tx, ctx.secretsKey, tenantId, VOICE_SECRET));
       return {

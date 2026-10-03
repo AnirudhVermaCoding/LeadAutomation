@@ -1,12 +1,7 @@
 import { DAY, HOUR } from './clock.ts';
 
 export type RecoveryKind =
-  | 'LOST_LEAD'
-  | 'EMPTY_SLOT'
-  | 'NO_SHOW'
-  | 'STALLED_TREATMENT'
-  | 'RECALL_DUE'
-  | 'PAYMENT_FOLLOWUP';
+  'LOST_LEAD' | 'EMPTY_SLOT' | 'NO_SHOW' | 'STALLED_TREATMENT' | 'RECALL_DUE' | 'PAYMENT_FOLLOWUP';
 
 /**
  * Deterministic priority (higher first). A freed slot is perishable, so it outranks everything and gets

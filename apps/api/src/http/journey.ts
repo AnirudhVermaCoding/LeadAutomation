@@ -113,7 +113,8 @@ export function registerJourneyRoutes(app: FastifyInstance, ctx: AppContext) {
         planId: id,
         by: 'staff',
         fields: Object.keys(body),
-        ...(body.status && body.status !== before.status && { reason: `status ${before.status} -> ${body.status}` }),
+        ...(body.status &&
+          body.status !== before.status && { reason: `status ${before.status} -> ${body.status}` }),
       });
       if (body.paid_inr !== undefined && (body.paid_inr ?? 0) > (before.paidInr ?? 0))
         await emit(tx, ctx.clock, 'payment.recorded', { leadId: before.leadId, planId: id, by: 'staff' });

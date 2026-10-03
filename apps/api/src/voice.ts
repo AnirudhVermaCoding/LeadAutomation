@@ -1,10 +1,4 @@
-import {
-  autonomyOf,
-  fillVariables,
-  NEVER_ACTIONS,
-  voiceOf,
-  type TenantConfig,
-} from '@instantlead/config';
+import { autonomyOf, fillVariables, NEVER_ACTIONS, voiceOf, type TenantConfig } from '@instantlead/config';
 import { localParts, matchesEmergency, toE164, zonedTimeToUtc } from '@instantlead/core';
 import { VOICE_PROVIDERS, type VoiceEvent, type VoiceProvider } from '@instantlead/integrations';
 import { eq, gte, sql } from 'drizzle-orm';
@@ -34,7 +28,8 @@ export async function voiceTenant(deps: VoiceDeps, tenantId: string) {
   });
 }
 
-const monthStart = (now: Date, tz: string) => zonedTimeToUtc(`${localParts(now, tz).date.slice(0, 8)}01`, '00:00', tz);
+const monthStart = (now: Date, tz: string) =>
+  zonedTimeToUtc(`${localParts(now, tz).date.slice(0, 8)}01`, '00:00', tz);
 
 /** Phone-agent minutes used this calendar month (finished calls). */
 export async function minutesThisMonth(tx: Tx, now: Date, tz: string) {
@@ -50,7 +45,13 @@ export async function minutesThisMonth(tx: Tx, now: Date, tz: string) {
  * counts as consent for this conversation, recorded with the disclosure the agent reads out. No
  * WhatsApp first reply is sent: they are already talking to us. A withheld number gives no lead.
  */
-async function callContext(deps: VoiceDeps, tenantId: string, config: TenantConfig, callId: string, from: string | null) {
+async function callContext(
+  deps: VoiceDeps,
+  tenantId: string,
+  config: TenantConfig,
+  callId: string,
+  from: string | null,
+) {
   const now = deps.clock.now();
   const phone = from ? toE164(from) : null;
   return withTenant(deps.db, tenantId, async (tx) => {
@@ -72,14 +73,22 @@ async function callContext(deps: VoiceDeps, tenantId: string, config: TenantConf
       : null;
     const [row] = await tx
       .insert(calls)
-      .values({ leadId, provider: 'vapi', providerCallId: callId, startedAt: now, afterHours: !isOpen(config, now) })
+      .values({
+        leadId,
+        provider: 'vapi',
+        providerCallId: callId,
+        startedAt: now,
+        afterHours: !isOpen(config, now),
+      })
       .onConflictDoUpdate({
         target: [calls.tenantId, calls.providerCallId],
         set: { leadId: sql`coalesce(${calls.leadId}, excluded.lead_id)` },
       })
       .returning();
     const resources = [
-      ...new Set((await tx.select({ r: availabilityRules.resource }).from(availabilityRules)).map((x) => x.r)),
+      ...new Set(
+        (await tx.select({ r: availabilityRules.resource }).from(availabilityRules)).map((x) => x.r),
+      ),
     ];
     return { call: row!, leadId, resources };
   });
@@ -92,7 +101,13 @@ const SAY_EMERGENCY = (config: TenantConfig) =>
   )}"`;
 
 /** Record one result per tool-call id; a retried call returns the first answer (and never runs the tool twice). */
-async function storeResult(deps: VoiceDeps, tenantId: string, callRowId: string, toolCallId: string, result: string) {
+async function storeResult(
+  deps: VoiceDeps,
+  tenantId: string,
+  callRowId: string,
+  toolCallId: string,
+  result: string,
+) {
   return withTenant(deps.db, tenantId, async (tx) => {
     const [row] = await tx
       .update(calls)
@@ -106,7 +121,12 @@ async function storeResult(deps: VoiceDeps, tenantId: string, callRowId: string,
   });
 }
 
-async function flagCall(deps: VoiceDeps, tenantId: string, callRowId: string, set: Partial<typeof calls.$inferInsert>) {
+async function flagCall(
+  deps: VoiceDeps,
+  tenantId: string,
+  callRowId: string,
+  set: Partial<typeof calls.$inferInsert>,
+) {
   await withTenant(deps.db, tenantId, (tx) => tx.update(calls).set(set).where(eq(calls.id, callRowId)));
 }
 
@@ -127,7 +147,9 @@ export async function handleVoiceEvent(
   const now = deps.clock.now();
   const ctx = await callContext(deps, tenantId, config, event.callId, event.from);
   const { call, leadId } = ctx;
-  const tool = leadId ? { deps, tenantId, leadId, config, resources: ctx.resources, channel: 'phone' as const } : null;
+  const tool = leadId
+    ? { deps, tenantId, leadId, config, resources: ctx.resources, channel: 'phone' as const }
+    : null;
 
   switch (event.type) {
     case 'call_started':
@@ -149,16 +171,23 @@ export async function handleVoiceEvent(
     case 'transfer_request': {
       if (voice.transfer_number && isOpen(config, now)) {
         await flagCall(deps, tenantId, call.id, { transferred: true });
-        return provider.transferResponse({ number: voice.transfer_number, message: 'Connecting you to the clinic now.' });
+        return provider.transferResponse({
+          number: voice.transfer_number,
+          message: 'Connecting you to the clinic now.',
+        });
       }
       return provider.transferResponse({
-        error: 'Nobody from the clinic can take the call right now. Take a message and tell the caller the team will call back when the clinic opens.',
+        error:
+          'Nobody from the clinic can take the call right now. Take a message and tell the caller the team will call back when the clinic opens.',
       });
     }
 
     case 'tool_calls': {
       const cap = voice.monthly_minutes_cap;
-      const overCap = cap > 0 && (await withTenant(deps.db, tenantId, (tx) => minutesThisMonth(tx, now, config.locale.timezone))) >= cap;
+      const overCap =
+        cap > 0 &&
+        (await withTenant(deps.db, tenantId, (tx) => minutesThisMonth(tx, now, config.locale.timezone))) >=
+          cap;
       const results: { id: string; name: string; result: string }[] = [];
       for (const c of event.calls) {
         const cached = call.toolResults[c.id];
@@ -169,29 +198,40 @@ export async function handleVoiceEvent(
         let result: string;
         if (call.escalated) result = SAY_EMERGENCY(config);
         else if (overCap) {
-          result = 'The phone assistant has used its monthly minutes. Do not book or change anything: use transferCall to connect the caller to the clinic, or take a message.';
+          result =
+            'The phone assistant has used its monthly minutes. Do not book or change anything: use transferCall to connect the caller to the clinic, or take a message.';
           await withTenant(deps.db, tenantId, (tx) =>
             emit(tx, deps.clock, 'voice.cap_reached', { callId: call.id, minutesCap: cap }),
           );
         } else if (!tool)
-          result = "The caller's number is hidden, so nothing can be booked or changed by phone. Take their name and mobile number as a message for the team, then use escalate_to_human.";
+          result =
+            "The caller's number is hidden, so nothing can be booked or changed by phone. Take their name and mobile number as a message for the team, then use escalate_to_human.";
         else {
           const out = await runTool(tool, c.name, c.args);
           result = out.content;
           if (c.name === 'escalate_to_human' && !out.isError) {
             await flagCall(deps, tenantId, call.id, { escalated: true });
-            result += voice.transfer_number && isOpen(config, now)
-              ? ' The clinic is open: use transferCall to connect them now.'
-              : ' The clinic is closed: say the team will call them back when it opens.';
+            result +=
+              voice.transfer_number && isOpen(config, now)
+                ? ' The clinic is open: use transferCall to connect them now.'
+                : ' The clinic is closed: say the team will call them back when it opens.';
           }
         }
-        results.push({ id: c.id, name: c.name, result: await storeResult(deps, tenantId, call.id, c.id, result) });
+        results.push({
+          id: c.id,
+          name: c.name,
+          result: await storeResult(deps, tenantId, call.id, c.id, result),
+        });
       }
       return provider.toolResponse(results);
     }
 
     case 'call_ended': {
-      const status = event.failed ? 'failed' : event.transferred || call.transferred ? 'transferred' : 'completed';
+      const status = event.failed
+        ? 'failed'
+        : event.transferred || call.transferred
+          ? 'transferred'
+          : 'completed';
       await withTenant(deps.db, tenantId, async (tx) => {
         const [before] = await tx.select({ endedAt: calls.endedAt }).from(calls).where(eq(calls.id, call.id));
         await tx
@@ -206,7 +246,12 @@ export async function handleVoiceEvent(
           })
           .where(eq(calls.id, call.id));
         if (before?.endedAt) return; // a retried report: already recorded and alerted
-        await emit(tx, deps.clock, 'call.ended', { leadId, callId: call.id, channel: 'phone', reason: event.endedReason });
+        await emit(tx, deps.clock, 'call.ended', {
+          leadId,
+          callId: call.id,
+          channel: 'phone',
+          reason: event.endedReason,
+        });
         // Staff hear about calls that need them: escalated, failed, or after hours with nothing done.
         if (leadId && (call.escalated || event.failed))
           await alertStaff(
@@ -214,7 +259,9 @@ export async function handleVoiceEvent(
             deps,
             tenantId,
             leadId,
-            event.failed ? 'a phone call to the assistant failed; please call them back' : 'a phone caller needs the team (see the call summary)',
+            event.failed
+              ? 'a phone call to the assistant failed; please call them back'
+              : 'a phone caller needs the team (see the call summary)',
           );
       });
       return {};
@@ -226,7 +273,11 @@ export async function handleVoiceEvent(
  * What the clinic pastes into the vendor console: the voice system prompt (built from the same config
  * and never-list as WhatsApp) and the tool definitions, each pointing at this clinic's webhook.
  */
-export function voiceAssistantSetup(config: TenantConfig, webhookUrl: string | null, resources: readonly string[] = []) {
+export function voiceAssistantSetup(
+  config: TenantConfig,
+  webhookUrl: string | null,
+  resources: readonly string[] = [],
+) {
   const voice = config.voice;
   const knowledge =
     autonomyOf(config, 'faq') === 'auto'

@@ -253,12 +253,7 @@ export async function sendStaffWhatsApp(
     const sent = await tx
       .select({ id: events.id })
       .from(events)
-      .where(
-        and(
-          eq(events.type, 'staff.whatsapp_sent'),
-          sql`${events.payload}->>'key' = ${marker}`,
-        ),
-      )
+      .where(and(eq(events.type, 'staff.whatsapp_sent'), sql`${events.payload}->>'key' = ${marker}`))
       .limit(1);
     if (sent.length) return null;
     const channel = await channelFor(tx, deps, tenantId);
@@ -279,7 +274,9 @@ export async function sendStaffWhatsApp(
     buttonPayloads: TEMPLATES[key].buttons.map((b: { id: string }) => buttonPayload(key, b.id)),
   });
   await withTenant(deps.db, tenantId, (tx) =>
-    tx.insert(events).values({ type: 'staff.whatsapp_sent', payload: { key: marker }, occurredAt: deps.clock.now() }),
+    tx
+      .insert(events)
+      .values({ type: 'staff.whatsapp_sent', payload: { key: marker }, occurredAt: deps.clock.now() }),
   );
   return { ...r, body };
 }

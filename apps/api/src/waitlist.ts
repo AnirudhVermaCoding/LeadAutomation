@@ -140,7 +140,11 @@ export async function runSlotRecovery(
   const { tenantId, opportunityId } = job;
   const now = deps.clock.now();
   const loaded = await withTenant(deps.db, tenantId, async (tx) => {
-    const [o] = await tx.select().from(opportunities).where(eq(opportunities.id, opportunityId)).for('update');
+    const [o] = await tx
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, opportunityId))
+      .for('update');
     const config = (await getActiveConfig(tx))?.config;
     if (!o || !config || o.kind !== 'EMPTY_SLOT' || !o.slotStartsAt) return { done: 'gone' };
     if (!['open', 'needs_approval', 'actioned'].includes(o.status)) return { done: `already ${o.status}` };
@@ -165,7 +169,13 @@ export async function runSlotRecovery(
     await tx
       .update(slotOffers)
       .set({ status: 'expired' })
-      .where(and(eq(slotOffers.opportunityId, o.id), eq(slotOffers.status, 'sent'), lte(slotOffers.expiresAt, now)));
+      .where(
+        and(
+          eq(slotOffers.opportunityId, o.id),
+          eq(slotOffers.status, 'sent'),
+          lte(slotOffers.expiresAt, now),
+        ),
+      );
     const [pending] = await tx
       .select({ expiresAt: slotOffers.expiresAt })
       .from(slotOffers)
@@ -177,7 +187,10 @@ export async function runSlotRecovery(
       return { done: 'quiet hours' }; // the 15-minute sweep re-queues it
     const offered = new Set(
       (
-        await tx.select({ leadId: slotOffers.leadId }).from(slotOffers).where(eq(slotOffers.opportunityId, o.id))
+        await tx
+          .select({ leadId: slotOffers.leadId })
+          .from(slotOffers)
+          .where(eq(slotOffers.opportunityId, o.id))
       ).map((r) => r.leadId),
     );
     const tz = config.locale.timezone;
@@ -212,10 +225,15 @@ export async function runSlotRecovery(
   });
   if (!loaded.candidates) {
     if (loaded.retryAt)
-      await deps.enqueue(null, QUEUES.slotRecovery, { tenantId, opportunityId }, {
-        startAfter: loaded.retryAt,
-        singletonKey: `${opportunityId}:${loaded.retryAt.toISOString()}`,
-      });
+      await deps.enqueue(
+        null,
+        QUEUES.slotRecovery,
+        { tenantId, opportunityId },
+        {
+          startAfter: loaded.retryAt,
+          singletonKey: `${opportunityId}:${loaded.retryAt.toISOString()}`,
+        },
+      );
     return { status: loaded.done ?? 'skipped' };
   }
   const { o, config, slot, candidates, batch } = loaded;
@@ -261,7 +279,13 @@ export async function runSlotRecovery(
     const [offer] = await withTenant(deps.db, tenantId, (tx) =>
       tx
         .insert(slotOffers)
-        .values({ opportunityId: o.id, leadId: lead.id, waitlistEntryId: entry.id, offeredAt: now, expiresAt })
+        .values({
+          opportunityId: o.id,
+          leadId: lead.id,
+          waitlistEntryId: entry.id,
+          offeredAt: now,
+          expiresAt,
+        })
         .onConflictDoNothing()
         .returning({ id: slotOffers.id }),
     );
@@ -292,14 +316,23 @@ export async function runSlotRecovery(
   await withTenant(deps.db, tenantId, (tx) =>
     tx
       .update(opportunities)
-      .set(sent ? { status: 'actioned', aiActed: true, actedAt: now, outcome: null } : { outcome: 'Offers could not be sent' })
+      .set(
+        sent
+          ? { status: 'actioned', aiActed: true, actedAt: now, outcome: null }
+          : { outcome: 'Offers could not be sent' },
+      )
       .where(eq(opportunities.id, o.id)),
   );
   // After the offer window: expire unanswered offers and offer the next people.
-  await deps.enqueue(null, QUEUES.slotRecovery, { tenantId, opportunityId: o.id }, {
-    startAfter: expiresAt,
-    singletonKey: `${o.id}:${expiresAt.toISOString()}`,
-  });
+  await deps.enqueue(
+    null,
+    QUEUES.slotRecovery,
+    { tenantId, opportunityId: o.id },
+    {
+      startAfter: expiresAt,
+      singletonKey: `${o.id}:${expiresAt.toISOString()}`,
+    },
+  );
   return { status: 'offered', offered: sent };
 }
 
@@ -340,7 +373,12 @@ export async function answerSlotOffer(
         .update(slotOffers)
         .set({ status: 'declined', respondedAt: now })
         .where(eq(slotOffers.id, offer.id));
-      await deps.enqueue(tx, QUEUES.slotRecovery, { tenantId, opportunityId: o.id }, { singletonKey: `${o.id}:declined:${offer.id}` });
+      await deps.enqueue(
+        tx,
+        QUEUES.slotRecovery,
+        { tenantId, opportunityId: o.id },
+        { singletonKey: `${o.id}:declined:${offer.id}` },
+      );
     });
     return { status: 'declined' };
   }
@@ -374,7 +412,10 @@ export async function answerSlotOffer(
     return { status: err.code === 'taken' || err.code === 'unavailable' ? 'taken' : 'expired' };
   }
   await withTenant(deps.db, tenantId, async (tx) => {
-    await tx.update(slotOffers).set({ status: 'accepted', respondedAt: now }).where(eq(slotOffers.id, offer.id));
+    await tx
+      .update(slotOffers)
+      .set({ status: 'accepted', respondedAt: now })
+      .where(eq(slotOffers.id, offer.id));
     await tx
       .update(slotOffers)
       .set({ status: 'superseded' })

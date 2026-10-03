@@ -5,6 +5,7 @@ import {
   CalendarCheck,
   FlaskConical,
   Inbox,
+  LifeBuoy,
   LogOut,
   Menu,
   Settings,
@@ -15,6 +16,7 @@ import { api, ApiError, tenantSelection, type Me, type TenantConfig, type Tenant
 import { Agency } from './pages/Agency.tsx';
 import { InboxPage } from './pages/Inbox.tsx';
 import { Login } from './pages/Login.tsx';
+import { RecoveryPage } from './pages/Recovery.tsx';
 import { ReportsPage } from './pages/Reports.tsx';
 import { Sandbox } from './pages/Sandbox.tsx';
 import { SettingsPage } from './pages/Settings.tsx';
@@ -26,6 +28,7 @@ import { Button, cx, ErrorState, Loading, Select } from './ui.tsx';
 const NAV = [
   { path: '/', label: 'Today', icon: CalendarCheck },
   { path: '/inbox', label: 'Inbox', icon: Inbox },
+  { path: '/recovery', label: 'Recovery', icon: LifeBuoy },
   { path: '/reports', label: 'Reports', icon: BarChart3 },
   { path: '/sandbox', label: 'Demo sandbox', icon: FlaskConical },
   { path: '/settings', label: 'Settings', icon: Settings },
@@ -98,6 +101,8 @@ function Shell({ me }: { me: Me }) {
     switch (path) {
       case '/inbox':
         return <InboxPage {...props} />;
+      case '/recovery':
+        return <RecoveryPage {...props} />;
       case '/reports':
         return <ReportsPage {...props} />;
       case '/sandbox':

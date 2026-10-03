@@ -6,6 +6,7 @@ import { useLocation } from '../router.ts';
 import { Button, Card, cx, PageHeader } from '../ui.tsx';
 import { Integrations } from './settings/Integrations.tsx';
 import { Availability, Templates } from './settings/Operations.tsx';
+import { AutonomySection, PhoneAgentSection } from './settings/OpsSections.tsx';
 import {
   AiPrivacySection,
   BookingPolicySection,
@@ -26,6 +27,8 @@ const TABS = [
   ['booking', 'Booking'],
   ['messages', 'Messages'],
   ['reports', 'Reports'],
+  ['autonomy', 'AI autonomy'],
+  ['phone', 'Phone agent'],
   ['ai', 'AI & data'],
   ['integrations', 'Integrations'],
 ] as const;
@@ -162,6 +165,8 @@ export function SettingsPage({
           </>
         )}
         {tab === 'reports' && <ReportsSection draft={draft} edit={edit} />}
+        {tab === 'autonomy' && <AutonomySection draft={draft} edit={edit} />}
+        {tab === 'phone' && <PhoneAgentSection draft={draft} edit={edit} canEdit={canEdit} />}
         {tab === 'ai' && <AiPrivacySection draft={draft} edit={edit} />}
         {tab === 'integrations' && <Integrations canEdit={canEdit} />}
       </fieldset>

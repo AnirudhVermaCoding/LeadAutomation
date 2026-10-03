@@ -488,7 +488,8 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
               ),
             )
         ).filter(
-          (p) => p.service?.toLowerCase() === service.name.toLowerCase() && sameAttendee(p.attendee, attendee),
+          (p) =>
+            p.service?.toLowerCase() === service.name.toLowerCase() && sameAttendee(p.attendee, attendee),
         );
     if (input.treatmentPlanId) {
       const [own] = await tx

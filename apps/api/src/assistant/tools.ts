@@ -131,7 +131,13 @@ export async function escalate(c: Omit<ToolContext, 'config'>, reason: string, c
       ...(category && { category }),
       ...(c.channel === 'phone' && { channel: 'phone' }),
     });
-    await alertStaff(tx, c.deps, c.tenantId, c.leadId, category ? `${category.replace('_', ' ')}: ${reason}` : reason);
+    await alertStaff(
+      tx,
+      c.deps,
+      c.tenantId,
+      c.leadId,
+      category ? `${category.replace('_', ' ')}: ${reason}` : reason,
+    );
   });
 }
 
@@ -200,7 +206,11 @@ export async function runTool(c: ToolContext, name: string, rawInput: unknown): 
     case 'cancel':
       // The clinic wants a person to approve changes and cancellations: hand over instead of acting.
       if ((name === 'reschedule' || name === 'cancel') && autonomyOf(c.config, name) === 'approval') {
-        await escalate(c, `customer asked to ${name} an appointment; the clinic approves these itself`, 'outside_policy');
+        await escalate(
+          c,
+          `customer asked to ${name} an appointment; the clinic approves these itself`,
+          'outside_policy',
+        );
         return {
           content: `Not done: this clinic's team handles ${name === 'cancel' ? 'cancellations' : 'changes'} themselves. A team member has been alerted. Tell them kindly that the team will confirm shortly; do not say it is done.`,
         };

@@ -267,7 +267,8 @@ export async function runAssistantTurn(
       return { status: 'replied', reason: `slot offer: ${r.status}` };
     }
     const bookButton =
-      button.buttonId === 'book' && ['treatment_followup', 'recall_due', 'lead_reactivation'].includes(button.key);
+      button.buttonId === 'book' &&
+      ['treatment_followup', 'recall_due', 'lead_reactivation'].includes(button.key);
     if (
       (button.key === 'appointment_change' && button.buttonId === 'times') ||
       (button.key === 'cancellation' && button.buttonId === 'rebook') ||
@@ -278,7 +279,9 @@ export async function runAssistantTurn(
         bookButton ? lastAppointmentOrPlan(tx, leadId) : lastCancelledAppointment(tx, leadId),
       );
       const service = old?.service ?? config.booking.services[0]?.name ?? '';
-      const hour = old?.startsAt ? Number(localParts(old.startsAt, config.locale.timezone).time.slice(0, 2)) : 12;
+      const hour = old?.startsAt
+        ? Number(localParts(old.startsAt, config.locale.timezone).time.slice(0, 2))
+        : 12;
       const prefer = hour < 12 ? 'morning' : hour < 16 ? 'afternoon' : 'evening';
       const { slots } = await findSlots(deps, tenantId, { service, prefer });
       if (!slots.length) {

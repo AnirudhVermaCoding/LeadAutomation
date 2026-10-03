@@ -29,7 +29,12 @@ describe('opportunity priority', () => {
 });
 
 describe('stalled treatment', () => {
-  const plan = { status: 'in_progress' as const, visitsDone: 1, nextVisitDueAt: daysAgo(8), since: daysAgo(40) };
+  const plan = {
+    status: 'in_progress' as const,
+    visitsDone: 1,
+    nextVisitDueAt: daysAgo(8),
+    since: daysAgo(40),
+  };
   test('overdue by more than the grace period with nothing booked', () => {
     expect(isStalled(plan, now, false, 7)).toBe(true);
     expect(isStalled(plan, now, false, 10)).toBe(false);
@@ -38,11 +43,21 @@ describe('stalled treatment', () => {
     expect(isStalled({ ...plan, status: 'declined' }, now, false, 7)).toBe(false);
   });
   test('an accepted plan never started counts from acceptance; no date and visits done = not stalled', () => {
-    expect(isStalled({ status: 'accepted', visitsDone: 0, nextVisitDueAt: null, since: daysAgo(9) }, now, false, 7)).toBe(
-      true,
-    );
     expect(
-      isStalled({ status: 'in_progress', visitsDone: 2, nextVisitDueAt: null, since: daysAgo(90) }, now, false, 7),
+      isStalled(
+        { status: 'accepted', visitsDone: 0, nextVisitDueAt: null, since: daysAgo(9) },
+        now,
+        false,
+        7,
+      ),
+    ).toBe(true);
+    expect(
+      isStalled(
+        { status: 'in_progress', visitsDone: 2, nextVisitDueAt: null, since: daysAgo(90) },
+        now,
+        false,
+        7,
+      ),
     ).toBe(false);
   });
 });

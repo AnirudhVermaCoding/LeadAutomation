@@ -3,6 +3,7 @@ import { CalendarClock, Check, CircleSlash, Clock, UserCheck, X } from 'lucide-r
 import { useState } from 'react';
 import { api, type Appointment, type Role, type TenantConfig } from '../api.ts';
 import { navigate } from '../router.ts';
+import { CommandCenter } from './CommandCenter.tsx';
 import {
   Badge,
   Button,
@@ -56,7 +57,11 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
   const act = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'confirm' | 'complete' | 'no-show' | 'cancel' }) =>
       api(`/v1/appointments/${id}/${action}`, { method: 'POST' }),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['appointments'] }),
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['appointments'] }),
+        qc.invalidateQueries({ queryKey: ['command-center'] }),
+      ]),
   });
 
   const now = Date.now();
@@ -110,6 +115,7 @@ export function Today({ config }: { config: TenantConfig; role: Role }) {
           </span>
         }
       />
+      <CommandCenter tz={tz} />
       {late.data && (
         <p className="mb-4 text-sm text-slate-600">
           Told {late.data.notified} {late.data.notified === 1 ? 'person' : 'people'} booked later today.

@@ -17,7 +17,8 @@ let script: ((req: LlmRequest) => LlmResponse) | null = null;
 const llm: LlmProvider = {
   provider: 'fake',
   model: 'fake',
-  complete: async (req, hints) => (script && req.task === 'agent_reply' ? script(req) : fake.complete(req, hints)),
+  complete: async (req, hints) =>
+    script && req.task === 'agent_reply' ? script(req) : fake.complete(req, hints),
 };
 const text = (t: string): LlmResponse => ({
   text: t,
@@ -92,11 +93,21 @@ describe('autonomy: approval', () => {
   });
 
   test('cancel / reschedule need approval: nothing changes, staff take over', async () => {
-    const config = await setConfig((c) => ({ ...c, autonomy: { cancel: 'approval', reschedule: 'approval' } }));
+    const config = await setConfig((c) => ({
+      ...c,
+      autonomy: { cancel: 'approval', reschedule: 'approval' },
+    }));
     const leadId = await newLead();
-    const [slot, later] = (await findSlots(t.ctx, A, { service: 'Consultation', limit: 200, spread: false })).slots
-      .slice(0, 2);
-    await bookSlot(t.ctx, A, { leadId, service: 'Consultation', date: slot!.date, time: slot!.time, source: 'staff' });
+    const [slot, later] = (
+      await findSlots(t.ctx, A, { service: 'Consultation', limit: 200, spread: false })
+    ).slots.slice(0, 2);
+    await bookSlot(t.ctx, A, {
+      leadId,
+      service: 'Consultation',
+      date: slot!.date,
+      time: slot!.time,
+      source: 'staff',
+    });
     const out = await runTool(tool(config, leadId), 'cancel', {});
     expect(out.content).toMatch(/^Not done/);
     const res = await runTool(tool(config, leadId), 'reschedule', { date: later!.date, time: later!.time });
@@ -159,7 +170,9 @@ describe('never: clinical actions and invented facts', () => {
     expect(checkReply('From what you describe, you probably have a cavity.', ctx)).toHaveLength(1);
     expect(checkReply('You need a root canal, it is nothing serious.', ctx)[0]).toMatch(/clinical/);
     expect(checkReply('Gargle with salt water tonight and see the dentist.', ctx)).toHaveLength(1);
-    expect(checkReply("I can't say what's causing it. Shall I book a Root canal consultation?", ctx)).toEqual([]);
+    expect(checkReply("I can't say what's causing it. Shall I book a Root canal consultation?", ctx)).toEqual(
+      [],
+    );
   });
 
   test('a price the clinic never gave is never sent (repair once, then hand over)', async () => {
@@ -175,7 +188,10 @@ describe('never: clinical actions and invented facts', () => {
     await t.drainAssistant();
     script = null;
     const out = await withTenant(t.ctx.db, A, async (tx) => {
-      const [l] = await tx.select().from(leads).where(eq(leads.phoneE164, `+91${phone}`));
+      const [l] = await tx
+        .select()
+        .from(leads)
+        .where(eq(leads.phoneE164, `+91${phone}`));
       return {
         lead: l!,
         sent: await tx

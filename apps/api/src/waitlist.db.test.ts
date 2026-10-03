@@ -61,8 +61,15 @@ async function newLead(name: string) {
 }
 /** A booking on Wednesday, the idx-th free Consultation slot of that day. */
 async function bookWed(leadId: string, idx = 0, date = '2026-10-07') {
-  const slot = (await findSlots(t.ctx, A, { service: 'Consultation', date, limit: 200, spread: false })).slots[idx]!;
-  const r = await bookSlot(t.ctx, A, { leadId, service: 'Consultation', date: slot.date, time: slot.time, source: 'staff' });
+  const slot = (await findSlots(t.ctx, A, { service: 'Consultation', date, limit: 200, spread: false }))
+    .slots[idx]!;
+  const r = await bookSlot(t.ctx, A, {
+    leadId,
+    service: 'Consultation',
+    date: slot.date,
+    time: slot.time,
+    source: 'staff',
+  });
   await t.drainJobs();
   return r.appointment;
 }
@@ -73,21 +80,31 @@ const slotOpp = (appointmentId: string) =>
     const [o] = await tx
       .select()
       .from(opportunities)
-      .where(and(eq(opportunities.kind, 'EMPTY_SLOT'), eq(opportunities.subjectKey, `slot:${appointmentId}`)));
+      .where(
+        and(eq(opportunities.kind, 'EMPTY_SLOT'), eq(opportunities.subjectKey, `slot:${appointmentId}`)),
+      );
     return o;
   });
 const offersFor = (opportunityId: string) =>
   withTenant(t.ctx.db, A, (tx) =>
-    tx.select().from(slotOffers).where(eq(slotOffers.opportunityId, opportunityId)).orderBy(asc(slotOffers.createdAt)),
+    tx
+      .select()
+      .from(slotOffers)
+      .where(eq(slotOffers.opportunityId, opportunityId))
+      .orderBy(asc(slotOffers.createdAt)),
   );
-const clearWaitlist = () => withTenant(t.ctx.db, A, (tx) => tx.update(waitlistEntries).set({ status: 'removed' }));
+const clearWaitlist = () =>
+  withTenant(t.ctx.db, A, (tx) => tx.update(waitlistEntries).set({ status: 'removed' }));
 const activeAt = (startsAt: Date) =>
   withTenant(t.ctx.db, A, (tx) =>
     tx
       .select()
       .from(appointments)
       .where(
-        and(eq(appointments.startsAt, startsAt), inArray(appointments.status, ['pending', 'scheduled', 'confirmed'])),
+        and(
+          eq(appointments.startsAt, startsAt),
+          inArray(appointments.status, ['pending', 'scheduled', 'confirmed']),
+        ),
       ),
   );
 const tap = (phone: string, payload: string) =>
@@ -124,7 +141,11 @@ describe('cancellation → waitlist recovery', () => {
     expect(booked.map((a) => a.leadId)).toEqual([w2.leadId]);
     expect(booked[0]!.googleEventId).toBeTruthy();
     expect(calendar.events.has(booked[0]!.googleEventId!)).toBe(true);
-    expect(await slotOpp(appt.id)).toMatchObject({ status: 'won', outcome: 'filled from the waitlist', leadId: w2.leadId });
+    expect(await slotOpp(appt.id)).toMatchObject({
+      status: 'won',
+      outcome: 'filled from the waitlist',
+      leadId: w2.leadId,
+    });
     const after = await offersFor(opp.id);
     expect(after.find((o) => o.leadId === w2.leadId)?.status).toBe('accepted');
     expect(after.find((o) => o.leadId === w1.leadId)?.status).toBe('superseded');
@@ -135,7 +156,10 @@ describe('cancellation → waitlist recovery', () => {
     await t.drainAssistant();
     expect((await activeAt(appt.startsAt)).map((a) => a.leadId)).toEqual([w2.leadId]);
     const [last] = await withTenant(t.ctx.db, A, (tx) =>
-      tx.select().from(messages).where(and(eq(messages.leadId, w1.leadId), eq(messages.direction, 'out'))),
+      tx
+        .select()
+        .from(messages)
+        .where(and(eq(messages.leadId, w1.leadId), eq(messages.direction, 'out'))),
     ).then((rows) => rows.slice(-1));
     expect(last?.body).toMatch(/someone else just took that time/);
   });
@@ -172,7 +196,9 @@ describe('cancellation → waitlist recovery', () => {
     const opp = (await slotOpp(appt.id))!;
     let offers = await offersFor(opp.id);
     expect(offers.map((o) => o.leadId)).toEqual([ws[0]!.leadId, ws[1]!.leadId]);
-    expect(await answerSlotOffer(t.ctx, A, { offerId: offers[0]!.id, leadId: ws[0]!.leadId, accept: false })).toEqual({
+    expect(
+      await answerSlotOffer(t.ctx, A, { offerId: offers[0]!.id, leadId: ws[0]!.leadId, accept: false }),
+    ).toEqual({
       status: 'declined',
     });
     // One offer still outstanding: wait for it.
@@ -188,7 +214,9 @@ describe('cancellation → waitlist recovery', () => {
       [ws[3]!.leadId, 'sent'],
     ]);
     // An expired offer can't be accepted.
-    expect(await answerSlotOffer(t.ctx, A, { offerId: offers[1]!.id, leadId: ws[1]!.leadId, accept: true })).toEqual({
+    expect(
+      await answerSlotOffer(t.ctx, A, { offerId: offers[1]!.id, leadId: ws[1]!.leadId, accept: true }),
+    ).toEqual({
       status: 'expired',
     });
   });
@@ -227,8 +255,15 @@ describe('cancellation → waitlist recovery', () => {
     const owner = await newLead('Owner 5');
     const appt = await bookWed(owner.leadId, 15);
     // Rescheduling also frees a slot: the owner moves to Thursday.
-    const slotThu = (await findSlots(t.ctx, A, { service: 'Consultation', date: '2026-10-08', limit: 1, spread: false })).slots[0]!;
-    await rescheduleLeadAppointment(t.ctx, A, { leadId: owner.leadId, date: slotThu.date, time: slotThu.time, source: 'staff' });
+    const slotThu = (
+      await findSlots(t.ctx, A, { service: 'Consultation', date: '2026-10-08', limit: 1, spread: false })
+    ).slots[0]!;
+    await rescheduleLeadAppointment(t.ctx, A, {
+      leadId: owner.leadId,
+      date: slotThu.date,
+      time: slotThu.time,
+      source: 'staff',
+    });
     await t.drainJobs();
     const opp = (await slotOpp(appt.id))!;
     const [offer] = await offersFor(opp.id);
@@ -239,11 +274,18 @@ describe('cancellation → waitlist recovery', () => {
       tx
         .select()
         .from(appointments)
-        .where(and(eq(appointments.leadId, early.leadId), inArray(appointments.status, ['scheduled', 'confirmed']))),
+        .where(
+          and(
+            eq(appointments.leadId, early.leadId),
+            inArray(appointments.status, ['scheduled', 'confirmed']),
+          ),
+        ),
     );
     expect(mine.map((a) => a.startsAt.getTime())).toEqual([appt.startsAt.getTime()]);
     expect(await slotOpp(later.id)).toMatchObject({ kind: 'EMPTY_SLOT' });
-    const [l] = await withTenant(t.ctx.db, A, (tx) => tx.select().from(leads).where(eq(leads.id, early.leadId)));
+    const [l] = await withTenant(t.ctx.db, A, (tx) =>
+      tx.select().from(leads).where(eq(leads.id, early.leadId)),
+    );
     expect(l?.state).toBe('booked');
   });
 });

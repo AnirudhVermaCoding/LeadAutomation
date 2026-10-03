@@ -49,17 +49,42 @@ describe('Vapi adapter', () => {
           endedAt: '2026-10-05T04:33:30Z',
         },
       }),
-    ).toMatchObject({ type: 'call_ended', summary: 'Booked a cleaning.', durationSec: 210, transferred: true, failed: false });
+    ).toMatchObject({
+      type: 'call_ended',
+      summary: 'Booked a cleaning.',
+      durationSec: 210,
+      transferred: true,
+      failed: false,
+    });
     expect(
-      vapiProvider.parse({ message: { type: 'end-of-call-report', call, endedReason: 'pipeline-error-openai', durationSeconds: 12.4 } }),
+      vapiProvider.parse({
+        message: {
+          type: 'end-of-call-report',
+          call,
+          endedReason: 'pipeline-error-openai',
+          durationSeconds: 12.4,
+        },
+      }),
     ).toMatchObject({ durationSec: 12, failed: true, summary: null });
   });
 
   test('final caller transcripts only; unknown or malformed messages are ignored', () => {
     expect(
-      vapiProvider.parse({ message: { type: 'transcript', call, role: 'user', transcriptType: 'final', transcript: 'my face is swelling' } }),
+      vapiProvider.parse({
+        message: {
+          type: 'transcript',
+          call,
+          role: 'user',
+          transcriptType: 'final',
+          transcript: 'my face is swelling',
+        },
+      }),
     ).toEqual({ type: 'transcript', callId: 'call_1', from: '+919876543210', text: 'my face is swelling' });
-    expect(vapiProvider.parse({ message: { type: 'transcript', call, role: 'user', transcriptType: 'partial', transcript: 'my' } }).type).toBe('ignored');
+    expect(
+      vapiProvider.parse({
+        message: { type: 'transcript', call, role: 'user', transcriptType: 'partial', transcript: 'my' },
+      }).type,
+    ).toBe('ignored');
     expect(vapiProvider.parse({ message: { type: 'speech-update', call } }).type).toBe('ignored');
     expect(vapiProvider.parse({ nope: true }).type).toBe('ignored');
     expect(vapiProvider.parse({ message: { type: 'tool-calls' } }).type).toBe('ignored');

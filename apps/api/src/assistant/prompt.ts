@@ -55,7 +55,9 @@ export function toolSchemas(config: TenantConfig, resources: readonly string[] =
       category: z
         .enum(ESCALATION_CATEGORIES)
         .optional()
-        .describe('complaint, refund, special_pricing (discounts / custom prices), account (billing, records), outside_policy, clinical (a medical question), or other'),
+        .describe(
+          'complaint, refund, special_pricing (discounts / custom prices), account (billing, records), outside_policy, clinical (a medical question), or other',
+        ),
     }),
     mark_disqualified: z.strictObject({
       reason: z.string().min(3).max(300).describe('Which answer disqualifies the lead and why'),

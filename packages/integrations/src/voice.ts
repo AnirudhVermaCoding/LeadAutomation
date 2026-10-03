@@ -114,7 +114,9 @@ export const vapiProvider: VoiceProvider = {
     const from = m.call?.customer?.number ?? m.customer?.number ?? null;
     switch (m.type) {
       case 'status-update':
-        return m.status === 'in-progress' ? { type: 'call_started', callId, from } : { type: 'ignored', reason: `status ${m.status}` };
+        return m.status === 'in-progress'
+          ? { type: 'call_started', callId, from }
+          : { type: 'ignored', reason: `status ${m.status}` };
       case 'tool-calls':
         return {
           type: 'tool_calls',
@@ -137,7 +139,8 @@ export const vapiProvider: VoiceProvider = {
         const started = m.startedAt ? Date.parse(m.startedAt) : NaN;
         const ended = m.endedAt ? Date.parse(m.endedAt) : NaN;
         const duration =
-          m.durationSeconds ?? (Number.isFinite(started) && Number.isFinite(ended) ? (ended - started) / 1000 : null);
+          m.durationSeconds ??
+          (Number.isFinite(started) && Number.isFinite(ended) ? (ended - started) / 1000 : null);
         return {
           type: 'call_ended',
           callId,
