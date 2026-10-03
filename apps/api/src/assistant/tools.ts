@@ -1,4 +1,4 @@
-import type { TenantConfig } from '@instantlead/config';
+import { autonomyOf, type TenantConfig } from '@instantlead/config';
 import { scoreLead } from '@instantlead/core';
 import { eq } from 'drizzle-orm';
 import { withTenant, type TenantTx, type Tx } from '../db/client.ts';
@@ -13,7 +13,8 @@ import {
   findSlots,
   rescheduleLeadAppointment,
 } from '../booking.ts';
-import { toolSchemas, weeklyHours, type ToolName } from './prompt.ts';
+import { joinWaitlist } from '../waitlist.ts';
+import { allowedToolSchemas, weeklyHours, type ToolName } from './prompt.ts';
 
 export interface ToolContext {
   deps: LeadDeps & { db: Db };
@@ -22,6 +23,8 @@ export interface ToolContext {
   config: TenantConfig;
   /** Doctors / agents (availability rule resources). */
   resources?: readonly string[];
+  /** Where the request came from (the phone agent shares this exact tool boundary). */
+  channel?: 'whatsapp' | 'phone';
 }
 
 export interface ToolOutcome {
@@ -119,11 +122,16 @@ function lookupKnowledge(c: ToolContext, input: { query: string }): ToolOutcome 
 }
 
 /** Hand the conversation to a person: pause the AI, record why, and alert staff. */
-export async function escalate(c: Omit<ToolContext, 'config'>, reason: string) {
+export async function escalate(c: Omit<ToolContext, 'config'>, reason: string, category?: string) {
   await withTenant(c.deps.db, c.tenantId, async (tx) => {
     await transitionLead(tx, c.leadId, { type: 'HUMAN_TAKEOVER' });
-    await emit(tx, c.deps.clock, 'lead.escalated', { leadId: c.leadId, reason });
-    await alertStaff(tx, c.deps, c.tenantId, c.leadId, reason);
+    await emit(tx, c.deps.clock, 'lead.escalated', {
+      leadId: c.leadId,
+      reason,
+      ...(category && { category }),
+      ...(c.channel === 'phone' && { channel: 'phone' }),
+    });
+    await alertStaff(tx, c.deps, c.tenantId, c.leadId, category ? `${category.replace('_', ' ')}: ${reason}` : reason);
   });
 }
 
@@ -139,9 +147,11 @@ export function alertStaff(tx: TenantTx, deps: LeadDeps, tenantId: string, leadI
 
 /** Validate the model's arguments, then run the tool. Bad arguments go back to the model as an error. */
 export async function runTool(c: ToolContext, name: string, rawInput: unknown): Promise<ToolOutcome> {
-  const schemas = toolSchemas(c.config, c.resources);
-  if (!(name in schemas)) return { content: `Unknown tool ${name}`, isError: true, invalidArguments: true };
-  const parsed = schemas[name as ToolName].safeParse(rawInput);
+  // Only tools this clinic allows (autonomy "off" = not offered, and not callable either).
+  const schemas = allowedToolSchemas(c.config, c.resources);
+  const schema = schemas[name as ToolName];
+  if (!schema) return { content: `Unknown tool ${name}`, isError: true, invalidArguments: true };
+  const parsed = schema.safeParse(rawInput);
   if (!parsed.success)
     return { content: `Invalid arguments: ${parsed.error.message}`, isError: true, invalidArguments: true };
   const input = parsed.data as Record<string, string>;
@@ -152,7 +162,7 @@ export async function runTool(c: ToolContext, name: string, rawInput: unknown): 
     case 'lookup_knowledge':
       return lookupKnowledge(c, input as { query: string });
     case 'escalate_to_human':
-      await escalate(c, input.reason ?? 'escalated');
+      await escalate(c, input.reason ?? 'escalated', input.category);
       return {
         content:
           'Done: a team member will take over this conversation. Tell the lead they will hear from a person shortly.',
@@ -163,10 +173,38 @@ export async function runTool(c: ToolContext, name: string, rawInput: unknown): 
         await emit(tx, c.deps.clock, 'lead.disqualified', { leadId: c.leadId, reason: input.reason });
       });
       return { content: 'Marked as not a fit. Close politely and offer a call from the team.' };
+    case 'join_waitlist': {
+      const r = await joinWaitlist(c.deps, c.tenantId, {
+        leadId: c.leadId,
+        service: input.service ?? '',
+        fromDate: input.from_date,
+        toDate: input.to_date,
+        partOfDay: input.part_of_day as 'morning' | 'afternoon' | 'evening' | undefined,
+        forName: input.for_name,
+        source: 'assistant',
+      }).catch((err: unknown) => {
+        if (err instanceof BookingError) return { error: err.message };
+        throw err;
+      });
+      if ('error' in r) return { content: r.error, isError: true };
+      return {
+        content: JSON.stringify({
+          ...r,
+          note: 'Tell them they are on the waitlist and will get a WhatsApp message if a time opens up; the first to accept gets it. Promise no particular time.',
+        }),
+      };
+    }
     case 'get_available_slots':
     case 'book_slot':
     case 'reschedule':
     case 'cancel':
+      // The clinic wants a person to approve changes and cancellations: hand over instead of acting.
+      if ((name === 'reschedule' || name === 'cancel') && autonomyOf(c.config, name) === 'approval') {
+        await escalate(c, `customer asked to ${name} an appointment; the clinic approves these itself`, 'outside_policy');
+        return {
+          content: `Not done: this clinic's team handles ${name === 'cancel' ? 'cancellations' : 'changes'} themselves. A team member has been alerted. Tell them kindly that the team will confirm shortly; do not say it is done.`,
+        };
+      }
       try {
         return { content: JSON.stringify(await booking(c, name as Parameters<typeof booking>[1], input)) };
       } catch (err) {
@@ -219,6 +257,7 @@ async function booking(
         source: 'assistant',
         resource: input.resource,
         forName: input.for_name,
+        requireApproval: autonomyOf(c.config, 'book') === 'approval',
       });
       return {
         booked: input.resource ? `${r.label} with ${input.resource}` : r.label,

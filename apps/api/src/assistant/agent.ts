@@ -1,4 +1,4 @@
-import { fillVariables, parseButtonPayload, type TenantConfig } from '@instantlead/config';
+import { autonomyOf, fillVariables, parseButtonPayload, type TenantConfig } from '@instantlead/config';
 import {
   detectLanguage,
   displayStatus,
@@ -386,7 +386,11 @@ export async function runAssistantTurn(
   }
 
   const memory = await conversationMemory(deps, tenantId, leadId, config, ctx.all, ctx.conversation);
-  const knowledgeText = config.qualification.knowledge.map((k) => `${k.title}: ${k.content}`).join('\n');
+  // Facts the reply may use: the clinic's knowledge, unless the clinic answers questions itself (FAQ autonomy).
+  const knowledgeText =
+    autonomyOf(config, 'faq') === 'auto'
+      ? config.qualification.knowledge.map((k) => `${k.title}: ${k.content}`).join('\n')
+      : '';
   const allowedUrls = [config.sequences.review_request.google_review_link ?? ''].filter(Boolean);
 
   const scored = scoreLead(config.qualification, ctx.answers);

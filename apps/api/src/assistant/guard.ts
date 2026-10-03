@@ -216,9 +216,15 @@ export function cleanReply(text: string): string {
 }
 
 const LEAK =
-  /\b(record_answer|lookup_knowledge|escalate_to_human|mark_disqualified|get_available_slots|book_slot|tool_use|CRM state|QUALIFICATION QUESTIONS|system prompt|my instructions|Do not guess|Internal note)\b|\bKNOWLEDGE\b/;
+  /\b(record_answer|lookup_knowledge|escalate_to_human|mark_disqualified|get_available_slots|book_slot|join_waitlist|tool_use|CRM state|QUALIFICATION QUESTIONS|system prompt|my instructions|Do not guess|Internal note)\b|\bKNOWLEDGE\b/;
 const MEDICINE =
   /\b(paracetamol|ibuprofen|crocin|combiflam|dolo|calpol|aspirin|diclofenac|nimesulide|amoxicillin|azithromycin|metronidazole|cetirizine|antibiotics?|painkillers?|\d+\s?mg)\b/i;
+/**
+ * Clinical interpretation the assistant must never give (diagnosis, treatment decisions, "it's nothing serious").
+ * Narrow on purpose: naming a bookable service ("a root canal consultation") is fine; telling someone they need one is not.
+ */
+const CLINICAL =
+  /\b(you (probably |likely |may |might |definitely |surely )?(have|need|are suffering from|have got) (a |an |some )?(cavity|cavities|infection|abscess|gum disease|gingivitis|periodontitis|root canal|extraction|tooth removal|filling|crown|implant|surgery|tumou?r|cancer|fracture)|(it|this|that) (sounds|looks|seems) like (a |an )?(cavity|infection|abscess|gum disease|gingivitis|decay|fracture|ulcer)|(it|this|that)('s| is| isn't| is not) (nothing serious|not serious|serious|dangerous|nothing to worry about)|no need to (see|visit) (a |the )?(doctor|dentist)|(take|apply|use|gargle with) (some |a )?(clove oil|salt water|warm water|ice|turmeric|antiseptic|mouthwash))\b/i;
 const DEVANAGARI = /[ऀ-ॿ]/gu;
 const LETTERS = /\p{L}/gu;
 const numbers = (s: string) => new Set([...s.matchAll(/\d[\d,]*/g)].map((m) => m[0].replace(/,/g, '')));
@@ -248,6 +254,8 @@ export function checkReply(text: string, c: ReplyContext): string[] {
 
   if (c.noMedicalAdvice && MEDICINE.test(text))
     problems.push('names a medicine or dose (no medical advice allowed)');
+  if (c.noMedicalAdvice && CLINICAL.test(text))
+    problems.push('gives a diagnosis, treatment decision or home remedy (clinical advice is never allowed)');
 
   const allowed = [...c.allowedUrls, ...(c.sources.match(/https?:\/\/\S+|www\.\S+/g) ?? [])].map((u) =>
     u.replace(/[).,]+$/, '').toLowerCase(),
