@@ -17,8 +17,10 @@ const migrationsFolder = fileURLToPath(new URL('../../drizzle', import.meta.url)
  */
 export async function migrate(ownerUrl: string, appUrl: string): Promise<void> {
   const app = new URL(appUrl);
-  const role = decodeURIComponent(app.username);
-  if (role !== APP_ROLE) throw new Error(`DATABASE_URL must connect as "${APP_ROLE}" (got "${role}")`);
+  const login = decodeURIComponent(app.username);
+  // Supabase's pooler logs in as "<role>.<project ref>"; the role itself is still instantlead_app.
+  const role = login.split('.')[0];
+  if (role !== APP_ROLE) throw new Error(`DATABASE_URL must connect as "${APP_ROLE}" (got "${login}")`);
 
   const client = new pg.Client({ connectionString: ownerUrl });
   await client.connect();
@@ -71,9 +73,43 @@ export async function migrate(ownerUrl: string, appUrl: string): Promise<void> {
       grant execute on all functions in schema pgboss to ${r};
       alter default privileges in schema pgboss grant select, insert, update, delete on tables to ${r};
     `);
+    await lockDownDataApi(client);
   } finally {
     await client.end();
   }
+}
+
+/**
+ * Supabase (and anything else with PostgREST roles): a new table in `public` is readable by `anon` and
+ * `authenticated`, i.e. by anyone holding the project's public anon key, through the auto-generated REST API.
+ * Our tables are reached only by the app role over a direct connection, so: take every privilege away from those
+ * roles (now and for future tables), and turn row-level security on for any table that still lacks it (deny by
+ * default). No-op on a plain Postgres, where those roles don't exist. Safe to re-run.
+ */
+export async function lockDownDataApi(client: { query(sql: string): Promise<unknown> }) {
+  await client.query(`
+    do $$
+    declare r record; roles text[] := array(select rolname::text from pg_roles where rolname in ('anon', 'authenticated'));
+    begin
+      if cardinality(roles) > 0 then
+        execute format('revoke all on all tables in schema public from %s', array_to_string(roles, ', '));
+        execute format('revoke all on all sequences in schema public from %s', array_to_string(roles, ', '));
+        execute format('revoke all on all functions in schema public from %s', array_to_string(roles, ', '));
+        execute format('alter default privileges in schema public revoke all on tables from %s', array_to_string(roles, ', '));
+        execute format('alter default privileges in schema public revoke all on sequences from %s', array_to_string(roles, ', '));
+        execute format('alter default privileges in schema public revoke all on functions from %s', array_to_string(roles, ', '));
+        -- Supabase also creates objects as its own admin role; cover its defaults when we are allowed to.
+        begin
+          execute format('alter default privileges for role postgres in schema public revoke all on tables from %s', array_to_string(roles, ', '));
+        exception when others then null;
+        end;
+      end if;
+      for r in select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+               where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity loop
+        execute format('alter table public.%I enable row level security', r.relname);
+      end loop;
+    end $$;
+  `);
 }
 
 if (import.meta.main) {

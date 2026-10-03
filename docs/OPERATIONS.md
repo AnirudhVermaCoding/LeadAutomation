@@ -71,14 +71,26 @@ migration must be compatible with the previous release**:
 - The migrator takes an advisory lock (two containers can't migrate at once) and a 10 s `lock_timeout`: a migration that can't get its lock fails fast instead of queueing every query behind it. The deploy then stops before swapping the app.
 - Data-destroying changes (drop table/column) are the only thing a rollback can't undo: take the pre-deploy backup (the script does) and note the restore time.
 
-### Managed Postgres instead of the container (optional, later)
+### Managed Postgres instead of the container (Supabase, Mumbai)
 
-Any managed Postgres 16 in India works (AWS RDS Mumbai, DigitalOcean BLR1, **Supabase Pro in Mumbai used as plain Postgres**). The app only needs two connection strings:
+Any managed Postgres 16+ in India works (AWS RDS Mumbai, DigitalOcean BLR1, **Supabase in ap-south-1 used as plain Postgres**). A staging project, `instantlead-staging` (ap-south-1, Postgres 17), already has the full schema, the `instantlead_app` role, RLS everywhere and the Data API locked down (checked with Supabase's security advisor: only intentional notes remain).
 
-- Use the **direct** (or session-pooler) connection, port 5432. pg-boss and the migration lock need session features (LISTEN/NOTIFY, advisory locks, prepared statements) that Supabase's transaction pooler (port 6543) does not provide. Direct connections there are IPv6-only unless you buy the IPv4 add-on; the session pooler is IPv4.
-- `DATABASE_OWNER_URL` must be a role that can `CREATE ROLE` and `CREATE EXTENSION btree_gist` (Supabase's `postgres` can; verify with `deploy/restore-check.sh` after a trial migrate: **not yet tested against Supabase**). Drop the `db` service and point both URLs at the managed host.
-- Backups: Supabase Pro keeps 7 daily backups; point-in-time recovery is a paid add-on; restores cause downtime; custom role passwords are not in its daily backups (our migrate step re-applies the app role). Keep running `deploy/backup.sh` to your own bucket as well.
-- Never use the free tier for patient data (no backups, pauses when idle).
+Set up (on your machine; nothing secret goes in chat or git):
+
+1. Supabase dashboard > Database > Settings: reset the `postgres` password. Supabase > Connect: copy the session-pooler string.
+2. `cp .env.supabase.example .env.supabase` and fill it in (`.env*` is gitignored). Pick a long random `APP_DB_PASSWORD`.
+3. `pnpm db:migrate` (sets the app role's password, applies any new migration, backfills template rows) then `pnpm db:seed`, with those variables loaded.
+4. Run the app against it (`DATABASE_URL`, `DATABASE_OWNER_URL`), and drop the `db` service from compose if you deploy this way.
+
+Rules that matter:
+
+- Use the **direct** connection or the **session pooler** (port 5432). pg-boss and the migration lock need LISTEN/NOTIFY-class session features, advisory locks and prepared statements that the transaction pooler (port 6543) does not provide. Direct is IPv6-only unless you buy the IPv4 add-on; the session pooler is IPv4. On the pooler the login is `instantlead_app.<project-ref>`; the migrator reads the role from before the dot.
+- Add `?sslmode=no-verify` (encrypted, CA not checked) or load Supabase's CA to verify.
+- **The Data API is off-limits by design.** Supabase grants `anon` / `authenticated` access to new `public` tables by default. The migrator revokes that, turns RLS on for every table (including the auth tables, which have no policy: deny-all) and changes the default privileges for future tables. Tested in `lockdown.db.test.ts`. We never use the REST API, Supabase Auth or Realtime; consider switching the Data API off in the dashboard too.
+- `btree_gist` is installed in `public` (the advisor warns; harmless here, since `appointments_no_overlap` depends on it).
+- Backups: Supabase Pro keeps 7 daily backups; point-in-time recovery is a paid add-on; restores cause downtime; custom role passwords are not in its backups (our migrate step re-applies the app role). Keep running `deploy/backup.sh` to your own bucket as well.
+- **Free tier = staging only** (no backups, pauses after a week idle). Move to Pro in Mumbai before any real patient data.
+- The app has been tested against local Postgres only; it has not yet run live against Supabase. The first `pnpm db:migrate` + `pnpm dev` there is the real test (the schema itself was applied and checked through Supabase's SQL tool).
 
 **Scaling later:** run a second app container with `ROLE=worker` and set the web one to `ROLE=api`. Nothing else changes.
 
