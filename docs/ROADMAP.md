@@ -7,21 +7,23 @@
 - **Portal APIs / CRM push (99acres, MagicBricks, Housing, Practo, JustDial):** no public push API; they sell CRM integrations per account. Reason: the email-forward and Zapier / Make paths work today.
 - **Outlook / Office 365 calendar:** one more `CalendarProvider` adapter (Microsoft Graph subscriptions expire in ~3 days). Reason: separate Microsoft app registration and publisher verification; nobody has asked.
 - **HubSpot and other CRM adapters, n8n bridge:** outbound webhooks + Zapier / Make cover it for now.
-- **Voice calling and missed-call text-back (telephony).**
+- **Outbound phone calls (service reminders, recall calls) and missed-call text-back.** Reason: inbound AI receptionist is built (optional, Vapi); outbound calling needs per-clinic DLT / TRAI registration, a registered caller id and consent records per call purpose, so it stays off until a clinic provides them. Promotional calling will not be built.
+- **Voice transcripts and our own guard on spoken replies.** Reason: the vendor's model speaks between tool calls; we check every tool call and caller utterance, and store only the vendor's summary.
+- **More voice vendors (Bolna, Exotel voicebot, Retell):** one `VoiceProvider` adapter each.
 - **WhatsApp BSP adapters (Wati / Interakt / AiSensy):** add when a signed client uses one.
 
 ## Product
 
 - **Plans, message / AI limits per plan, payments and subscriptions.** Reason: pricing is your decision; usage by month + CSV and paused-tenant enforcement exist, so you can invoice manually in the pilot.
 - **White-label domains.**
-- **Database reactivation / recall campaigns; A/B testing.**
+- **Bulk reactivation campaigns and A/B testing.** Reason: one-to-one recall, lost-lead and stalled-treatment reminders are built (Recovery); bulk sends need marketing-template budgets and opt-in hygiene first.
+- **Billing / accounting:** payment links only; no invoices, ledgers or gateway reconciliation. Treatment value and payments are what staff type on the plan.
 - **Large-document RAG** (the assistant injects configured knowledge text).
 - **Voice-note transcription** (needs a speech-to-text provider; today the customer is asked to type, by choice) and **photo understanding** (patient photos are never sent to an AI, by choice).
 - **Per-task AI model routing in the Settings UI** (providers and budget are in the UI; routing stays JSON).
 - **Two-way sync of blocked time from Google beyond the 60-day window, and appointments typed by hand in Google becoming InstantLead appointments.** Reason: imported as busy time (safe); mapping free-text events to patients is guesswork.
 - **Patient-chosen alternative doctor during a leave rebooking** (today: same-time reassignment or new times).
 - **"Doctor running late" detected automatically** (today: a staff button).
-- **Staff WhatsApp alerts with idempotency keys** (a retried job can alert twice).
 - **Data principal self-service** (patients request access / erasure themselves; today via the clinic).
 
 ## Platform

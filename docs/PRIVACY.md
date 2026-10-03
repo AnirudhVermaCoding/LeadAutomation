@@ -22,6 +22,13 @@ Logs redact phone, email, names, tokens and cookies. Per-clinic credentials (Wha
 webhook secrets) are encrypted with AES-256-GCM and bound to the clinic, so they can't be moved between clinics.
 Each clinic's data is isolated by Postgres row-level security.
 
+### Phone calls, treatment plans, recovery (optional modules)
+
+- **Calls** (phone agent): caller number (as the lead), time, duration, outcome and the vendor's call summary. No recordings or transcripts are stored by us; the vendor (Vapi) processes the audio and may keep recordings per its own settings, so configure retention there and name it as a processor. A call counts as consent for that conversation, with the disclosure read at the start as the notice.
+- **Treatment plans**: the clinic's wording of a treatment, visit counts and dates, optional amounts. Administrative data entered by staff, not a medical record.
+- **Opportunities and waitlist**: ids, reasons in plain words, statuses.
+- Erasure deletes all of it with the lead; anonymization blanks call summaries, plan titles and family members' names; retention counts calls and plans as activity and never touches an open treatment or a future recall.
+
 ## Consent and notice
 
 - Every lead needs consent: the hosted form shows the clinic's notice (Settings → Business) and records it with

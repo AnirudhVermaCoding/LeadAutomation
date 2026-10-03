@@ -117,3 +117,17 @@ Three workstreams, one commit each; details in DECISIONS 91–120. Read [GO-LIVE
 - **W3 Production:** log scrubbing, request ids, optional Sentry, heartbeat, pool / process hardening, first-reply failure alerts, CSRF + rate limits + password rules + agency reset + single-use OAuth state + SSRF fix, generated RLS coverage test, operational data retention, compose / deploy / rollback / backup / restore scripts + a CI job that runs them, hot-path indexes + EXPLAIN test, assistant concurrency (p95 30 s → 5 s under 60 chatting customers), usage by month + CSV, paused tenants.
 - **Verified (mock mode, local):** lint, typecheck, build, 400+ tests on real Postgres 16, `pnpm demo` 6/6 (new: staff block 3–5 pm in Google → no longer offered, the booking inside it flagged, nobody messaged until staff choose), `pnpm sim` dental 14/14 and real estate 7/7, `pnpm loadtest --mix` (first reply p95 0.5 s; 60 chatting customers p95 5 s; 156 reminders due at once delivered in 6 s), `pnpm e2e` 2/2, `pnpm audit` clean.
 - **Not verified:** any real service (Meta, Google, Resend, a real model, `pnpm evals` for prompt `agent-v3`), the Docker image and deploy scripts, a restore on real Postgres tooling (the CI `docker` job covers these once pushed), Supabase as the database host.
+
+## AI operations employee (2026-10-03)
+
+Branch `feat/ai-operations-employee`. Details in DECISIONS 122–131.
+
+- **Patient journey:** one timeline per patient across WhatsApp, phone, web and staff actions (Inbox → Journey & treatment); treatment plans entered by staff, advanced by completed visits, recall dates.
+- **Recovery engine:** lost leads, no-shows, stalled treatments, recalls, payment follow-ups (clinic data only), freed slots; deterministic priority, outcomes, daily cap, approvals; Recovery page.
+- **Waitlist recovery:** cancellations / reschedules free slots, batched offers on WhatsApp, first acceptance books (exclusion constraint), decline / expiry move on, earlier-time moves.
+- **Autonomy:** auto / approval / off per action, enforced at the tool boundary and in sequences; fixed never-list; clinical-advice output guard; escalation categories.
+- **Phone agent (optional, off by default):** Vapi adapter behind `VoiceProvider`, same tools and patient as WhatsApp, deterministic emergency handling, transfers, minutes cap, call summaries on the timeline; Settings → Phone agent with the generated prompt and tools.
+- **Command center (Today):** today's numbers, needs-attention list, 30-day AI impact with clinic-entered value only.
+- **Hardening:** idempotent staff alerts, privacy/retention/export over the new data, health shows phone and follow-up failures, EXPLAIN coverage for the new queries, drizzle-schema Data API lockdown.
+- **Verified (mock mode, local):** lint, typecheck, build, 464 tests (59 files) on Postgres 16, `pnpm demo` 6/6, `pnpm sim` 14/14, `pnpm e2e` 2/2 (now with the command center), visual QA desktop + mobile (headless Chromium); migration 0017 applied to Supabase `instantlead-staging` with RLS / grants / advisors checked.
+- **Not verified:** Vapi, Meta, Google, Resend or a real model live; the new templates are not yet approved by Meta; the app has not run against Supabase (only the schema is there).

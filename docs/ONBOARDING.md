@@ -111,6 +111,17 @@ The client owns the WhatsApp Business Account (WABA); we get access to it.
 - **Settings → Reports:** extra WhatsApp numbers for the one-line weekly summary.
 - **Opt-out:** a customer who replies STOP gets one confirmation and nothing more; if they reply START later they are back (their own consent, recorded). Staff can record a phone or in-person opt-out or opt-in from the Inbox.
 
+## 5c. Treatment journeys, recovery and autonomy (15 min)
+
+- Settings → **AI autonomy**: choose per action Automatic / Needs approval / Off (the defaults are automatic). Many clinics start payment reminders and reactivation on "Needs approval" for the first weeks.
+- Settings → AI autonomy → **payment link** (the clinic's UPI / gateway page) if they want payment reminders; leave it empty otherwise.
+- Show the front desk Inbox → **Journey & treatment**: after a consultation they add the plan (visits, interval, optional amounts). Stalled treatments, recalls and balances then appear under **Recovery**.
+- Show **Today**: the command center at the top is the owner's daily view.
+
+## 5d. Phone agent (optional, ~1 h + the number)
+
+See GO-LIVE → Phone agent. Off by default; nothing changes for the clinic until it is turned on.
+
 ## 6. Optional
 
 - **Google Calendar** (two-way: bookings appear in the calendar, and events their team adds there block those times): Settings → Integrations → Connect Google Calendar, then map each calendar to a doctor / agent (or the whole clinic). Needs `GOOGLE_CLIENT_ID/SECRET` on the server and a verified Google app: see [GOOGLE-CALENDAR.md](GOOGLE-CALENDAR.md).
