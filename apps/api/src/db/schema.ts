@@ -3,6 +3,7 @@ import { LEAD_STATES, TIERS } from '@instantlead/core';
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  type AnyPgColumn,
   index,
   integer,
   jsonb,
@@ -70,6 +71,8 @@ export const tenants = pgTable(
     /** Secret path segment of this tenant's inbound-email webhook (/webhooks/email-in/:key): portal lead emails are forwarded there. */
     emailInKey: text().unique(),
     metaPageId: text().unique(),
+    /** Secret path segment of this tenant's phone-agent webhook (/webhooks/voice/:key). */
+    voiceInKey: text().unique(),
     ...timestamps,
   },
   () => [pgPolicy('tenant_self', { for: 'select', to: appRole, using: sql`id = ${currentTenant}` })],
@@ -210,6 +213,8 @@ export const LEAD_SOURCES = [
   'api',
   'csv',
   'portal_email',
+  /** Someone called the clinic and the phone agent picked up. */
+  'phone_call',
 ] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 
@@ -367,12 +372,18 @@ export const events = pgTable(
     tenantId: tenantId(),
     type: text().notNull(),
     payload: jsonb().$type<Record<string, unknown>>().notNull(),
+    /** Copied from payload.leadId by emit(): the patient timeline reads events by it. No FK (ids only, pruned by retention). */
+    leadId: uuid(),
     occurredAt: ts().notNull(),
     /** Outbound-webhook outbox: set once the event has been fanned out to the tenant's endpoints. */
     webhookDispatchedAt: ts(),
     ...timestamps,
   },
-  (t) => [index('events_tenant_type_occurred').on(t.tenantId, t.type, t.occurredAt), tenantScoped()],
+  (t) => [
+    index('events_tenant_type_occurred').on(t.tenantId, t.type, t.occurredAt),
+    index('events_lead_occurred').on(t.leadId, t.occurredAt),
+    tenantScoped(),
+  ],
 );
 
 // ---- M3: AI assistant ----
@@ -578,6 +589,8 @@ export const appointments = pgTable(
     /** Who the visit is for when it is not the person messaging (a parent booking for a child). null = the lead themselves. */
     attendeeName: text(),
     notes: text(),
+    /** The clinic's treatment plan this visit belongs to (completing it advances the plan). */
+    treatmentPlanId: uuid().references((): AnyPgColumn => treatmentPlans.id, { onDelete: 'set null' }),
     ...timestamps,
   },
   (t) => [
@@ -756,4 +769,200 @@ export const breachLog = pgTable(
     ...timestamps,
   },
   () => [tenantScoped()],
+);
+
+// ---- Operations employee: treatment journeys, calls, recovery opportunities, waitlist ----
+
+export const TREATMENT_PLAN_STATUSES = ['proposed', 'accepted', 'in_progress', 'completed', 'declined'] as const;
+export type TreatmentPlanStatus = (typeof TREATMENT_PLAN_STATUSES)[number];
+
+/**
+ * A treatment the clinic proposed (entered by staff, never by the AI): the administrative journey only, not a
+ * clinical record. Money columns are what the clinic typed; null means "unknown", never estimated.
+ */
+export const treatmentPlans = pgTable(
+  'treatment_plans',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid()
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    attendeeName: text(),
+    /** Clinic wording, e.g. "Root canal, 3 visits". */
+    title: text().notNull(),
+    /** The service booked for the next visit (one of booking.services). */
+    service: text(),
+    status: text({ enum: TREATMENT_PLAN_STATUSES }).notNull().default('proposed'),
+    visitsPlanned: integer(),
+    visitsDone: integer().notNull().default(0),
+    visitIntervalDays: integer(),
+    nextVisitDueAt: ts(),
+    recallDueAt: ts(),
+    valueInr: numeric({ precision: 12, scale: 2, mode: 'number' }),
+    paidInr: numeric({ precision: 12, scale: 2, mode: 'number' }),
+    notes: text(),
+    createdBy: uuid(),
+    ...timestamps,
+  },
+  (t) => [
+    index('treatment_plans_tenant_status_due').on(t.tenantId, t.status, t.nextVisitDueAt),
+    index('treatment_plans_lead').on(t.leadId),
+    tenantScoped(),
+  ],
+);
+
+export const CALL_STATUSES = ['in_progress', 'completed', 'transferred', 'missed', 'failed'] as const;
+
+/** Phone-agent calls (optional module). The summary is the vendor's; transcripts are not stored. */
+export const calls = pgTable(
+  'calls',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid().references(() => leads.id, { onDelete: 'cascade' }),
+    provider: text({ enum: ['vapi', 'fake'] }).notNull(),
+    /** The vendor's call id: webhooks are retried, so every event upserts on it. */
+    providerCallId: text().notNull(),
+    direction: text({ enum: ['in', 'out'] })
+      .notNull()
+      .default('in'),
+    status: text({ enum: CALL_STATUSES }).notNull().default('in_progress'),
+    startedAt: ts().notNull(),
+    endedAt: ts(),
+    durationSec: integer(),
+    afterHours: boolean().notNull().default(false),
+    summary: text(),
+    /** Why the call ended (the vendor's reason, e.g. customer-ended-call). */
+    outcome: text(),
+    transferred: boolean().notNull().default(false),
+    escalated: boolean().notNull().default(false),
+    /** Results of tool calls already run, by the vendor's tool-call id: a retried tool call gets the same answer. */
+    toolResults: jsonb().$type<Record<string, string>>().notNull().default({}),
+    ...timestamps,
+  },
+  (t) => [
+    unique().on(t.tenantId, t.providerCallId),
+    index('calls_lead_started').on(t.leadId, t.startedAt),
+    index('calls_tenant_started').on(t.tenantId, t.startedAt),
+    tenantScoped(),
+  ],
+);
+
+export const OPPORTUNITY_KINDS = [
+  'LOST_LEAD',
+  'EMPTY_SLOT',
+  'NO_SHOW',
+  'STALLED_TREATMENT',
+  'RECALL_DUE',
+  'PAYMENT_FOLLOWUP',
+] as const;
+export type OpportunityKind = (typeof OPPORTUNITY_KINDS)[number];
+export const OPPORTUNITY_STATUSES = ['open', 'needs_approval', 'actioned', 'won', 'lost', 'dismissed'] as const;
+export type OpportunityStatus = (typeof OPPORTUNITY_STATUSES)[number];
+
+/**
+ * Something worth recovering, found by deterministic rules (opportunities.ts). `subject_key` names what it is
+ * about (an appointment, a plan, a slot, a recall cycle), so detecting it again is a no-op.
+ */
+export const opportunities = pgTable(
+  'opportunities',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    /** Null for an empty slot (it belongs to whoever takes it). */
+    leadId: uuid().references(() => leads.id, { onDelete: 'cascade' }),
+    kind: text({ enum: OPPORTUNITY_KINDS }).notNull(),
+    subjectKey: text().notNull(),
+    status: text({ enum: OPPORTUNITY_STATUSES }).notNull().default('open'),
+    priority: integer().notNull(),
+    reason: text().notNull(),
+    recommendedAction: text().notNull(),
+    detectedAt: ts().notNull(),
+    aiActed: boolean().notNull().default(false),
+    actedAt: ts(),
+    outcome: text(),
+    outcomeAt: ts(),
+    /** Money only from the clinic's own data (a treatment plan); null = unavailable. */
+    valueInr: numeric({ precision: 12, scale: 2, mode: 'number' }),
+    valueSource: text({ enum: ['treatment_plan'] }),
+    treatmentPlanId: uuid().references(() => treatmentPlans.id, { onDelete: 'cascade' }),
+    appointmentId: uuid().references(() => appointments.id, { onDelete: 'set null' }),
+    /** EMPTY_SLOT: the freed time. */
+    slotStartsAt: ts(),
+    slotResource: text(),
+    slotService: text(),
+    ...timestamps,
+  },
+  (t) => [
+    unique().on(t.tenantId, t.kind, t.subjectKey),
+    index('opportunities_tenant_status_priority').on(t.tenantId, t.status, t.priority.desc()),
+    index('opportunities_lead').on(t.leadId),
+    tenantScoped(),
+  ],
+);
+
+/** People who want an (earlier) appointment if one frees up. */
+export const waitlistEntries = pgTable(
+  'waitlist_entries',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    leadId: uuid()
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    service: text().notNull(),
+    resource: text(),
+    attendeeName: text(),
+    /** They already hold this booking and want an earlier time: accepting moves it. */
+    appointmentId: uuid().references(() => appointments.id, { onDelete: 'set null' }),
+    /** Tenant-local YYYY-MM-DD window (inclusive); null = any day. */
+    fromDate: text(),
+    toDate: text(),
+    partOfDay: text({ enum: ['morning', 'afternoon', 'evening'] }),
+    status: text({ enum: ['waiting', 'booked', 'removed', 'expired'] })
+      .notNull()
+      .default('waiting'),
+    source: text({ enum: ['assistant', 'staff'] }).notNull(),
+    joinedAt: ts().notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    index('waitlist_tenant_status_service').on(t.tenantId, t.status, t.service, t.joinedAt),
+    // One open entry per person and service.
+    uniqueIndex('waitlist_one_open_per_person')
+      .on(t.tenantId, t.leadId, t.service, sql`lower(coalesce(${t.attendeeName}, ''))`)
+      .where(sql`${t.status} = 'waiting'`),
+    tenantScoped(),
+  ],
+);
+
+/** A freed slot offered to one waiting person. Unique per slot and person: nobody is offered the same slot twice. */
+export const slotOffers = pgTable(
+  'slot_offers',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    opportunityId: uuid()
+      .notNull()
+      .references(() => opportunities.id, { onDelete: 'cascade' }),
+    leadId: uuid()
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    waitlistEntryId: uuid()
+      .notNull()
+      .references(() => waitlistEntries.id, { onDelete: 'cascade' }),
+    status: text({ enum: ['sent', 'accepted', 'declined', 'expired', 'superseded', 'failed'] })
+      .notNull()
+      .default('sent'),
+    offeredAt: ts().notNull(),
+    expiresAt: ts().notNull(),
+    respondedAt: ts(),
+    ...timestamps,
+  },
+  (t) => [
+    unique().on(t.opportunityId, t.leadId),
+    index('slot_offers_opportunity_status').on(t.opportunityId, t.status),
+    tenantScoped(),
+  ],
 );

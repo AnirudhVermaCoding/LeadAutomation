@@ -11,6 +11,32 @@ export const LANGUAGES = ['en', 'hi', 'hinglish'] as const;
 export const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export const INTAKE_SOURCES = ['form', 'meta_lead_ads', 'click_to_whatsapp', 'api', 'csv'] as const;
 
+/** Actions the AI can be allowed to take (Settings → AI autonomy). The never-list is not configurable: see NEVER_ACTIONS. */
+export const AUTONOMY_ACTIONS = [
+  'faq',
+  'book',
+  'reschedule',
+  'cancel',
+  'remind',
+  'follow_up',
+  'waitlist_offer',
+  'reactivate',
+  'payment_reminder',
+] as const;
+export type AutonomyAction = (typeof AUTONOMY_ACTIONS)[number];
+export type AutonomyMode = 'auto' | 'approval' | 'off';
+
+/** Hard-coded in the prompt and the output guard; no setting can turn these on. */
+export const NEVER_ACTIONS = [
+  'diagnose a condition',
+  'prescribe or name medicines or doses',
+  'change or recommend clinical treatment',
+  'interpret symptoms, reports or photos',
+  'state medical facts or prices that are not in the clinic information',
+  'override clinic policy',
+  'make emergency decisions (emergencies go to the clinic immediately)',
+] as const;
+
 const Language = z.enum(LANGUAGES);
 const Weekday = z.enum(WEEKDAYS);
 
@@ -125,6 +151,40 @@ export const TenantConfigSchema = z.strictObject({
       routing: z.partialRecord(z.enum(LLM_TASKS), z.array(nonEmpty).min(1)).optional(),
     })
     .optional(),
+  /** What the AI may do by itself, what needs staff approval, what it never does here. Optional (defaults: AUTONOMY_DEFAULTS). */
+  autonomy: z.partialRecord(z.enum(AUTONOMY_ACTIONS), z.enum(['auto', 'approval', 'off'])).optional(),
+  /** Treatment follow-up, recall, recovery and waitlist rules. Optional (defaults: JOURNEY_DEFAULTS). */
+  journeys: z
+    .strictObject({
+      stall_grace_days: z.int().min(1).max(90),
+      recall_months: z.int().min(1).max(36),
+      lost_lead_after_hours: z.int().min(12).max(720),
+      max_outreach_per_day: z.int().min(0).max(500),
+      /** The clinic's own payment page (UPI / gateway link) sent in payment reminders. https only. */
+      payment_url: z
+        .url()
+        .refine((u) => u.startsWith('https://'), 'must start with https://')
+        .optional(),
+      waitlist_offer_minutes: z.int().min(5).max(24 * 60),
+      waitlist_batch: z.int().min(1).max(10),
+    })
+    .optional(),
+  /** Optional AI phone receptionist. Off unless enabled; outbound calling is not supported. */
+  voice: z
+    .strictObject({
+      enabled: z.boolean(),
+      provider: z.enum(['vapi']),
+      /** Where a caller is transferred to reach a person (E.164). Without it the agent takes a message. */
+      transfer_number: z
+        .string()
+        .regex(/^\+[1-9]\d{9,14}$/, 'use the international format, e.g. +919876543210')
+        .optional(),
+      /** Said at the start of each call ({{business_name}} allowed). */
+      call_disclosure: z.string().trim().min(20).max(400),
+      /** Phone-agent minutes per calendar month; above it calls go straight to the clinic. 0 = no limit. */
+      monthly_minutes_cap: z.int().min(0).max(100_000),
+    })
+    .optional(),
   reports: z.strictObject({
     weekly_day: Weekday,
     send_to: z.array(z.email('must be an email address')),
@@ -139,6 +199,33 @@ export const TenantConfigSchema = z.strictObject({
 });
 
 export type TenantConfig = z.infer<typeof TenantConfigSchema>;
+
+export const AUTONOMY_DEFAULTS: Record<AutonomyAction, AutonomyMode> = {
+  faq: 'auto',
+  book: 'auto',
+  reschedule: 'auto',
+  cancel: 'auto',
+  remind: 'auto',
+  follow_up: 'auto',
+  waitlist_offer: 'auto',
+  reactivate: 'auto',
+  payment_reminder: 'auto',
+};
+export const autonomyOf = (config: TenantConfig, action: AutonomyAction): AutonomyMode =>
+  config.autonomy?.[action] ?? AUTONOMY_DEFAULTS[action];
+
+export const JOURNEY_DEFAULTS: NonNullable<TenantConfig['journeys']> = {
+  stall_grace_days: 7,
+  recall_months: 6,
+  lost_lead_after_hours: 48,
+  max_outreach_per_day: 30,
+  waitlist_offer_minutes: 30,
+  waitlist_batch: 3,
+};
+export const journeysOf = (config: TenantConfig) => ({ ...JOURNEY_DEFAULTS, ...config.journeys });
+
+/** The phone agent's settings, or null when it is off (the product then behaves exactly as without it). */
+export const voiceOf = (config: TenantConfig) => (config.voice?.enabled ? config.voice : null);
 export type Language = z.infer<typeof Language>;
 
 /** Default opt-in keywords: "START" is the WhatsApp convention. One-word ones must be the whole message. */

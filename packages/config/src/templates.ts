@@ -29,6 +29,7 @@ const YES = { id: 'yes', text: { en: 'Yes, please', hi: 'हाँ, ज़रू
 const SHOW_TIMES = { id: 'times', text: { en: 'Show new times', hi: 'नए समय दिखाएँ' } };
 const REBOOK = { id: 'rebook', text: { en: 'Book a new time', hi: 'नया समय बुक करें' } };
 const CALL_ME = { id: 'call', text: { en: 'Call me', hi: 'मुझे कॉल करें' } };
+const BOOK = { id: 'book', text: { en: 'Book a time', hi: 'समय बुक करें' } };
 
 export const TEMPLATES = {
   first_reply: {
@@ -225,6 +226,67 @@ export const TEMPLATES = {
     body: {
       en: 'Update from your WhatsApp assistant: {{1}}. Open the InstantLead dashboard for details.',
       hi: 'आपके WhatsApp असिस्टेंट से अपडेट: {{1}}। विवरण के लिए InstantLead डैशबोर्ड खोलें।',
+    },
+    buttons: [],
+  },
+  treatment_followup: {
+    providerName: 'il_treatment_followup',
+    category: 'utility',
+    purpose:
+      'A treatment the clinic recorded is due for its next visit (or the visit was missed) and nothing is booked. Sent only when the clinic allows follow-ups.',
+    variables: ['first_name', 'treatment', 'business_name'],
+    body: {
+      en: 'Hi {{1}}, your next visit for {{2}} at {{3}} is due. Would you like us to book a time for you?',
+      hi: 'नमस्ते {{1}}, {{3}} में आपके {{2}} की अगली विज़िट का समय हो गया है। क्या हम आपके लिए समय बुक कर दें?',
+    },
+    buttons: [BOOK, CALL_ME, STOP],
+  },
+  recall_due: {
+    providerName: 'il_recall_due',
+    category: 'marketing',
+    purpose: 'A past patient is due for their regular check-up (recall interval set by the clinic).',
+    variables: ['first_name', 'business_name'],
+    body: {
+      en: 'Hi {{1}}, it has been a while since your last visit to {{2}} and your regular check-up is due. Would you like to book a time?',
+      hi: 'नमस्ते {{1}}, {{2}} में आपकी पिछली विज़िट को काफ़ी समय हो गया है और आपका नियमित चेक-अप बाकी है। क्या आप समय बुक करना चाहेंगे?',
+    },
+    buttons: [BOOK, STOP],
+  },
+  lead_reactivation: {
+    providerName: 'il_lead_reactivation',
+    category: 'marketing',
+    purpose: 'A qualified enquiry that never booked: one reminder that times are available.',
+    variables: ['first_name', 'business_name'],
+    body: {
+      en: 'Hi {{1}}, you asked {{2}} about an appointment earlier. We have times available - would you like to book one?',
+      hi: 'नमस्ते {{1}}, आपने पहले {{2}} से अपॉइंटमेंट के बारे में पूछा था। हमारे पास समय उपलब्ध है - क्या आप बुक करना चाहेंगे?',
+    },
+    buttons: [BOOK, STOP],
+  },
+  slot_offer: {
+    providerName: 'il_slot_offer',
+    category: 'utility',
+    purpose:
+      'An earlier appointment opened up and this patient asked to be told (waitlist). The first to accept gets it.',
+    variables: ['first_name', 'appointment.service', 'appointment.time', 'business_name'],
+    body: {
+      en: 'Hi {{1}}, a {{2}} appointment has opened up on {{3}} at {{4}}. You asked to hear about earlier times - would you like it? It goes to the first person who accepts.',
+      hi: 'नमस्ते {{1}}, {{4}} में {{3}} को {{2}} का एक समय खाली हुआ है। आपने पहले समय के बारे में बताने को कहा था - क्या आप यह लेना चाहेंगे? यह पहले स्वीकार करने वाले को मिलेगा।',
+    },
+    buttons: [
+      { id: 'accept', text: { en: 'Book it', hi: 'बुक करें' } },
+      { id: 'decline', text: { en: 'No thanks', hi: 'नहीं, धन्यवाद' } },
+    ],
+  },
+  payment_reminder: {
+    providerName: 'il_payment_reminder',
+    category: 'utility',
+    purpose:
+      "A balance the clinic recorded on a treatment is still pending. Sent only with the clinic's amount and its own payment link.",
+    variables: ['first_name', 'business_name', 'amount', 'payment_link'],
+    body: {
+      en: 'Hi {{1}}, a gentle reminder from {{2}}: Rs. {{3}} is pending for your treatment. You can pay here: {{4}}. Reply here if you have any questions.',
+      hi: 'नमस्ते {{1}}, {{2}} की ओर से याद दिलाना: आपके इलाज के Rs. {{3}} बाकी हैं। आप यहाँ भुगतान कर सकते हैं: {{4}}। कोई सवाल हो तो यहाँ जवाब दें।',
     },
     buttons: [],
   },

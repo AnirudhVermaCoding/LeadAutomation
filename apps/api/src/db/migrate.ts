@@ -104,10 +104,15 @@ export async function lockDownDataApi(client: { query(sql: string): Promise<unkn
         exception when others then null;
         end;
       end if;
-      for r in select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
-               where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity loop
-        execute format('alter table public.%I enable row level security', r.relname);
+      for r in select n.nspname, c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+               where n.nspname in ('public', 'drizzle') and c.relkind = 'r' and not c.relrowsecurity loop
+        execute format('alter table %I.%I enable row level security', r.nspname, r.relname);
       end loop;
+      -- The migration journal: only the owner needs it (it runs migrations and, as table owner, bypasses RLS).
+      if cardinality(roles) > 0 and exists (select 1 from pg_namespace where nspname = 'drizzle') then
+        execute format('revoke all on schema drizzle from %s', array_to_string(roles, ', '));
+        execute format('revoke all on all tables in schema drizzle from %s', array_to_string(roles, ', '));
+      end if;
     end $$;
   `);
 }

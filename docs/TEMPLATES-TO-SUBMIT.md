@@ -29,6 +29,11 @@ Use the exact **name**, **category** and **language**; body variables are positi
 | `il_cancellation` | utility | The appointment was cancelled (by staff, or at the customer request) and the 24-hour chat window is closed, so a plain message cannot be sent. |
 | `il_running_late` | utility | Sent by staff from Today when the doctor / agent is running late. |
 | `il_staff_update` | utility | To staff: something needs a look (unconfirmed booking or reminder, auto-confirmed booking, unmarked visits). |
+| `il_treatment_followup` | utility | A treatment the clinic recorded is due for its next visit (or the visit was missed) and nothing is booked. Sent only when the clinic allows follow-ups. |
+| `il_recall_due` | marketing | A past patient is due for their regular check-up (recall interval set by the clinic). |
+| `il_lead_reactivation` | marketing | A qualified enquiry that never booked: one reminder that times are available. |
+| `il_slot_offer` | utility | An earlier appointment opened up and this patient asked to be told (waitlist). The first to accept gets it. |
+| `il_payment_reminder` | utility | A balance the clinic recorded on a treatment is still pending. Sent only with the clinic's amount and its own payment link. |
 
 ## `il_first_reply`
 
@@ -387,4 +392,115 @@ Update from your WhatsApp assistant: {{1}}. Open the InstantLead dashboard for d
 
 ```text
 आपके WhatsApp असिस्टेंट से अपडेट: {{1}}। विवरण के लिए InstantLead डैशबोर्ड खोलें।
+```
+
+## `il_treatment_followup`
+
+- **Category:** utility
+- **Purpose:** A treatment the clinic recorded is due for its next visit (or the visit was missed) and nothing is booked. Sent only when the clinic allows follow-ups.
+- **Variables:** `{{1}}` = first_name, `{{2}}` = treatment, `{{3}}` = business_name
+- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = undefined, `{{3}}` = Smile Dental
+
+**English (`en`)**
+
+```text
+Hi {{1}}, your next visit for {{2}} at {{3}} is due. Would you like us to book a time for you?
+```
+
+Quick-reply buttons: `Book a time` · `Call me` · `Stop messages`
+
+**Hindi (`hi`)**
+
+```text
+नमस्ते {{1}}, {{3}} में आपके {{2}} की अगली विज़िट का समय हो गया है। क्या हम आपके लिए समय बुक कर दें?
+```
+
+Quick-reply buttons: `समय बुक करें` · `मुझे कॉल करें` · `मैसेज बंद करें`
+
+## `il_recall_due`
+
+- **Category:** marketing
+- **Purpose:** A past patient is due for their regular check-up (recall interval set by the clinic).
+- **Variables:** `{{1}}` = first_name, `{{2}}` = business_name
+- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = Smile Dental
+
+**English (`en`)**
+
+```text
+Hi {{1}}, it has been a while since your last visit to {{2}} and your regular check-up is due. Would you like to book a time?
+```
+
+Quick-reply buttons: `Book a time` · `Stop messages`
+
+**Hindi (`hi`)**
+
+```text
+नमस्ते {{1}}, {{2}} में आपकी पिछली विज़िट को काफ़ी समय हो गया है और आपका नियमित चेक-अप बाकी है। क्या आप समय बुक करना चाहेंगे?
+```
+
+Quick-reply buttons: `समय बुक करें` · `मैसेज बंद करें`
+
+## `il_lead_reactivation`
+
+- **Category:** marketing
+- **Purpose:** A qualified enquiry that never booked: one reminder that times are available.
+- **Variables:** `{{1}}` = first_name, `{{2}}` = business_name
+- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = Smile Dental
+
+**English (`en`)**
+
+```text
+Hi {{1}}, you asked {{2}} about an appointment earlier. We have times available - would you like to book one?
+```
+
+Quick-reply buttons: `Book a time` · `Stop messages`
+
+**Hindi (`hi`)**
+
+```text
+नमस्ते {{1}}, आपने पहले {{2}} से अपॉइंटमेंट के बारे में पूछा था। हमारे पास समय उपलब्ध है - क्या आप बुक करना चाहेंगे?
+```
+
+Quick-reply buttons: `समय बुक करें` · `मैसेज बंद करें`
+
+## `il_slot_offer`
+
+- **Category:** utility
+- **Purpose:** An earlier appointment opened up and this patient asked to be told (waitlist). The first to accept gets it.
+- **Variables:** `{{1}}` = first_name, `{{2}}` = appointment.service, `{{3}}` = appointment.time, `{{4}}` = business_name
+- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = consultation, `{{3}}` = 6 Oct, 11:30 AM, `{{4}}` = Smile Dental
+
+**English (`en`)**
+
+```text
+Hi {{1}}, a {{2}} appointment has opened up on {{3}} at {{4}}. You asked to hear about earlier times - would you like it? It goes to the first person who accepts.
+```
+
+Quick-reply buttons: `Book it` · `No thanks`
+
+**Hindi (`hi`)**
+
+```text
+नमस्ते {{1}}, {{4}} में {{3}} को {{2}} का एक समय खाली हुआ है। आपने पहले समय के बारे में बताने को कहा था - क्या आप यह लेना चाहेंगे? यह पहले स्वीकार करने वाले को मिलेगा।
+```
+
+Quick-reply buttons: `बुक करें` · `नहीं, धन्यवाद`
+
+## `il_payment_reminder`
+
+- **Category:** utility
+- **Purpose:** A balance the clinic recorded on a treatment is still pending. Sent only with the clinic's amount and its own payment link.
+- **Variables:** `{{1}}` = first_name, `{{2}}` = business_name, `{{3}}` = amount, `{{4}}` = payment_link
+- **Sample values (for Meta review):** `{{1}}` = Priya, `{{2}}` = Smile Dental, `{{3}}` = undefined, `{{4}}` = undefined
+
+**English (`en`)**
+
+```text
+Hi {{1}}, a gentle reminder from {{2}}: Rs. {{3}} is pending for your treatment. You can pay here: {{4}}. Reply here if you have any questions.
+```
+
+**Hindi (`hi`)**
+
+```text
+नमस्ते {{1}}, {{2}} की ओर से याद दिलाना: आपके इलाज के Rs. {{3}} बाकी हैं। आप यहाँ भुगतान कर सकते हैं: {{4}}। कोई सवाल हो तो यहाँ जवाब दें।
 ```

@@ -19,6 +19,11 @@ export const TEMPLATE_VARIABLES = [
   'note',
   /** Running-late notices. */
   'delay_minutes',
+  /** Treatment follow-ups: the clinic's plan title. */
+  'treatment',
+  /** Payment reminders: the clinic's recorded outstanding amount and its own payment link. */
+  'amount',
+  'payment_link',
 ] as const;
 
 const VARIABLE = /\{\{\s*([^{}]*?)\s*\}\}/g;

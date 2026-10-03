@@ -30,7 +30,8 @@ export const hashPhone = (key: Buffer, tenantId: string, e164: string) =>
   createHmac('sha256', key).update(`${tenantId}:${e164}`).digest('hex');
 
 export async function emit(tx: Tx, clock: Clock, type: string, payload: Record<string, unknown>) {
-  await tx.insert(events).values({ type, payload, occurredAt: clock.now() });
+  const leadId = typeof payload.leadId === 'string' ? payload.leadId : null;
+  await tx.insert(events).values({ type, payload, leadId, occurredAt: clock.now() });
 }
 
 export async function isSuppressed(tx: Tx, deps: LeadDeps, tenantId: string, e164: string) {
