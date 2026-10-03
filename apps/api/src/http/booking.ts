@@ -96,6 +96,8 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
         time,
         /** The visit is for someone else (a child): their name. */
         for_name: z.string().trim().min(1).max(60).optional(),
+        /** The clinic's treatment plan this visit is for. */
+        treatment_plan_id: z.uuid().optional(),
       })
       .parse(req.body);
     return bookingErrors(reply, async () => {
@@ -106,6 +108,7 @@ export function registerBookingRoutes(app: FastifyInstance, ctx: AppContext) {
         time: body.time,
         source: 'staff',
         forName: body.for_name,
+        treatmentPlanId: body.treatment_plan_id,
       });
       return reply.code(201).send(r);
     });

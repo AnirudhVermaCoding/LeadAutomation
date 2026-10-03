@@ -23,8 +23,10 @@ import {
   availabilityRules,
   blockedTimes,
   leads,
+  treatmentPlans,
   type AppointmentStatus,
 } from './db/schema.ts';
+import { advancePlan } from './journey.ts';
 import { QUEUES } from './jobs.ts';
 import { emit, transitionLeadIfAllowed, type LeadDeps } from './leads.ts';
 import {
@@ -196,11 +198,6 @@ export async function upcomingAppointments(tx: Tx, leadId: string, now: Date) {
     .orderBy(asc(appointments.startsAt));
 }
 
-/** The first upcoming appointment (the dashboard's single-appointment view). */
-export async function activeAppointment(tx: Tx, leadId: string, now: Date) {
-  return (await upcomingAppointments(tx, leadId, now))[0] ?? null;
-}
-
 const SELF = new Set(['me', 'myself', 'self', 'mine', 'main', 'mujhe']);
 
 /**
@@ -324,6 +321,8 @@ async function change(
         appt.id,
       );
       if (kind === 'completed') await enrollAfterVisit(tx, deps.clock, config, appt, 'review_request');
+      if (kind === 'completed' && appt.treatmentPlanId)
+        await advancePlan(tx, deps.clock, config, appt.treatmentPlanId, leadId);
       if (kind === 'no_show') await enrollAfterVisit(tx, deps.clock, config, appt, 'no_show_recovery');
     }
   }
@@ -349,6 +348,10 @@ export async function bookSlot(
     resource?: string | undefined;
     /** Who the visit is for when it is not the lead (a child): undefined = the lead, or the replaced booking's person. */
     forName?: string | null | undefined;
+    /** The clinic's treatment plan this visit is for (staff); otherwise linked when exactly one open plan matches. */
+    treatmentPlanId?: string | undefined;
+    /** Autonomy says assistant bookings need staff approval: book as pending (the staff-confirm path). */
+    requireApproval?: boolean;
   },
 ) {
   // Outside the transaction (a network call): pull in Google events the push channel hasn't delivered yet.
@@ -460,7 +463,37 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
       });
     }
     const status: AppointmentStatus =
-      config.booking.mode === 'staff_confirm' && input.source === 'assistant' ? 'pending' : 'scheduled';
+      (config.booking.mode === 'staff_confirm' || input.requireApproval) && input.source === 'assistant'
+        ? 'pending'
+        : 'scheduled';
+    // A visit for an open treatment plan (same person, same service) counts toward that plan.
+    const openPlans = input.treatmentPlanId
+      ? []
+      : (
+          await tx
+            .select({
+              id: treatmentPlans.id,
+              service: treatmentPlans.service,
+              attendee: treatmentPlans.attendeeName,
+            })
+            .from(treatmentPlans)
+            .where(
+              and(
+                eq(treatmentPlans.leadId, input.leadId),
+                inArray(treatmentPlans.status, ['accepted', 'in_progress']),
+              ),
+            )
+        ).filter(
+          (p) => p.service?.toLowerCase() === service.name.toLowerCase() && sameAttendee(p.attendee, attendee),
+        );
+    if (input.treatmentPlanId) {
+      const [own] = await tx
+        .select({ id: treatmentPlans.id })
+        .from(treatmentPlans)
+        .where(and(eq(treatmentPlans.id, input.treatmentPlanId), eq(treatmentPlans.leadId, input.leadId)));
+      if (!own) throw new BookingError('no_appointment', 'That treatment plan belongs to someone else');
+    }
+    const planId = input.treatmentPlanId ?? (openPlans.length === 1 ? openPlans[0]!.id : null);
     const [appt] = await tx
       .insert(appointments)
       .values({
@@ -473,6 +506,7 @@ function bookOnce(deps: BookingDeps, tenantId: string, input: Parameters<typeof 
         status,
         source: input.source,
         attendeeName: attendee,
+        treatmentPlanId: planId,
       })
       .returning();
     if (!appt) throw new Error('appointment insert failed');

@@ -17,7 +17,7 @@ import {
   templates,
   tenantConfigs,
 } from '../db/schema.ts';
-import { optIn, optOut, transitionLead } from '../leads.ts';
+import { emit, optIn, optOut, transitionLead } from '../leads.ts';
 import { integrationHealth, runMonitor } from '../monitoring.ts';
 import { sendToLead } from '../outbound.ts';
 import { computeReport, listReports, renderReportEmail } from '../reports.ts';
@@ -58,6 +58,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
       const [lead] = await tx.select().from(leads).where(eq(leads.id, id));
       if (!lead) return null;
       const [conversation] = await tx.select().from(conversations).where(eq(conversations.leadId, id));
+      const upcoming = await upcomingAppointments(tx, id, ctx.clock.now());
       return {
         lead,
         conversation: conversation ?? null,
@@ -65,8 +66,8 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
           .select({ key: answers.key, value: answers.value })
           .from(answers)
           .where(eq(answers.leadId, id)),
-        appointment: (await upcomingAppointments(tx, id, ctx.clock.now()))[0] ?? null,
-        appointments: await upcomingAppointments(tx, id, ctx.clock.now()),
+        appointment: upcoming[0] ?? null,
+        appointments: upcoming,
         messages: await tx
           .select()
           .from(messages)
@@ -86,6 +87,10 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: AppContext) {
       const id = leadParam(req);
       return withTenant(ctx.db, tenantOf(req), async (tx) => {
         const status = await transitionLead(tx, id, { type });
+        await emit(tx, ctx.clock, path === 'takeover' ? 'lead.takeover' : 'lead.resumed', {
+          leadId: id,
+          by: 'staff',
+        });
         await audit(tx, ctx.clock, actor(req.principal), {
           action: `lead.${path}`,
           entityType: 'lead',
