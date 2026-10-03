@@ -115,6 +115,7 @@ The client owns the WhatsApp Business Account (WABA); we get access to it.
 
 - Settings → **AI autonomy**: choose per action Automatic / Needs approval / Off (the defaults are automatic). Many clinics start payment reminders and reactivation on "Needs approval" for the first weeks.
 - Settings → AI autonomy → **payment link** (the clinic's UPI / gateway page) if they want payment reminders; leave it empty otherwise.
+- Settings → **Treatments**: go through the templates with the dentist (visits, interval, usual price if fixed, instalments for braces / implants); add any treatment they do often.
 - Show the front desk Inbox → **Journey & treatment**: after a consultation they add the plan (visits, interval, optional amounts). Stalled treatments, recalls and balances then appear under **Recovery**.
 - Show **Today**: the command center at the top is the owner's daily view.
 

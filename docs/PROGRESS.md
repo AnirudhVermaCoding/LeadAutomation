@@ -131,3 +131,9 @@ Branch `feat/ai-operations-employee`. Details in DECISIONS 122–131.
 - **Hardening:** idempotent staff alerts, privacy/retention/export over the new data, health shows phone and follow-up failures, EXPLAIN coverage for the new queries, drizzle-schema Data API lockdown.
 - **Verified (mock mode, local):** lint, typecheck, build, 464 tests (59 files) on Postgres 16, `pnpm demo` 6/6, `pnpm sim` 14/14, `pnpm e2e` 2/2 (now with the command center), visual QA desktop + mobile (headless Chromium); migration 0017 applied to Supabase `instantlead-staging` with RLS / grants / advisors checked.
 - **Not verified:** Vapi, Meta, Google, Resend or a real model live; the new templates are not yet approved by Meta; the app has not run against Supabase (only the schema is there).
+
+## Treatment templates + payment schedules (2026-10-03)
+
+- Settings → **Treatments**: clinic templates (RCT, braces, aligners, implant, scaling by default; editable, prices optional). Adding a plan offers "Start from a template".
+- Per plan **payment schedule** (braces, implants): set up / re-plan, paid / waive / undo (moves the plan's paid total), overdue instalments → one payment reminder for that amount through Recovery (same autonomy, payment link, opt-out rules).
+- Verified: 469 tests, demo 6/6, sim 14/14, e2e 2/2, desktop + mobile screenshots (templates, picker, schedule). DECISIONS 132–133.
