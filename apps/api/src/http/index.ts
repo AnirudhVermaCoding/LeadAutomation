@@ -10,6 +10,7 @@ import { registerDashboardRoutes } from './dashboard.ts';
 import { registerGoogleRoutes } from './google.ts';
 import { registerIntakeRoutes } from './intake.ts';
 import { registerJourneyRoutes } from './journey.ts';
+import { registerRecoveryRoutes } from './recovery.ts';
 import { registerPrivacyRoutes } from './privacy.ts';
 import { registerRoutes } from './routes.ts';
 import { registerWebhookRoutes } from './webhooks.ts';
@@ -57,6 +58,7 @@ export async function registerHttp(app: FastifyInstance, ctx: AppContext) {
   registerGoogleRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
   registerJourneyRoutes(app, ctx);
+  registerRecoveryRoutes(app, ctx);
   registerPrivacyRoutes(app, ctx);
   await serveDashboard(app);
 }

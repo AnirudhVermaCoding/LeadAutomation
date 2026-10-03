@@ -22,6 +22,9 @@ export const QUEUES = {
   templateSyncCron: 'template-sync-cron',
   calendarSweep: 'calendar-sweep',
   deadLetter: 'dead-letter',
+  opportunitySweep: 'opportunity-sweep',
+  opportunityAct: 'opportunity-act',
+  slotRecovery: 'slot-recovery',
 } as const;
 
 export interface JobData {
@@ -55,6 +58,11 @@ export interface JobData {
   };
   /** Delete our events from the clinic's Google Calendar (erasure, retention). `calendarId` null = primary. */
   [QUEUES.calendarRemove]: { tenantId: string; events: { eventId: string; calendarId: string | null }[] };
+  [QUEUES.opportunitySweep]: Record<string, never>;
+  /** Send the one message a recovery opportunity calls for. `approvedBy` = a staff user approved it. */
+  [QUEUES.opportunityAct]: { tenantId: string; opportunityId: string; approvedBy?: string };
+  /** Offer a freed slot to the next people on the waitlist (re-queued after each offer window). */
+  [QUEUES.slotRecovery]: { tenantId: string; opportunityId: string };
 }
 export type QueueName = keyof JobData;
 
@@ -92,6 +100,7 @@ export async function ensureQueues(boss: PgBoss) {
     QUEUES.reportsCron,
     QUEUES.monitorCron,
     QUEUES.maintenanceCron,
+    QUEUES.opportunitySweep,
   ])
     await boss.createQueue(cron, { policy: 'singleton', retryLimit: 0 });
   for (const name of [
@@ -104,6 +113,8 @@ export async function ensureQueues(boss: PgBoss) {
     QUEUES.calendarRemove,
     QUEUES.leadNotice,
     QUEUES.templateSync,
+    QUEUES.opportunityAct,
+    QUEUES.slotRecovery,
   ])
     await boss.createQueue(name, RETRY);
   // One queued + one running sync per calendar (singletonKey = link id): a burst of push notifications is one sync.

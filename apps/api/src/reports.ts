@@ -220,7 +220,7 @@ async function deliverReport(
     );
     if (already) continue;
     try {
-      await sendStaffWhatsApp(deps, tenantId, number, 'report_weekly', [reportOneLine(report.data)]);
+      await sendStaffWhatsApp(deps, tenantId, number, 'report_weekly', [reportOneLine(report.data)], `report:${report.id}`);
       await withTenant(deps.db, tenantId, (tx) =>
         emit(tx, deps.clock, 'report.whatsapp_sent', { key: marker }),
       );

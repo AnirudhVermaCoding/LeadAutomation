@@ -12,6 +12,7 @@ import { captureError } from './sentry.ts';
 import { runCalendarSync, sweepCalendars } from './calendar-sync.ts';
 import { runStaffDigest } from './staff-digest.ts';
 import { enrollFollowups, runStep, sweepDueSteps } from './sequences.ts';
+import { actOnOpportunity, sweepOpportunities } from './opportunities.ts';
 import { ChannelError, fetchMetaLead } from '@instantlead/integrations';
 import type { FastifyBaseLogger } from 'fastify';
 import { getActiveConfig } from './config-store.ts';
@@ -173,14 +174,17 @@ export async function startWorkers(ctx: AppContext, log: FastifyBaseLogger) {
   });
   await ctx.boss.schedule(QUEUES.templateSyncCron, '20 4 * * *'); // daily, quiet time
   await workBatched(ctx, log, QUEUES.leadNotice, (d) => sendLeadNotice(ctx, d));
+  await workBatched(ctx, log, QUEUES.opportunityAct, (d) => actOnOpportunity(ctx, d));
+  await ctx.boss.work(QUEUES.opportunitySweep, async () => {
+    await runJob(log, QUEUES.opportunitySweep, () => sweepOpportunities(ctx));
+  });
+  await ctx.boss.schedule(QUEUES.opportunitySweep, '*/15 * * * *');
   await workBatched(ctx, log, QUEUES.calendarSync, (d) => runCalendarSync(ctx, d));
   await ctx.boss.work(QUEUES.calendarSweep, async () => {
     await runJob(log, QUEUES.calendarSweep, () => sweepCalendars(ctx));
   });
   await ctx.boss.schedule(QUEUES.calendarSweep, '*/5 * * * *');
-  await ctx.boss.work<JobData['meta-leadgen']>(QUEUES.metaLeadgen, async (jobs) => {
-    for (const job of jobs) await runJob(log, QUEUES.metaLeadgen, () => importMetaLead(ctx, job.data));
-  });
+  await workBatched(ctx, log, QUEUES.metaLeadgen, (d) => importMetaLead(ctx, d));
   await ctx.boss.work(QUEUES.sequenceSweep, async () => {
     await runJob(log, QUEUES.sequenceSweep, async () => ({
       steps: await sweepDueSteps(ctx),

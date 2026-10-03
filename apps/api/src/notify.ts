@@ -1,11 +1,11 @@
 import { buttonPayload, renderTemplateBody, TEMPLATES, type TemplateKey } from '@instantlead/config';
 import { formatSlot } from '@instantlead/core';
 import { ChannelError, type CalendarProvider, type EmailProvider } from '@instantlead/integrations';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getActiveConfig } from './config-store.ts';
 import { withTenant, type Tx } from './db/client.ts';
 import { calendarTargetFor } from './calendar-sync.ts';
-import { ACTIVE_APPOINTMENT_STATUSES, appointments, leads, templates } from './db/schema.ts';
+import { ACTIVE_APPOINTMENT_STATUSES, appointments, events, leads, templates } from './db/schema.ts';
 import type { JobData } from './jobs.ts';
 import { channelFor, sendToLead, type MessagingDeps } from './outbound.ts';
 
@@ -96,14 +96,24 @@ export async function notifyAppointmentChange(deps: NotifyDeps, job: JobData['ap
         idempotencyKey: `appt:${appt.id}:${kind}:staff`,
       });
     } else if (kind === 'booked') {
-      results.staff = await sendStaffWhatsApp(deps, tenantId, notify.to, 'staff_new_booking', [
-        values.first_name ?? lead.phoneE164,
-        serviceLabel,
-        values['appointment.time'],
-      ]);
+      results.staff = await sendStaffWhatsApp(
+        deps,
+        tenantId,
+        notify.to,
+        'staff_new_booking',
+        [values.first_name ?? lead.phoneE164, serviceLabel, values['appointment.time']],
+        `appt:${appt.id}:${kind}:staff`,
+      );
     } else {
       // Cancelled / rescheduled / confirmed: not a "new booking request", so the generic staff update.
-      results.staff = await sendStaffWhatsApp(deps, tenantId, notify.to, 'staff_update', [summary]);
+      results.staff = await sendStaffWhatsApp(
+        deps,
+        tenantId,
+        notify.to,
+        'staff_update',
+        [summary],
+        `appt:${appt.id}:${kind}:staff`,
+      );
     }
   }
 
@@ -194,9 +204,14 @@ export async function notifyStaffAlert(deps: NotifyDeps, job: JobData['staff-ale
       text: `${who} needs a reply from the team on WhatsApp.\nReason: ${job.reason}\n\nOpen the InstantLead inbox to see the conversation.`,
       idempotencyKey: `staff-alert:${job.leadId}:${job.at}`,
     });
-  return sendStaffWhatsApp(deps, job.tenantId, notify.to, 'staff_handover', [
-    lead.name?.trim().split(/\s+/)[0] || lead.phoneE164,
-  ]);
+  return sendStaffWhatsApp(
+    deps,
+    job.tenantId,
+    notify.to,
+    'staff_handover',
+    [lead.name?.trim().split(/\s+/)[0] || lead.phoneE164],
+    `staff-alert:${job.leadId}:${job.at}`,
+  );
 }
 
 /** A short note to the clinic's staff channel (email, or the staff_update WhatsApp template). */
@@ -216,18 +231,36 @@ export async function sendStaffNote(
       text: `${note}.\n\nOpen the InstantLead dashboard for details.`,
       idempotencyKey,
     });
-  return sendStaffWhatsApp(deps, tenantId, notify.to, 'staff_update', [note]);
+  return sendStaffWhatsApp(deps, tenantId, notify.to, 'staff_update', [note], idempotencyKey);
 }
 
-/** Staff alerts go out as an approved template (staff aren't in a conversation window). */
+/**
+ * Staff alerts go out as an approved template (staff aren't in a conversation window). `idempotencyKey`
+ * makes a retried job (e.g. the calendar step failed after the alert went out) not alert twice: a
+ * `staff.whatsapp_sent` event marks each key once it was sent. The send itself is outside any transaction.
+ */
 export async function sendStaffWhatsApp(
   deps: MessagingDeps,
   tenantId: string,
   to: string,
   key: TemplateKey,
   values: string[],
+  idempotencyKey: string,
 ) {
-  return withTenant(deps.db, tenantId, async (tx) => {
+  const marker = `${idempotencyKey}:${to}`;
+  const body = renderTemplateBody(key, 'en', values);
+  const prepared = await withTenant(deps.db, tenantId, async (tx) => {
+    const sent = await tx
+      .select({ id: events.id })
+      .from(events)
+      .where(
+        and(
+          eq(events.type, 'staff.whatsapp_sent'),
+          sql`${events.payload}->>'key' = ${marker}`,
+        ),
+      )
+      .limit(1);
+    if (sent.length) return null;
     const channel = await channelFor(tx, deps, tenantId);
     const [row] = await tx
       .select()
@@ -235,12 +268,18 @@ export async function sendStaffWhatsApp(
       .where(and(eq(templates.key, key), eq(templates.language, 'en')));
     if (channel.provider === 'meta' && row?.status !== 'approved')
       throw new ChannelError(`Template ${key} is not approved, staff alert not sent`, { retryable: false });
-    return channel.send(to, {
-      kind: 'template',
-      name: row?.providerName ?? TEMPLATES[key].providerName,
-      language: 'en',
-      bodyParams: values,
-      buttonPayloads: TEMPLATES[key].buttons.map((b: { id: string }) => buttonPayload(key, b.id)),
-    });
-  }).then((r) => ({ ...r, body: renderTemplateBody(key, 'en', values) }));
+    return { channel, name: row?.providerName ?? TEMPLATES[key].providerName };
+  });
+  if (!prepared) return { skipped: 'already sent', body };
+  const r = await prepared.channel.send(to, {
+    kind: 'template',
+    name: prepared.name,
+    language: 'en',
+    bodyParams: values,
+    buttonPayloads: TEMPLATES[key].buttons.map((b: { id: string }) => buttonPayload(key, b.id)),
+  });
+  await withTenant(deps.db, tenantId, (tx) =>
+    tx.insert(events).values({ type: 'staff.whatsapp_sent', payload: { key: marker }, occurredAt: deps.clock.now() }),
+  );
+  return { ...r, body };
 }
