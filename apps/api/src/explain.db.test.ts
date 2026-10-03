@@ -72,7 +72,40 @@ beforeAll(async () => {
     `insert into enrollment_steps (tenant_id, enrollment_id, step, action, due_at, status)
      select tenant_id, id, 1, 'message', now() + make_interval(hours => (random() * 100)::int), 'pending' from enrollments`,
   );
+  // Ops employee tables: timelines, recovery opportunities, calls, treatment plans, waitlist.
+  await o(
+    `insert into events (tenant_id, type, payload, lead_id, occurred_at)
+     select tenant_id, 'lead.replied', '{}', id, now() - interval '1 minute' from leads where tenant_id in ($1, $2)`,
+    [A, B],
+  );
+  await o(
+    `insert into treatment_plans (tenant_id, lead_id, title, status, next_visit_due_at)
+     select tenant_id, id, 'Plan', case when random() < 0.2 then 'in_progress' else 'completed' end, now() - interval '3 days'
+     from leads where tenant_id in ($1, $2)`,
+    [A, B],
+  );
+  await o(
+    `insert into opportunities (tenant_id, lead_id, kind, subject_key, status, priority, reason, recommended_action, detected_at)
+     select tenant_id, id, 'LOST_LEAD', 'lead:' || id, case when random() < 0.1 then 'open' else 'lost' end, 40, 'x', 'x', now()
+     from leads where tenant_id in ($1, $2)`,
+    [A, B],
+  );
+  await o(
+    `insert into calls (tenant_id, lead_id, provider, provider_call_id, started_at)
+     select tenant_id, id, 'vapi', 'call-' || id, now() - interval '1 day' from leads where tenant_id in ($1, $2)`,
+    [A, B],
+  );
+  await o(
+    `insert into waitlist_entries (tenant_id, lead_id, service, status, source, joined_at)
+     select tenant_id, id, 'Consultation', case when random() < 0.05 then 'waiting' else 'booked' end, 'assistant', now()
+     from leads where tenant_id in ($1, $2)`,
+    [A, B],
+  );
   for (const table of [
+    'treatment_plans',
+    'opportunities',
+    'calls',
+    'waitlist_entries',
     'leads',
     'messages',
     'llm_runs',
@@ -148,5 +181,38 @@ test("B never needs A's data: the same queries stay indexed for the second tenan
   noSeqScan(
     await plan(`select * from leads where tenant_id = $1 order by received_at desc limit 50`, [B]),
     'leads',
+  );
+});
+
+test('patient timeline: events, calls and plans of one lead', async () => {
+  noSeqScan(
+    await plan(`select * from events where lead_id = $1 order by occurred_at desc limit 500`, [aLead]),
+    'events',
+  );
+  noSeqScan(await plan(`select * from calls where lead_id = $1 order by started_at desc`, [aLead]), 'calls');
+  noSeqScan(await plan(`select * from treatment_plans where lead_id = $1`, [aLead]), 'treatment_plans');
+});
+
+test('recovery: open opportunities by priority; plans to check; the waitlist queue', async () => {
+  noSeqScan(
+    await plan(
+      `select * from opportunities where tenant_id = $1 and status = 'open' order by priority desc limit 200`,
+      [A],
+    ),
+    'opportunities',
+  );
+  noSeqScan(
+    await plan(
+      `select * from treatment_plans where tenant_id = $1 and status in ('accepted', 'in_progress')`,
+      [A],
+    ),
+    'treatment_plans',
+  );
+  noSeqScan(
+    await plan(
+      `select * from waitlist_entries where tenant_id = $1 and status = 'waiting' order by joined_at`,
+      [A],
+    ),
+    'waitlist_entries',
   );
 });

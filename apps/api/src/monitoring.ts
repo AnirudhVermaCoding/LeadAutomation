@@ -116,6 +116,9 @@ export async function integrationHealth(tx: Tx) {
       failed_24h: string;
       llm_errors_24h: string;
       last_llm_ok: Date | null;
+      last_call: Date | null;
+      failed_calls_24h: string;
+      outreach_not_sent_24h: string;
     }>(sql`
       select
         (select max(occurred_at) from messages where direction = 'out' and status in ('sent', 'delivered', 'read')) as last_sent,
@@ -123,7 +126,10 @@ export async function integrationHealth(tx: Tx) {
         (select max(occurred_at) from messages where direction = 'in') as last_inbound,
         (select count(*) from messages where direction = 'out' and status = 'failed' and updated_at > now() - interval '24 hours') as failed_24h,
         (select count(*) from llm_runs where error is not null and created_at > now() - interval '24 hours') as llm_errors_24h,
-        (select max(occurred_at) from llm_runs where error is null) as last_llm_ok`)
+        (select max(occurred_at) from llm_runs where error is null) as last_llm_ok,
+        (select max(started_at) from calls) as last_call,
+        (select count(*) from calls where status = 'failed' and updated_at > now() - interval '24 hours') as failed_calls_24h,
+        (select count(*) from opportunities where outcome like 'Not sent:%' and updated_at > now() - interval '24 hours') as outreach_not_sent_24h`)
   ).rows;
   return {
     lastSuccessfulSend: row?.last_sent ?? null,
@@ -132,5 +138,9 @@ export async function integrationHealth(tx: Tx) {
     failedSends24h: Number(row?.failed_24h ?? 0),
     llmErrors24h: Number(row?.llm_errors_24h ?? 0),
     lastAssistantReply: row?.last_llm_ok ?? null,
+    lastPhoneCall: row?.last_call ?? null,
+    failedPhoneCalls24h: Number(row?.failed_calls_24h ?? 0),
+    /** Recovery follow-ups / reminders the assistant could not send (template not approved, opted out…). */
+    outreachNotSent24h: Number(row?.outreach_not_sent_24h ?? 0),
   };
 }

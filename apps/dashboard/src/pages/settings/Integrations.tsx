@@ -425,6 +425,9 @@ interface HealthData {
   failedSends24h: number;
   llmErrors24h: number;
   lastAssistantReply: string | null;
+  lastPhoneCall: string | null;
+  failedPhoneCalls24h: number;
+  outreachNotSent24h: number;
 }
 
 /** What actually happened recently: the quickest way to see if something is broken. */
@@ -444,6 +447,13 @@ function Health() {
     ['Last AI reply', when(h.lastAssistantReply), true],
     ['Failed sends (24 h)', String(h.failedSends24h), h.failedSends24h === 0],
     ['AI errors (24 h)', String(h.llmErrors24h), h.llmErrors24h === 0],
+    ['Follow-ups not sent (24 h)', String(h.outreachNotSent24h), h.outreachNotSent24h === 0],
+    ...(h.lastPhoneCall
+      ? ([
+          ['Last phone call', when(h.lastPhoneCall), true],
+          ['Failed phone calls (24 h)', String(h.failedPhoneCalls24h), h.failedPhoneCalls24h === 0],
+        ] as [string, string, boolean][])
+      : []),
   ];
   return (
     <Card title="Health">

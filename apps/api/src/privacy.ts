@@ -6,6 +6,7 @@ import { withTenant, type Db, type TenantTx, type Tx } from './db/client.ts';
 import {
   answers,
   appointments,
+  calls,
   consents,
   conversations,
   events,
@@ -13,6 +14,9 @@ import {
   llmRuns,
   messages,
   oauthNonces,
+  opportunities,
+  treatmentPlans,
+  waitlistEntries,
 } from './db/schema.ts';
 import { QUEUES, type Enqueue } from './jobs.ts';
 import type { LeadDeps } from './leads.ts';
@@ -58,8 +62,14 @@ async function anonymizeLead(tx: Tx, leadId: string) {
   await tx.update(consents).set({ evidence: null }).where(eq(consents.leadId, leadId));
   await tx
     .update(appointments)
-    .set({ notes: null, googleEventId: null, googleCalendarId: null })
+    .set({ notes: null, attendeeName: null, googleEventId: null, googleCalendarId: null })
     .where(eq(appointments.leadId, leadId));
+  await tx.update(calls).set({ summary: null, toolResults: {} }).where(eq(calls.leadId, leadId));
+  await tx
+    .update(treatmentPlans)
+    .set({ title: '[removed]', notes: null, attendeeName: null })
+    .where(eq(treatmentPlans.leadId, leadId));
+  await tx.update(waitlistEntries).set({ attendeeName: null }).where(eq(waitlistEntries.leadId, leadId));
 }
 
 /**
@@ -89,8 +99,13 @@ export async function runRetention(
             and greatest(
               l.received_at,
               coalesce((select max(m.occurred_at) from messages m where m.lead_id = l.id), l.received_at),
-              coalesce((select max(a.starts_at) from appointments a where a.lead_id = l.id), l.received_at)
+              coalesce((select max(a.starts_at) from appointments a where a.lead_id = l.id), l.received_at),
+              coalesce((select max(c.started_at) from calls c where c.lead_id = l.id), l.received_at),
+              coalesce((select max(p.updated_at) from treatment_plans p where p.lead_id = l.id), l.received_at)
             ) < ${cutoff}
+            -- An open treatment or a recall still ahead is an ongoing relationship, not stale data.
+            and not exists (select 1 from treatment_plans p where p.lead_id = l.id
+              and (p.status in ('accepted', 'in_progress') or p.recall_due_at > ${now}))
           limit 1000`)
       ).rows;
       await queueCalendarRemovals(
@@ -131,5 +146,9 @@ export async function exportTenantData(tx: Tx) {
     messages: await tx.select().from(messages),
     answers: await tx.select().from(answers),
     appointments: await tx.select().from(appointments),
+    treatmentPlans: await tx.select().from(treatmentPlans),
+    calls: await tx.select().from(calls),
+    waitlist: await tx.select().from(waitlistEntries),
+    opportunities: await tx.select().from(opportunities),
   };
 }
