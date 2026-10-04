@@ -14,7 +14,7 @@ import { withTenant, type Tx } from '../db/client.ts';
 import { appointments, conversations, treatmentPlans } from '../db/schema.ts';
 import { runStructured } from '../llm-router.ts';
 import type { AssistantDeps } from './agent.ts';
-import { redact } from './guard.ts';
+import { PRICE, redact } from './guard.ts';
 import { jsonSchema } from './prompt.ts';
 
 /** Messages sent verbatim each turn; anything older is summarised once the conversation passes SUMMARIZE_AFTER. */
@@ -108,7 +108,12 @@ export async function hasHistory(tx: Tx, leadId: string): Promise<boolean> {
  * The get_patient_history tool: this lead's last visits and treatment plans, newest first.
  * Clinic-entered facts only: no amounts (money questions go to staff), no staff notes.
  */
-export async function patientHistory(tx: Tx, leadId: string, timezone: string) {
+export async function patientHistory(
+  tx: Tx,
+  leadId: string,
+  timezone: string,
+  about: 'visits' | 'treatment' | 'both' = 'both',
+) {
   const visits = await tx
     .select()
     .from(appointments)
@@ -122,14 +127,19 @@ export async function patientHistory(tx: Tx, leadId: string, timezone: string) {
     .orderBy(desc(treatmentPlans.updatedAt))
     .limit(HISTORY_LIMIT);
   return {
-    past_visits: visits.map((a) => ({
+    past_visits: (about === 'treatment' ? [] : visits).map((a) => ({
       service: a.service,
       when: formatSlot(a.startsAt, timezone),
       status: a.status.replace('_', '-'),
       ...(a.attendeeName && { for: a.attendeeName }),
     })),
-    treatment_plans: plans.map((p) => ({
-      treatment: p.title,
+    treatment_plans: (about === 'visits' ? [] : plans).map((p) => ({
+      // Staff type the title freely; an amount in it must not become a price the model may quote.
+      treatment: p.title
+        .replace(PRICE, '')
+        .replace(/\s+([,.;)])/g, '$1')
+        .replace(/\s{2,}/g, ' ')
+        .trim(),
       status: p.status.replace('_', ' '),
       visits: p.visitsPlanned ? `${p.visitsDone} of ${p.visitsPlanned} done` : `${p.visitsDone} done`,
       ...(p.nextVisitDueAt && { next_visit_due: formatSlot(p.nextVisitDueAt, timezone) }),

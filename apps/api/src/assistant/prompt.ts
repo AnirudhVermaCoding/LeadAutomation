@@ -80,7 +80,12 @@ export function toolSchemas(config: TenantConfig, resources: readonly string[] =
       part_of_day: z.enum(['morning', 'afternoon', 'evening']).optional(),
       ...forName,
     }),
-    get_patient_history: z.strictObject({}),
+    get_patient_history: z.strictObject({
+      about: z
+        .enum(['visits', 'treatment', 'both'])
+        .optional()
+        .describe('Past visits, treatment plans, or both (default)'),
+    }),
   };
 }
 export type ToolName = keyof ReturnType<typeof toolSchemas>;

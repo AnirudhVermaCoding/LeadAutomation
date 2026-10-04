@@ -241,12 +241,15 @@ export interface ReplyContext {
 }
 
 /** Hard rules every reply must pass. Returns the problems (empty = fine). */
+/** A rupee amount as checkReply reads one ("₹1,500", "Rs 500", "1500 rupees", "500/-"). */
+export const PRICE = /(?:₹|rs\.?|inr)\s?(\d[\d,]*)|(\d[\d,]*)\s?(?:rupees|rs\b|\/-)/gi;
+
 export function checkReply(text: string, c: ReplyContext): string[] {
   const problems: string[] = [];
   if (LEAK.test(text)) problems.push('mentions internal instructions or tool names');
 
   const known = numbers(c.sources);
-  for (const m of text.matchAll(/(?:₹|rs\.?|inr)\s?(\d[\d,]*)|(\d[\d,]*)\s?(?:rupees|rs\b|\/-)/gi)) {
+  for (const m of text.matchAll(PRICE)) {
     const amount = (m[1] ?? m[2] ?? '').replace(/,/g, '');
     if (amount && !known.has(amount))
       problems.push(`states a price (₹${amount}) that is not in the business's information`);

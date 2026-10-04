@@ -188,7 +188,12 @@ export async function runTool(c: ToolContext, name: string, rawInput: unknown): 
       return {
         content: JSON.stringify(
           await withTenant(c.deps.db, c.tenantId, (tx) =>
-            patientHistory(tx, c.leadId, c.config.locale.timezone),
+            patientHistory(
+              tx,
+              c.leadId,
+              c.config.locale.timezone,
+              input.about as 'visits' | 'treatment' | undefined,
+            ),
           ),
         ),
       };

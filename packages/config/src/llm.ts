@@ -57,4 +57,4 @@ export const PROVIDER_NAMES: Record<LlmProviderName, string> = {
  * any customer text is sent, so an old notice never silently covers a new default provider.
  */
 export const providerDisclosed = (consentNotice: string, provider: LlmProviderName) =>
-  provider === 'anthropic' || consentNotice.toLowerCase().includes(PROVIDER_NAMES[provider].toLowerCase());
+  provider === 'anthropic' || new RegExp(`\\b${PROVIDER_NAMES[provider]}\\b`, 'i').test(consentNotice);

@@ -7,6 +7,7 @@ import { withTenant } from '../db/client.ts';
 import { appointments, leads, messages, treatmentPlans } from '../db/schema.ts';
 import { KEEP_RECENT } from './context.ts';
 import { createFakeLlm } from './fake-llm.ts';
+import { buildTools } from './prompt.ts';
 import { runTool } from './tools.ts';
 
 /**
@@ -121,7 +122,7 @@ async function patient(opts: { messages?: number } = {}) {
     });
     await tx.insert(treatmentPlans).values({
       leadId: lead.id,
-      title: 'Root canal, 3 visits',
+      title: 'Root canal ₹14,500, 3 visits', // staff typed a price into the title
       service: 'Consultation',
       status: 'in_progress',
       visitsPlanned: 3,
@@ -151,6 +152,8 @@ describe('minimal context by default', () => {
     expect(text).not.toContain('question number 0 about');
     expect(text).not.toMatch(/Root canal|completed\)|14500|sedation/);
     expect(toolNames(req)).toContain('get_patient_history');
+    // A long chat alone is not complex: the default model answers it.
+    expect(req.task).toBe('agent_reply');
 
     // Audit: per-turn conversation context (chars / 4 ~ tokens), recorded in docs/PROGRESS.
     console.info(
@@ -185,10 +188,19 @@ describe('history on demand, scoped and permissioned in code', () => {
       {},
     );
     expect(out.isError).toBeFalsy();
-    expect(out.content).toContain('Root canal, 3 visits');
+    expect(out.content).toContain('"treatment":"Root canal 3 visits"'); // the amount is stripped
     expect(out.content).toContain('1 of 3 done');
     expect(out.content).toMatch(/Consultation/);
-    expect(out.content).not.toMatch(/Implant for someone else|14500|5000|sedation|STAFF ONLY/);
+    expect(out.content).not.toMatch(/Implant for someone else|14,?500|5000|₹|sedation|STAFF ONLY/);
+    const visitsOnly = await runTool(
+      { deps: t.ctx, tenantId: A, leadId: mine.lead.id, config, historyAccess: true },
+      'get_patient_history',
+      { about: 'visits' },
+    );
+    expect(JSON.parse(visitsOnly.content)).toMatchObject({
+      treatment_plans: [],
+      past_visits: [expect.anything()],
+    });
   });
 
   test('the model cannot call it unless code granted access, and never on the phone channel', async () => {
@@ -212,7 +224,15 @@ describe('history on demand, scoped and permissioned in code', () => {
       r.turns.flatMap((x) => (x.role === 'assistant' ? x.toolCalls.map((c) => c.name) : [])),
     );
     expect(toolCalls).toContain('get_patient_history');
-    expect((await outbound(lead.id)).at(-1)).toMatch(/Root canal, 3 visits is 1 of 3 done/);
+    expect((await outbound(lead.id)).at(-1)).toMatch(/Root canal 3 visits is 1 of 3 done/);
+  });
+});
+
+describe('tool schemas', () => {
+  test('every tool declares at least one parameter (Gemini rejects OBJECT parameters with no properties)', async () => {
+    const config = await withTenant(t.ctx.db, A, async (tx) => (await getActiveConfig(tx))!.config);
+    for (const tool of buildTools(config, ['Dr A', 'Dr B'], { history: true }))
+      expect(Object.keys((tool.inputSchema.properties ?? {}) as object), tool.name).not.toHaveLength(0);
   });
 });
 

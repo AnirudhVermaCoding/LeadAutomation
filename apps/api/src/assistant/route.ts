@@ -15,8 +15,6 @@ export interface TurnSignals {
   upcomingAppointments: number;
   /** A reminder button that needs interpreting (e.g. "reschedule", or unclear which appointment). */
   buttonNote: boolean;
-  /** The conversation is long enough that older messages are summarised. */
-  summarised: boolean;
   /** Returning after 14+ days with answers older than 60 days to re-confirm. */
   staleReturning: boolean;
 }
@@ -34,7 +32,6 @@ export function classifyTurn(s: TurnSignals): Complexity | 'ambiguous' {
   if (
     s.upcomingAppointments >= 2 ||
     s.buttonNote ||
-    s.summarised ||
     s.staleReturning ||
     DELICATE.test(s.text) ||
     questions >= 2 ||
@@ -69,7 +66,8 @@ export async function routeTurn(
         task: 'message_route',
         system: `You route WhatsApp messages sent to ${config.brand.business_name}. Answer "complex" only if a good reply needs careful reasoning: several requests at once, conditions or constraints to juggle, an unclear or emotional situation, or a misunderstanding to untangle. Plain questions, booking a time, and small talk are "simple".`,
         turns: [{ role: 'user', text: redact(signals.text).slice(0, 1500) }],
-        maxTokens: 30,
+        // Thinking counts toward max_tokens on Gemini 3.x (minimal, cannot be turned off) when 3.1 stands in as judge.
+        maxTokens: 256,
         timeoutMs: JUDGE_TIMEOUT_MS,
         output: { name: 'route', schema: jsonSchema(JudgeSchema) },
       },

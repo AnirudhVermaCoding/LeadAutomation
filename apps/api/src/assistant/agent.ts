@@ -404,7 +404,6 @@ export async function runAssistantTurn(
       text: ctx.inboundText,
       upcomingAppointments: ctx.appointments.length,
       buttonNote: buttonNote !== null,
-      summarised: memory.summary !== null,
       staleReturning: ctx.staleAnswers.length > 0 && (ctx.daysSinceBefore ?? 0) >= 14,
     },
   );

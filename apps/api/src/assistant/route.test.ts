@@ -5,7 +5,6 @@ const base: TurnSignals = {
   text: '',
   upcomingAppointments: 0,
   buttonNote: false,
-  summarised: false,
   staleReturning: false,
 };
 const of = (text: string, extra: Partial<TurnSignals> = {}) => classifyTurn({ ...base, text, ...extra });
@@ -33,7 +32,6 @@ describe('classifyTurn: rules decide the obvious cases, the judge only the rest'
   test('workflow state makes a turn complex whatever the text', () => {
     expect(of('ok', { upcomingAppointments: 2 })).toBe('complex');
     expect(of('ok', { buttonNote: true })).toBe('complex');
-    expect(of('ok', { summarised: true })).toBe('complex');
     expect(of('ok', { staleReturning: true })).toBe('complex');
     expect(of('ok', { upcomingAppointments: 1 })).toBe('simple');
   });

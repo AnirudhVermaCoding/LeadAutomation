@@ -89,6 +89,33 @@ describe('AI providers', () => {
       expect.stringMatching(/allow at least one AI provider/),
     ]);
   });
+
+  test('a config without an ai section uses the default (Google), so its notice must name Google', () => {
+    const anthropicNotice = (c: TenantConfig) => {
+      delete c.ai;
+      c.intake.consent_notice_text = 'Replies may be written by an AI assistant (processed by Anthropic).';
+    };
+    expect(errorsFor(anthropicNotice)).toEqual([
+      expect.stringMatching(/consent_notice_text: mention Google/),
+    ]);
+    // Still saves when it keeps Anthropic explicitly (clinics set up before the switch).
+    expect(
+      errorsFor((c) => {
+        anthropicNotice(c);
+        c.ai = { allowed_providers: ['anthropic'], monthly_cost_cap_usd: 50 };
+      }),
+    ).toEqual([]);
+  });
+
+  test('the provider must be named as a word, not as part of another word', () => {
+    const notice = (text: string) =>
+      errorsFor((c) => {
+        c.ai = { allowed_providers: ['gemini', 'xai'], monthly_cost_cap_usd: 50 };
+        c.intake.consent_notice_text = text;
+      });
+    expect(notice('Processed by Googleplex and Taxai partners.')).toHaveLength(2);
+    expect(notice('Processed by Google (Gemini) and xAI.')).toEqual([]);
+  });
 });
 
 describe('treatment templates', () => {
