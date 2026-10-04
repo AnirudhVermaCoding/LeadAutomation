@@ -18,7 +18,7 @@ const llm: LlmProvider = {
   provider: 'fake',
   model: 'fake',
   complete: async (req, hints) =>
-    script && req.task === 'agent_reply' ? script(req) : fake.complete(req, hints),
+    script && req.task.startsWith('agent_reply') ? script(req) : fake.complete(req, hints),
 };
 const text = (t: string): LlmResponse => ({
   text: t,

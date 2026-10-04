@@ -192,7 +192,7 @@ export function clinicPreset(variant: ClinicVariant, businessName = 'Demo Clinic
     intake: {
       sources: ['form', 'meta_lead_ads', 'click_to_whatsapp', 'api', 'csv'],
       consent_notice_text:
-        'By submitting, you agree that {{business_name}} may contact you on WhatsApp, SMS or email about your enquiry and appointments. Replies may be written by an AI assistant (processed by Anthropic). Reply STOP anytime to opt out.',
+        'By submitting, you agree that {{business_name}} may contact you on WhatsApp, SMS or email about your enquiry and appointments. Replies may be written by an AI assistant (processed by Google Gemini). Reply STOP anytime to opt out.',
       opt_out_keywords: [...DEFAULT_OPT_OUT_KEYWORDS],
     },
     qualification: {

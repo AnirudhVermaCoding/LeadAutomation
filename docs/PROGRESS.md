@@ -137,3 +137,10 @@ Branch `feat/ai-operations-employee`. Details in DECISIONS 122–131.
 - Settings → **Treatments**: clinic templates (RCT, braces, aligners, implant, scaling by default; editable, prices optional). Adding a plan offers "Start from a template".
 - Per plan **payment schedule** (braces, implants): set up / re-plan, paid / waive / undo (moves the plan's paid total), overdue instalments → one payment reminder for that amount through Recovery (same autonomy, payment link, opt-out rules).
 - Verified: 469 tests, demo 6/6, sim 14/14, e2e 2/2, desktop + mobile screenshots (templates, picker, schedule). DECISIONS 132–133.
+
+## Gemini routing + Context Manager (2026-10-04)
+
+- Default models: Gemini 3.1 Flash-Lite answers, 3.5 Flash-Lite for complex turns, a 2.5 Flash-Lite judge only for turns the rules can't classify (9 of 63 eval messages); Claude removed from every default chain. Consent notice must name a provider before the router sends it text.
+- Context Manager: 12-message window + summary (was 30 + summary, with a gap between them now closed); past visits and treatment plans only through `get_patient_history` (no amounts, no staff notes; offered by code when records exist, WhatsApp only).
+- Audit (60-message returning patient, mock): conversation context ~310 tokens/turn; system prompt + tools ~3.8k tokens (the cacheable prefix). Estimated cost per reply (2 calls): ~$0.0025 on 3.1, ~$0.003 on 3.5, judge ~$0.00002. Judge: 5 s timeout, no SDK retries, one failover; failure means the default model.
+- Verified (mock only): 499 tests, demo 6/6, sim 14/14 + 7/7, e2e 2/2, eval dry run. **Not run against real Gemini** (costs money). DECISIONS 134–137.

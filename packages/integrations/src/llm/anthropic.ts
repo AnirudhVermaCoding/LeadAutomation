@@ -109,7 +109,13 @@ export function createAnthropicProvider(opts: {
       if (req.output) outputConfig.format = { type: 'json_schema', schema: req.output.schema };
       if (Object.keys(outputConfig).length) params.output_config = outputConfig;
       try {
-        return fromAnthropicMessage(await client.messages.create(params), opts.model);
+        return fromAnthropicMessage(
+          await client.messages.create(
+            params,
+            req.timeoutMs ? { timeout: req.timeoutMs, maxRetries: 0 } : undefined,
+          ),
+          opts.model,
+        );
       } catch (err) {
         if (err instanceof Anthropic.APIError)
           throw new LlmError(errorKind(err.status, err.message), err.message, err.status);

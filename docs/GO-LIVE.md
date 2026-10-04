@@ -63,7 +63,8 @@ an unlisted YouTube demo video, publish and submit. In **Testing** status refres
 
 ### Accounts and infrastructure
 
-- **Anthropic API key** (and run `pnpm evals` once; $8 cap; ask me first, it spends money).
+- **Gemini API key, paid tier** (`GEMINI_API_KEY`), then run `pnpm evals` once ($8 cap; ask me first, it spends money). Check the Google project can call `gemini-2.5-flash-lite` (Google limits 2.5 to projects that used it before; without access the judge falls back to 3.1 Flash-Lite automatically, at a slightly higher cost).
+- **Clinics set up before 2026-10-04** still store Anthropic as their AI provider and an "Anthropic" consent notice. With only a Gemini key they hand every conversation to staff ("no AI model available"). Per clinic: tell them, update the consent notice to name Google, allow Google in Settings → AI & data.
 - **Resend** account + a verified sending domain.
 - **VPS in India** (Ubuntu 24.04, Docker), a **domain + DNS A record** (`APP_DOMAIN`), firewall 22/80/443.
 - **S3-compatible bucket** (ap-south-1, versioning) for backups: `BACKUP_*` in `.env`, cron for `deploy/backup.sh`.
@@ -89,7 +90,7 @@ Do this on the **staging** deployment with your own WhatsApp number as the "clin
 12. **Revoke test:** remove the app's access in your Google account security settings → within minutes the dashboard shows "Reconnect Google" and you get the agency alert.
 13. **Opt-out:** reply STOP → one confirmation, nothing after; reply START → welcome back; check Inbox / consent record.
 14. **WhatsApp marketing opt-out:** use WhatsApp's own "stop marketing messages" control on a follow-up template (if available) → no more follow-ups.
-15. **Outage drill:** set a wrong `ANTHROPIC_API_KEY`, message the number → the customer gets the holding reply and staff an alert (never silence). Restore the key.
+15. **Outage drill:** set a wrong `GEMINI_API_KEY`, message the number → the customer gets the holding reply and staff an alert (never silence). Restore the key.
 16. **Backup / restore:** `deploy/backup.sh` → the file is in your bucket → `deploy/restore.sh <file>` into the scratch database prints "ok: RLS intact".
 17. **Report:** run the weekly report (or wait for the day): email + WhatsApp one-liner arrive.
 

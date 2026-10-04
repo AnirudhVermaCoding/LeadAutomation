@@ -10,8 +10,9 @@ Official WhatsApp Cloud API only. Everything runs in **mock mode with zero crede
 
 The assistant is built to take anything a customer sends (symptoms in their own words, several questions at once,
 Hindi or Hinglish, photos, voice notes, spam, vendor pitches, other bots, prompt injection) and reply like a warm
-receptionist, behind deterministic guardrails. It runs on Claude by default, with optional OpenAI, Gemini or Grok
-per clinic, routed per task with automatic failover.
+receptionist, behind deterministic guardrails. It runs on Gemini Flash-Lite by default (3.1 for most turns, 3.5 for
+complex ones, a 2.5 judge only when rules cannot tell), with optional Claude, OpenAI or Grok per clinic, routed per task
+with automatic failover.
 
 ## Quick start (mock mode)
 
@@ -51,7 +52,7 @@ flowchart LR
     Q --> W[Workers]
     W --> DB
     W -->|first reply, reminders,<br/>follow-ups| WA[WhatsApp Cloud API<br/>or fake channel]
-    W -->|assistant turns, routed per task<br/>with failover| LLM[Claude · OpenAI · Gemini · Grok<br/>or rule-based mock]
+    W -->|assistant turns, routed per task<br/>with failover| LLM[Gemini · Claude · OpenAI · Grok<br/>or rule-based mock]
     W -->|reports, alerts| E[Resend email<br/>or fake]
     W -->|optional| G[Google Calendar]
     W -->|signed events| H[Client webhooks]
@@ -64,14 +65,14 @@ flowchart LR
 - **Clock:** business times come from an injected clock; the demo fast-forwards it to show day-2 follow-ups and Monday reports in seconds.
 - **No build step for the backend:** Node 24 runs the TypeScript directly; only the dashboard is built.
 
-| Path                    | What                                                                                |
-| ----------------------- | ----------------------------------------------------------------------------------- |
-| `apps/api`              | HTTP, webhooks, workers, DB schema + migrations                                     |
-| `apps/dashboard`        | React dashboard (served by the API)                                                 |
-| `packages/core`         | Pure domain logic: lead state machine, scoring, availability, quiet hours           |
-| `packages/config`       | Tenant config schema, presets, WhatsApp template registry                           |
-| `packages/integrations` | WhatsApp, Meta Lead Ads, Claude, email, two-way Google Calendar (+ in-memory fakes) |
-| `packages/sim`          | Simulator, `pnpm demo`, `pnpm loadtest`                                             |
+| Path                    | What                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------ |
+| `apps/api`              | HTTP, webhooks, workers, DB schema + migrations                                            |
+| `apps/dashboard`        | React dashboard (served by the API)                                                        |
+| `packages/core`         | Pure domain logic: lead state machine, scoring, availability, quiet hours                  |
+| `packages/config`       | Tenant config schema, presets, WhatsApp template registry                                  |
+| `packages/integrations` | WhatsApp, Meta Lead Ads, LLM providers, email, two-way Google Calendar (+ in-memory fakes) |
+| `packages/sim`          | Simulator, `pnpm demo`, `pnpm loadtest`                                                    |
 
 ## Docs
 

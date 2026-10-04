@@ -14,13 +14,12 @@ import {
   type MediaType,
   type Turn,
 } from '@instantlead/integrations';
-import { and, asc, desc, eq, gte, inArray, sum } from 'drizzle-orm';
+import { and, asc, eq, gte, sum } from 'drizzle-orm';
 import { z } from 'zod';
 import { getActiveConfig } from '../config-store.ts';
 import { withTenant } from '../db/client.ts';
 import {
   answers as answersTable,
-  appointments,
   availabilityRules,
   conversations,
   leads,
@@ -64,6 +63,8 @@ import {
 import { alertStaff, escalate, loadAnswers, runTool } from './tools.ts';
 import { answerSlotOffer } from '../waitlist.ts';
 import { lastAppointmentOrPlan } from '../journey.ts';
+import { conversationMemory, hasHistory, type StoredMessage } from './context.ts';
+import { routeTurn } from './route.ts';
 
 export interface AssistantDeps extends MessagingDeps {
   router: LlmRouter;
@@ -75,7 +76,7 @@ const MAX_STEPS = 6; // model calls per turn
 /** More inbound messages than this in 10 minutes = a flood (or another bot): hand over once. */
 const FLOOD_LIMIT = 15;
 /** Logged on every model call, so evals and incidents can be tied to the prompt that produced them. */
-export const PROMPT_VERSION = 'agent-v3';
+export const PROMPT_VERSION = 'agent-v4';
 
 const HOLDING = {
   en: 'Thanks for your message! A member of our team will get back to you shortly.',
@@ -131,22 +132,8 @@ export async function runAssistantTurn(
     )
       .filter((a) => a.answeredAt.getTime() < sixtyDaysAgo && a.key !== PREFERRED_RESOURCE)
       .map((a) => a.key);
-    const pastVisits = (
-      await tx
-        .select()
-        .from(appointments)
-        .where(
-          and(
-            eq(appointments.leadId, leadId),
-            inArray(appointments.status, ['completed', 'no_show', 'cancelled', 'lapsed']),
-          ),
-        )
-        .orderBy(desc(appointments.startsAt))
-        .limit(3)
-    ).map(
-      (a) =>
-        `${a.service}${a.attendeeName ? ` for ${a.attendeeName}` : ''}, ${formatSlot(a.startsAt, active.config.locale.timezone)} (${a.status.replace('_', '-')})`,
-    );
+    // Past visits and treatment plans stay out of the prompt; the tool fetches them on demand (context.ts).
+    const historyOnFile = await hasHistory(tx, leadId);
     const upcoming = await upcomingAppointments(tx, leadId, deps.clock.now());
     const apptList = upcoming.map((a) => ({
       id: a.id,
@@ -202,7 +189,7 @@ export async function runAssistantTurn(
       appointment,
       appointments: apptList,
       staleAnswers,
-      pastVisits,
+      historyOnFile,
       daysSinceBefore,
     };
   });
@@ -215,7 +202,8 @@ export async function runAssistantTurn(
   const lastInbound = unanswered.at(-1);
   if (!lastInbound) return { status: 'skipped', reason: 'nothing to answer' };
 
-  const tool = { deps, tenantId, leadId, config, resources: ctx.resources };
+  // History access is decided here, in code: this lead has records and wrote from their own WhatsApp number.
+  const tool = { deps, tenantId, leadId, config, resources: ctx.resources, historyAccess: ctx.historyOnFile };
   const reply = (body: string, suffix = 'reply') =>
     sendToLead(deps, tenantId, {
       leadId,
@@ -405,15 +393,30 @@ export async function runAssistantTurn(
 
   await showTyping(deps, tenantId, lastInbound.providerMessageId);
 
+  const memory = await conversationMemory(deps, tenantId, leadId, config, ctx.all, ctx.conversation);
+
+  // Model tier: deterministic rules, the small judge only when they can't tell (route.ts).
+  const complexity = await routeTurn(
+    deps,
+    config,
+    { tenantId, leadId },
+    {
+      text: ctx.inboundText,
+      upcomingAppointments: ctx.appointments.length,
+      buttonNote: buttonNote !== null,
+      summarised: memory.summary !== null,
+      staleReturning: ctx.staleAnswers.length > 0 && (ctx.daysSinceBefore ?? 0) >= 14,
+    },
+  );
+  const task = complexity === 'complex' ? 'agent_reply_complex' : 'agent_reply';
   let chain: LlmProvider[];
   try {
-    chain = deps.router.chain('agent_reply', config);
+    chain = deps.router.chain(task, config);
   } catch (err) {
     if (err instanceof NoModelAvailableError) return handover('no AI model available');
     throw err;
   }
 
-  const memory = await conversationMemory(deps, tenantId, leadId, config, ctx.all, ctx.conversation);
   // Facts the reply may use: the clinic's knowledge, unless the clinic answers questions itself (FAQ autonomy).
   const knowledgeText =
     autonomyOf(config, 'faq') === 'auto'
@@ -423,7 +426,7 @@ export async function runAssistantTurn(
 
   const scored = scoreLead(config.qualification, ctx.answers);
   const system = buildSystemPrompt(config);
-  const tools = buildTools(config, ctx.resources);
+  const tools = buildTools(config, ctx.resources, { history: ctx.historyOnFile });
   const state: Turn = {
     role: 'system',
     text: stateMessage({
@@ -435,7 +438,7 @@ export async function runAssistantTurn(
       missing: scored.status === 'incomplete' ? scored.missing : [],
       status: displayStatus(lead),
       appointments: ctx.appointments.map((a) => a.label),
-      pastVisits: ctx.pastVisits,
+      historyOnFile: ctx.historyOnFile,
       staleAnswers: ctx.staleAnswers,
       daysSinceLastContact: ctx.daysSinceBefore,
       buttonNote,
@@ -446,7 +449,7 @@ export async function runAssistantTurn(
   /** One model drives the whole turn (bounded tool loop). Throws LlmError to fail over. */
   const converse = async (llm: LlmProvider, fallbackUsed: boolean): Promise<TurnResult> => {
     const request: LlmRequest = {
-      task: 'agent_reply',
+      task,
       system,
       tools,
       turns: [
@@ -477,7 +480,7 @@ export async function runAssistantTurn(
         deps,
         llm,
         request,
-        { tenantId, leadId, task: 'agent_reply', promptVersion: PROMPT_VERSION, fallbackUsed },
+        { tenantId, leadId, task, promptVersion: PROMPT_VERSION, fallbackUsed },
         hints,
       );
 
@@ -583,8 +586,6 @@ export async function runAssistantTurn(
   return handover(`all AI models failed (${why})`);
 }
 
-type StoredMessage = { direction: 'in' | 'out'; body: string; payload: Record<string, unknown> | null };
-
 const mediaOf = (m: { payload: Record<string, unknown> | null }) =>
   (m.payload?.mediaType as MediaType | undefined) ?? null;
 
@@ -657,62 +658,6 @@ When in doubt, choose genuine. Confidence is your probability (0-1) that the cat
     return out.category !== 'genuine' && out.confidence >= 0.8 ? out.category : null;
   } catch {
     return null; // the classifier is a filter, never a gate: on any failure, treat as genuine
-  }
-}
-
-const SummarySchema = z.strictObject({ summary: z.string().max(2000) });
-const SUMMARIZE_AFTER = 40; // messages
-const KEEP_RECENT = 30;
-const RESUMMARIZE_EVERY = 20;
-
-/**
- * Long conversations: older messages are folded into a short summary (memory_summarize task),
- * refreshed every 20 messages; the model then sees the summary plus the last 30 messages.
- */
-async function conversationMemory(
-  deps: AssistantDeps,
-  tenantId: string,
-  leadId: string,
-  config: TenantConfig,
-  all: (StoredMessage & { occurredAt: Date })[],
-  conversation: { summary: string | null; summaryUpTo: Date | null } | null,
-): Promise<{ summary: string | null; recent: StoredMessage[] }> {
-  if (all.length <= SUMMARIZE_AFTER) return { summary: null, recent: all };
-  const older = all.slice(0, -KEEP_RECENT);
-  const recent = all.slice(-KEEP_RECENT);
-  const upTo = older.at(-1)!.occurredAt;
-  const unsummarized = conversation?.summaryUpTo
-    ? older.filter((m) => m.occurredAt > conversation.summaryUpTo!).length
-    : older.length;
-  if (conversation?.summary && unsummarized < RESUMMARIZE_EVERY)
-    return { summary: conversation.summary, recent };
-  try {
-    const transcript = older
-      .map(
-        (m) =>
-          `${m.direction === 'in' ? 'Customer' : 'Assistant'}: ${m.direction === 'in' ? redact(m.body) : m.body}`,
-      )
-      .join('\n');
-    const { summary } = await runStructured(
-      deps,
-      config,
-      {
-        task: 'memory_summarize',
-        system:
-          'Summarise this WhatsApp conversation between a customer and a business assistant in under 120 words: what the customer wants, facts they gave (no phone numbers or emails), what was offered or agreed, and anything still open.',
-        turns: [{ role: 'user', text: transcript }],
-        maxTokens: 400,
-        output: { name: 'summary', schema: jsonSchema(SummarySchema) },
-      },
-      SummarySchema,
-      { tenantId, leadId, promptVersion: 'summary-v1' },
-    );
-    await withTenant(deps.db, tenantId, (tx) =>
-      tx.update(conversations).set({ summary, summaryUpTo: upTo }).where(eq(conversations.leadId, leadId)),
-    );
-    return { summary, recent };
-  } catch {
-    return { summary: conversation?.summary ?? null, recent }; // fall back to the last known summary
   }
 }
 

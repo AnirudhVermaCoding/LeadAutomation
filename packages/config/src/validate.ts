@@ -1,4 +1,5 @@
 import { TenantConfigSchema, type TenantConfig } from './schema.ts';
+import { PROVIDER_NAMES, providerDisclosed } from './llm.ts';
 
 type Path = readonly PropertyKey[];
 interface Issue {
@@ -63,12 +64,8 @@ function crossFieldIssues(c: TenantConfig): Issue[] {
   const questionKeys = new Set(q.questions.map((x) => x.key));
 
   // DPDP notice: every AI provider beyond the default must be disclosed to the people it processes.
-  const PROVIDER_NAMES = { openai: 'OpenAI', gemini: 'Google', xai: 'xAI' } as const;
   for (const p of c.ai?.allowed_providers ?? [])
-    if (
-      p !== 'anthropic' &&
-      !c.intake.consent_notice_text.toLowerCase().includes(PROVIDER_NAMES[p].toLowerCase())
-    )
+    if (!providerDisclosed(c.intake.consent_notice_text, p))
       add(
         ['intake', 'consent_notice_text'],
         `mention ${PROVIDER_NAMES[p]} in the consent notice before allowing it as an AI provider (customers must be told who processes their messages)`,

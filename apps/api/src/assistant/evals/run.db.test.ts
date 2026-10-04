@@ -7,7 +7,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_LLM_ROUTING, type LlmTaskName } from '@instantlead/config';
+import { DEFAULT_LLM_ROUTING, PROVIDER_NAMES, type LlmTaskName } from '@instantlead/config';
 import {
   costUsd,
   MODELS,
@@ -43,14 +43,12 @@ const keys = {
   gemini: process.env.GEMINI_API_KEY,
   xai: process.env.XAI_API_KEY,
 };
-/** Under test: each provider's primary agent model (from the default routing). */
+/** Under test: the default and the complex-turn agent models (each runs every task in its run). */
 const UNDER_TEST = dryRun
   ? ['fake']
-  : DEFAULT_LLM_ROUTING.agent_reply.filter(
-      (m, i, list) => list.findIndex((x) => MODELS[x]?.provider === MODELS[m]?.provider) === i,
-    );
+  : [...new Set([DEFAULT_LLM_ROUTING.agent_reply[0]!, DEFAULT_LLM_ROUTING.agent_reply_complex[0]!])];
 /** One fixed judge for every run (comparable scores): the first available, other providers preferred first. */
-const JUDGE_PREFERENCE = ['gpt-6.1-sol', 'gemini-3.8-flash', 'claude-sonnet-5-5', 'grok-4.7'];
+const JUDGE_PREFERENCE = ['gpt-6.1-sol', 'gemini-3.8-flash', 'grok-4.7'];
 
 // ---------------------------------------------------------------- budget
 
@@ -170,6 +168,11 @@ async function runModel(model: string, judgeLlm: LlmProvider, suite: Suite): Pro
         { type: 'system' },
         {
           ...config,
+          // The router only sends text to providers the consent notice names.
+          intake: {
+            ...config.intake,
+            consent_notice_text: `${config.intake.consent_notice_text} (${model === 'fake' ? '' : PROVIDER_NAMES[MODELS[model]!.provider as 'anthropic']})`,
+          },
           ai: {
             allowed_providers: model === 'fake' ? ['anthropic'] : [MODELS[model]!.provider as 'anthropic'],
             monthly_cost_cap_usd: 1000,

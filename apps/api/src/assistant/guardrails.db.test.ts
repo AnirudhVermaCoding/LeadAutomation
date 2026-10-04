@@ -18,7 +18,7 @@ const llm: LlmProvider = {
   model: 'fake',
   async complete(req, hints) {
     seen.push(structuredClone(req));
-    return script && req.task === 'agent_reply' ? script(req) : fake.complete(req, hints);
+    return script && req.task.startsWith('agent_reply') ? script(req) : fake.complete(req, hints);
   },
 };
 const text = (t: string): LlmResponse => ({
@@ -83,7 +83,7 @@ const outbound = async (leadId: string) =>
   )
     .filter((m) => m.direction === 'out')
     .map((m) => m.body);
-const agentCalls = () => seen.filter((r) => r.task === 'agent_reply').length;
+const agentCalls = () => seen.filter((r) => r.task.startsWith('agent_reply')).length;
 
 describe('media', () => {
   test('a photo without a caption: warm fixed reply, staff alerted, no AI call', async () => {
@@ -119,7 +119,7 @@ describe('media', () => {
     const from = newPhone();
     await say(from, { media_type: 'image', text: 'is this tooth decay?' });
     await t.drainAssistant();
-    const req = seen.filter((r) => r.task === 'agent_reply').at(-1)!;
+    const req = seen.filter((r) => r.task.startsWith('agent_reply')).at(-1)!;
     expect(JSON.stringify(req.turns)).toMatch(/\(sent a image\) is this tooth decay\?/);
   });
 });
@@ -276,7 +276,7 @@ describe('memory', () => {
       tx.select().from(conversations).where(eq(conversations.leadId, lead.id)),
     );
     expect(conv?.summary).toMatch(/Earlier the customer said/);
-    const req = seen.filter((r) => r.task === 'agent_reply').at(-1)!;
+    const req = seen.filter((r) => r.task.startsWith('agent_reply')).at(-1)!;
     expect(req.turns[0]).toMatchObject({
       role: 'system',
       text: expect.stringMatching(/^Summary of the earlier/),
@@ -289,7 +289,7 @@ test('customer identifiers are redacted before any prompt leaves the app', async
   const from = newPhone();
   await say(from, { text: 'please call me on 98765 43210 or mail priya@example.com about braces' });
   await t.drainAssistant();
-  const req = seen.filter((r) => r.task === 'agent_reply').at(-1)!;
+  const req = seen.filter((r) => r.task.startsWith('agent_reply')).at(-1)!;
   const sent = JSON.stringify(req.turns);
   expect(sent).toMatch(/\[phone\].*\[email\]/);
   expect(sent).not.toMatch(/98765|priya@/);

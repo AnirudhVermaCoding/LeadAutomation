@@ -260,5 +260,43 @@ describe('adapters (stub clients, no network)', () => {
         request,
       ),
     ).rejects.toBeInstanceOf(LlmError);
+
+    // 404 (no access to a model, e.g. Gemini 2.5 on a new project): fail over, don't retry.
+    const missing = new OpenAI.NotFoundError(404, {}, 'model not found', new Headers());
+    const gone = { chat: { completions: { create: () => Promise.reject(missing) } } } as unknown as Pick<
+      OpenAI,
+      'chat'
+    >;
+    await expect(
+      createOpenAICompatProvider({
+        provider: 'gemini',
+        apiKey: 'x',
+        model: 'gemini-2.5-flash-lite',
+        client: gone,
+      }).complete(request),
+    ).rejects.toMatchObject({ kind: 'unavailable', retryable: false, failover: true });
+  });
+
+  test('a critical-path call (timeoutMs) gets that timeout and no SDK retries', async () => {
+    const options: unknown[] = [];
+    const client = {
+      chat: {
+        completions: {
+          create: (_p: unknown, o: unknown) => {
+            options.push(o);
+            return Promise.resolve(chatCompletion);
+          },
+        },
+      },
+    } as unknown as Pick<OpenAI, 'chat'>;
+    const p = createOpenAICompatProvider({
+      provider: 'gemini',
+      apiKey: 'x',
+      model: 'gemini-2.5-flash-lite',
+      client,
+    });
+    await p.complete({ ...request, timeoutMs: 5_000 });
+    await p.complete(request);
+    expect(options).toEqual([{ timeout: 5_000, maxRetries: 0 }, undefined]);
   });
 });

@@ -18,7 +18,8 @@ export interface ModelSpec {
  * Model registry. VERIFY against current provider pricing/docs before changing defaults.
  * Checked 2026-10-02 on: platform.claude.com/docs/en/about-claude/pricing,
  * developers.openai.com/api/docs/models + /pricing, ai.google.dev/gemini-api/docs/pricing,
- * docs.x.ai/docs/models. Prices are standard tier, prompts under 200k tokens.
+ * docs.x.ai/docs/models. Gemini Flash-Lite ids, status and prices re-checked 2026-10-04 on
+ * ai.google.dev/gemini-api/docs/models + /pricing. Prices are standard tier, prompts under 200k tokens.
  */
 export const MODELS: Record<string, ModelSpec> = {
   'claude-sonnet-5-5': {
@@ -58,7 +59,7 @@ export const MODELS: Record<string, ModelSpec> = {
     contextWindow: 1_050_000,
     price: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.1 },
   },
-  // Gemini prices: introductory rate through 2026-12-31 (doubles on 2027-01-01).
+  // Gemini 3.8 Flash price: introductory rate through 2026-12-31 (doubles on 2027-01-01).
   'gemini-3.8-flash': {
     id: 'gemini-3.8-flash',
     provider: 'gemini',
@@ -68,6 +69,7 @@ export const MODELS: Record<string, ModelSpec> = {
     contextWindow: 1_000_000,
     price: { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   },
+  // Default conversational model (agent_reply). Flash-Lite prices are standard (no introductory rate).
   'gemini-3.1-flash-lite': {
     id: 'gemini-3.1-flash-lite',
     provider: 'gemini',
@@ -76,6 +78,27 @@ export const MODELS: Record<string, ModelSpec> = {
     supportsCaching: false,
     contextWindow: 1_000_000,
     price: { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0.25 },
+  },
+  // Genuinely complex turns (agent_reply_complex).
+  'gemini-3.5-flash-lite': {
+    id: 'gemini-3.5-flash-lite',
+    provider: 'gemini',
+    supportsTools: true,
+    supportsStructuredOutput: true,
+    supportsCaching: false,
+    contextWindow: 1_000_000,
+    price: { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
+  },
+  // Router / judge and small structured tasks. Google limits 2.5 access to projects that used it
+  // before: a 404 fails over to 3.1 Flash-Lite (errorKind 'unavailable').
+  'gemini-2.5-flash-lite': {
+    id: 'gemini-2.5-flash-lite',
+    provider: 'gemini',
+    supportsTools: true,
+    supportsStructuredOutput: true,
+    supportsCaching: false,
+    contextWindow: 1_000_000,
+    price: { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0.1 },
   },
   'grok-4.7': {
     id: 'grok-4.7',

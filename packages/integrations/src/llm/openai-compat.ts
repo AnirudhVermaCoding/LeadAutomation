@@ -140,7 +140,14 @@ export function createOpenAICompatProvider(opts: {
           json_schema: { name: req.output.name, schema: req.output.schema, strict: true },
         };
       try {
-        return fromChatCompletion(await client.chat.completions.create(params), opts.provider, opts.model);
+        return fromChatCompletion(
+          await client.chat.completions.create(
+            params,
+            req.timeoutMs ? { timeout: req.timeoutMs, maxRetries: 0 } : undefined,
+          ),
+          opts.provider,
+          opts.model,
+        );
       } catch (err) {
         if (err instanceof LlmError) throw err;
         if (err instanceof OpenAI.APIError)

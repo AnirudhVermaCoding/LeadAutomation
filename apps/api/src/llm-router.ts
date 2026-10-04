@@ -1,4 +1,10 @@
-import { DEFAULT_AI_SETTINGS, DEFAULT_LLM_ROUTING, type TenantConfig } from '@instantlead/config';
+import {
+  DEFAULT_AI_SETTINGS,
+  DEFAULT_LLM_ROUTING,
+  providerDisclosed,
+  type LlmProviderName,
+  type TenantConfig,
+} from '@instantlead/config';
 import {
   costUsd,
   LlmError,
@@ -19,6 +25,8 @@ import { llmRuns } from './db/schema.ts';
 /** Capabilities a task needs; models without them are never routed that task. */
 const NEEDS: Record<LlmTask, { tools?: boolean; structured?: boolean }> = {
   agent_reply: { tools: true },
+  agent_reply_complex: { tools: true },
+  message_route: { structured: true },
   intent_classify: { structured: true },
   language_detect: { structured: true },
   memory_summarize: {},
@@ -38,8 +46,8 @@ export interface LlmRouter {
 
 /**
  * Routing = the task's model list (tenant override, else global default), filtered to models
- * that are registered, have the task's capabilities, belong to an allowed provider and have a
- * key. With no keys at all, the fake model (mock mode) answers everything.
+ * that are registered, have the task's capabilities, belong to an allowed provider named in the
+ * consent notice and have a key. With no keys at all, the fake model (mock mode) answers everything.
  */
 export function createLlmRouter(opts: {
   keys: ProviderKeys;
@@ -69,6 +77,9 @@ export function createLlmRouter(opts: {
         const spec = MODELS[id];
         if (!spec || spec.provider === 'fake') return [];
         if (!(ai.allowed_providers as string[]).includes(spec.provider)) return [];
+        // Consent is code: a provider the customer wasn't told about never receives their text.
+        if (!providerDisclosed(config.intake.consent_notice_text, spec.provider as LlmProviderName))
+          return [];
         if ((needs.tools && !spec.supportsTools) || (needs.structured && !spec.supportsStructuredOutput))
           return [];
         const p = instance(id);
@@ -76,7 +87,7 @@ export function createLlmRouter(opts: {
       });
       if (!chain.length)
         throw new NoModelAvailableError(
-          `No AI model available for ${task}: allowed providers ${ai.allowed_providers.join(', ')} have no API key or no capable model`,
+          `No AI model available for ${task}: allowed providers ${ai.allowed_providers.join(', ')} have no API key, no capable model, or are not named in the consent notice`,
         );
       return chain;
     },

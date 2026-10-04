@@ -762,7 +762,7 @@ const PROVIDERS = [
 
 /** Which AI may read conversations, how much it may spend, and how long data is kept. */
 export function AiPrivacySection({ draft, edit }: Props) {
-  const ai = draft.ai ?? { allowed_providers: ['anthropic' as const], monthly_cost_cap_usd: 50 };
+  const ai = draft.ai ?? { allowed_providers: ['gemini' as const], monthly_cost_cap_usd: 50 };
   const privacy = draft.privacy ?? { retention_days: 365, mode: 'anonymize' as const };
   return (
     <>
@@ -770,7 +770,7 @@ export function AiPrivacySection({ draft, edit }: Props) {
         <div className="space-y-4">
           <Field
             label="AI providers allowed to process this business's conversations"
-            hint="Anthropic is the default. Adding another provider means telling your customers: name it in the consent notice (Business tab) or the config will not save."
+            hint="Google Gemini is the default. Every provider must be named in the consent notice (Business tab): the config will not save otherwise, and the AI will not use a provider the notice doesn't name."
           >
             <div className="flex flex-wrap gap-4">
               {PROVIDERS.map(([key, label]) => (
@@ -781,7 +781,7 @@ export function AiPrivacySection({ draft, edit }: Props) {
                     onChange={(e) =>
                       edit((d) => {
                         const cur = d.ai ?? {
-                          allowed_providers: ['anthropic' as const],
+                          allowed_providers: ['gemini' as const],
                           monthly_cost_cap_usd: 50,
                         };
                         const set = new Set(cur.allowed_providers);
@@ -807,7 +807,7 @@ export function AiPrivacySection({ draft, edit }: Props) {
               value={ai.monthly_cost_cap_usd}
               onChange={(e) =>
                 edit((d) => {
-                  const cur = d.ai ?? { allowed_providers: ['anthropic' as const], monthly_cost_cap_usd: 50 };
+                  const cur = d.ai ?? { allowed_providers: ['gemini' as const], monthly_cost_cap_usd: 50 };
                   d.ai = { ...cur, monthly_cost_cap_usd: num(e.target.value) };
                 })
               }

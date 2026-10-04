@@ -26,7 +26,7 @@ database. Treat the first push that goes green there, and your first deploy to t
    | `HASH_KEY`                                    | Set to the same value as `SECRETS_KEY` and never change it (keys the opt-out list)                 |
    | `AGENCY_ADMIN_EMAIL`, `AGENCY_ADMIN_PASSWORD` | The first agency login (12+ characters)                                                            |
    | `META_APP_SECRET`, `META_VERIFY_TOKEN`        | From the Meta app; the verify token is any random string you also enter in Meta                    |
-   | `ANTHROPIC_API_KEY`                           | Claude for the assistant (required in production; mock mode is refused)                            |
+   | `GEMINI_API_KEY`                              | Gemini (paid tier) for the assistant; required in production (mock mode is refused)                |
    | `RESEND_API_KEY`, `EMAIL_FROM`                | Reports and alerts (verify the sending domain in Resend)                                           |
    | `ALERT_EMAIL`                                 | Where operational alerts go                                                                        |
    | `ALERT_WHATSAPP_*`                            | Optional: agency alerts on your own WhatsApp number (template `il_agency_alert`)                   |
@@ -181,7 +181,7 @@ for quality, pause follow-ups (Settings → Messages) and check WhatsApp Manager
 `docker compose up -d`. Meta retries webhooks for a while, and form leads queued while the app was up are not lost.
 
 **AI misbehaving.** Take over the affected conversations from the Inbox (pauses the AI per lead). To stop the AI
-everywhere, unset `ANTHROPIC_API_KEY` and restart; the rule-based assistant takes over.
+everywhere, unset the AI provider keys (`GEMINI_API_KEY`) and restart; the rule-based assistant takes over.
 
 ### Incident: personal data breach
 

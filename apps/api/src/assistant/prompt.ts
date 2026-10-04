@@ -80,6 +80,7 @@ export function toolSchemas(config: TenantConfig, resources: readonly string[] =
       part_of_day: z.enum(['morning', 'afternoon', 'evening']).optional(),
       ...forName,
     }),
+    get_patient_history: z.strictObject({}),
   };
 }
 export type ToolName = keyof ReturnType<typeof toolSchemas>;
@@ -107,12 +108,18 @@ const TOOL_ACTION: Partial<Record<ToolName, AutonomyAction>> = {
 /**
  * The tools this clinic lets the AI use: an action set to "off" is not offered and, because runTool
  * validates against this same list, cannot be called either. "approval" stays available; runTool
- * routes it to staff.
+ * routes it to staff. get_patient_history only when code granted history access for this turn
+ * (assistant/context.ts), never by the model's choice.
  */
-export function allowedToolSchemas(config: TenantConfig, resources: readonly string[] = []) {
+export function allowedToolSchemas(
+  config: TenantConfig,
+  resources: readonly string[] = [],
+  access: { history?: boolean } = {},
+) {
   const all = toolSchemas(config, resources);
   return Object.fromEntries(
     Object.entries(all).filter(([name]) => {
+      if (name === 'get_patient_history') return access.history === true;
       const action = TOOL_ACTION[name as ToolName];
       return !action || autonomyOf(config, action) !== 'off';
     }),
@@ -138,10 +145,16 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     'Cancel an existing appointment, only after they clearly asked to cancel. With several appointments, pass for_name to say whose.',
   join_waitlist:
     'Put them on the waitlist for a service when none of the offered times suit them and they would like an earlier or different time if one opens up. They get a WhatsApp offer when a slot frees; the first to accept gets it.',
+  get_patient_history:
+    "This person's past visits and treatment plans from the clinic records. Use it only when they refer to an earlier visit or an ongoing treatment, or the next step depends on it.",
 };
 
-export function buildTools(config: TenantConfig, resources: readonly string[] = []): ToolSpec[] {
-  return Object.entries(allowedToolSchemas(config, resources)).map(([name, schema]) => ({
+export function buildTools(
+  config: TenantConfig,
+  resources: readonly string[] = [],
+  access: { history?: boolean } = {},
+): ToolSpec[] {
+  return Object.entries(allowedToolSchemas(config, resources, access)).map(([name, schema]) => ({
     name,
     description: DESCRIPTIONS[name as ToolName],
     inputSchema: jsonSchema(schema),
@@ -252,6 +265,7 @@ Tools
 - Booking: once the required questions are answered, or whenever they want to book, call get_available_slots for the best-matching service and offer the times by their labels. When they choose, call book_slot with exactly that date and time. Never offer or confirm a time that did not come from get_available_slots. A confirmation message is sent automatically, so just say it's done (or that the team will confirm, if the result says pending).
 - After answering a question, if they haven't booked, gently offer the next step — but if they say no or "later", respect it.
 - To change or cancel an existing appointment use reschedule or cancel. One person can hold several appointments (for themselves and family members, shown under "Upcoming appointments"): when it is for someone else, pass for_name; if it is unclear which one they mean, ask. To book for a second person, call book_slot with for_name.${changePolicy(config)}
+- Past visits and treatment plans are not in the CRM state. When it says records are on file and they refer to an earlier visit or treatment, call get_patient_history; never guess what happened before.
 - If they ask for a specific doctor or person (see "Bookable people" in the CRM state), pass resource to get_available_slots and book_slot and only offer that person's times. Otherwise don't ask; any free one is fine.
 
 EXAMPLES (the voice to aim for; adapt, don't copy)
@@ -289,8 +303,8 @@ export function stateMessage(s: {
   status: string;
   /** Upcoming appointments, one line each ("Consultation, Mon 12 Oct 11:00 am (for Rhea)"). */
   appointments: readonly string[];
-  /** Past visits, newest first ("Consultation, Mon 3 Aug (completed)"). */
-  pastVisits?: readonly string[];
+  /** Past visits / treatment plans exist (fetched on demand with get_patient_history, never inlined). */
+  historyOnFile?: boolean;
   /** Answers recorded more than 60 days ago: still shown, but worth re-confirming. */
   staleAnswers?: readonly string[];
   /** Days since the last message in this conversation, before the one being answered. */
@@ -319,7 +333,9 @@ export function stateMessage(s: {
     ...(s.appointments.length
       ? ['- Upcoming appointments:', ...s.appointments.map((a, i) => `  ${i + 1}. ${a}`)]
       : ['- Upcoming appointments: none']),
-    ...(s.pastVisits?.length ? [`- Past visits: ${s.pastVisits.join('; ')}`] : []),
+    ...(s.historyOnFile
+      ? ['- Past visits / treatment on file: call get_patient_history if they refer to them']
+      : []),
     ...(s.buttonNote ? [`- ${s.buttonNote}`] : []),
     ...((s.resources ?? []).filter((r) => r !== 'default').length > 1
       ? [`- Bookable people: ${(s.resources ?? []).filter((r) => r !== 'default').join(', ')}`]

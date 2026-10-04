@@ -209,6 +209,8 @@ function serviceFor(h: TurnHints): string {
   return (services.find((s) => words.some((w) => has(s.name, w))) ?? services[0])?.name ?? '';
 }
 
+const PAST_VISIT =
+  /\b(last time|last visit|previous|earlier visit|my treatment|next sitting|pichli baar|pichhli baar)\b/i;
 const CANCEL = /\b(cancel|radd|nahi aa paunga|nahi aa paungi)\b/i;
 const RESCHEDULE = /\b(reschedule|change|another time|different time|postpone|badal|shift)\b/i;
 const BOOK = /\b(book|slot|appointment|available|time)\b/i;
@@ -236,6 +238,14 @@ export function createFakeLlm(): LlmProvider {
       // Single-call tasks: rule-based stand-ins so mock mode exercises the same code paths.
       const lastUser = request.turns.filter((t) => t.role === 'user').at(-1);
       const userText = lastUser?.role === 'user' ? lastUser.text : '';
+      if (request.task === 'message_route')
+        return Promise.resolve(
+          message(
+            JSON.stringify({
+              complexity: /\b(but|unless|except|also)\b/i.test(userText) ? 'complex' : 'simple',
+            }),
+          ),
+        );
       if (request.task === 'intent_classify')
         return Promise.resolve(message(JSON.stringify(ruleBasedIntent(userText))));
       if (request.task === 'memory_summarize')
@@ -267,6 +277,21 @@ export function createFakeLlm(): LlmProvider {
         const results = toolResults.map((r) => r.content);
         const failed = toolResults.some((r) => r.isError);
 
+        if (names.includes('get_patient_history')) {
+          const r = parse<{
+            past_visits: { service: string; when: string; status: string }[];
+            treatment_plans: { treatment: string; visits: string }[];
+          }>(results[0] ?? '');
+          const plan = r?.treatment_plans[0];
+          const visit = r?.past_visits[0];
+          return reply(
+            plan
+              ? `Your ${plan.treatment} is ${plan.visits}. Would you like me to find a time for the next visit?`
+              : visit
+                ? `Your last visit was ${visit.service} on ${visit.when}. Would you like to book a follow-up?`
+                : "I couldn't find an earlier visit. Would you like to book one?",
+          );
+        }
         if (names.includes('escalate_to_human'))
           return reply('Sure — a member of our team will reply to you here shortly.');
         if (names.includes('cancel'))
@@ -372,6 +397,8 @@ export function createFakeLlm(): LlmProvider {
         return reply(
           `Sorry to hear that — that's worth getting checked properly. I can't say what's causing it, but our doctor can take a proper look. Would you like me to find you a ${concernService.toLowerCase()} slot this week?`,
         );
+      if (PAST_VISIT.test(inbound) && request.tools?.some((t) => t.name === 'get_patient_history'))
+        return call('get_patient_history', {});
       if (h.appointment && CANCEL.test(inbound)) return call('cancel', {});
       if (h.appointment && RESCHEDULE.test(inbound))
         return call('get_available_slots', { service: h.appointment.service, ...withResource(h, request) });

@@ -68,7 +68,7 @@ Leave `privacy` out to keep data until erased manually. Every run is audited.
 | Service                             | What it receives                                                                                                                                    | Notes                                                                  |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | Meta (WhatsApp Cloud API, Lead Ads) | Phone, message text                                                                                                                                 | The channel itself                                                     |
-| AI provider(s), see below           | Conversation text (identifiers redacted), first name, clinic knowledge                                                                              | Only providers the clinic allows; default Anthropic only               |
+| AI provider(s), see below           | Conversation text (identifiers redacted), first name, clinic knowledge                                                                              | Only providers the clinic allows and its notice names; default Google  |
 | Resend                              | Staff alerts, weekly reports (counts, no patient lists)                                                                                             | Only with `RESEND_API_KEY`                                             |
 | Google Calendar                     | Out: appointment time, service, patient first name and phone. In: only the time of other events (titles and attendees are never read, never stored) | Only if the clinic connects it; erasure removes our events from Google |
 | Client webhooks                     | Lead name, phone, email, status                                                                                                                     | Only to URLs the clinic adds                                           |
@@ -79,15 +79,18 @@ adding a processor.
 
 ## AI providers
 
-The assistant can run on Anthropic (Claude, the default), OpenAI, Google (Gemini) or xAI (Grok).
+The assistant runs on Google Gemini Flash-Lite by default (decision 134); Anthropic (Claude), OpenAI and xAI (Grok) only when a clinic routes to them.
 
 - **Which providers a clinic's data may reach is the clinic's choice:** `ai.allowed_providers` in its config,
-  **default `['anthropic']`**. The router never sends a task to a provider outside that list, even when the
-  server has a key for it, and even as a fallback during an outage. Enforced in code and covered by tests.
+  **default `['gemini']`**. The router never sends a task to a provider outside that list, even when the
+  server has a key for it, and even as a fallback during an outage. The router also skips any provider the
+  consent notice does not name, so a notice written before a provider change never covers it silently. Enforced
+  in code and covered by tests.
 - **Disclosure:** the consent notice must name every provider in use. The presets say replies "may be written by an
-  AI assistant (processed by Anthropic)". Saving a config that allows another provider fails until the notice
-  names it. Clinics must be told before a non-default provider is enabled, and existing leads were told about
-  Anthropic only.
+  AI assistant (processed by Google Gemini)" (before 2026-10-04: "processed by Anthropic"). Saving a config that
+  allows a provider fails until the notice names it. Clinics set up before the switch keep Anthropic in their
+  stored config and notice: their customers were told about Anthropic only, so moving them to Gemini means
+  telling the clinic, updating the notice, then allowing Google (Settings → AI & data).
 - **Minimisation:** before any text goes to a provider, phone numbers, email addresses and Aadhaar/PAN-like numbers
   in customer messages are replaced with `[phone]`, `[email]`, `[id number]`. Photos and voice notes are never
   sent to an AI. The lead's first name stays (replies use it).

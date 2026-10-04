@@ -53,8 +53,8 @@ The client owns the WhatsApp Business Account (WABA); we get access to it.
 
 ## 4. AI assistant (5 min)
 
-- **Provider:** every clinic starts on Anthropic (Claude) only. To allow another provider (OpenAI, Google Gemini,
-  xAI) for this clinic, first **tell the clinic and get their OK**, then add the provider's name to the consent
+- **Provider:** every new clinic starts on Google Gemini (Flash-Lite) only. To allow another provider (Anthropic,
+  OpenAI, xAI) for this clinic, first **tell the clinic and get their OK**, then add the provider's name to the consent
   notice (Settings → Business) and to `ai.allowed_providers` (Settings → Import/Export JSON). The config won't
   save until the notice names it. See [PRIVACY.md](PRIVACY.md#ai-providers) for what each provider receives.
 - **Budget:** `ai.monthly_cost_cap_usd` (default $50). The agency gets an alert email at 80%. At 100%, new
@@ -107,7 +107,7 @@ The client owns the WhatsApp Business Account (WABA); we get access to it.
 
 - **Settings → Booking → Changes, cancellations and confirmation:** how late a customer may change or cancel by chat (default 2 hours before; later requests go to your team), the cancellation policy text, and whether staff-confirm bookings auto-confirm.
 - **Family bookings:** one phone can hold several bookings, one per person (a parent booking for themselves and a child). Today shows "for Rhea"; reminders and buttons are per appointment.
-- **Settings → AI & data:** which AI providers may read conversations (Anthropic by default), the monthly AI budget, and how long customer data is kept.
+- **Settings → AI & data:** which AI providers may read conversations (Google Gemini by default), the monthly AI budget, and how long customer data is kept.
 - **Settings → Reports:** extra WhatsApp numbers for the one-line weekly summary.
 - **Opt-out:** a customer who replies STOP gets one confirmation and nothing more; if they reply START later they are back (their own consent, recorded). Staff can record a phone or in-person opt-out or opt-in from the Inbox.
 

@@ -143,7 +143,7 @@ export const TenantConfigSchema = z.strictObject({
       mode: z.enum(['anonymize', 'delete']),
     })
     .optional(),
-  /** Which AI providers may process this tenant's conversations, spend cap, optional per-task routing. Optional for older configs (defaults: Anthropic only, $50/month). */
+  /** Which AI providers may process this tenant's conversations, spend cap, optional per-task routing. Optional for older configs (defaults: Google Gemini only, $50/month). */
   ai: z
     .strictObject({
       allowed_providers: z.array(z.enum(LLM_PROVIDERS)).min(1, 'allow at least one AI provider'),

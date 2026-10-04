@@ -19,7 +19,7 @@ const llm: LlmProvider = {
     seen.push(structuredClone(req));
     if (failSummary && req.task === 'memory_summarize')
       return Promise.reject(new Error('summary model down'));
-    if (req.task === 'agent_reply')
+    if (req.task.startsWith('agent_reply'))
       return Promise.resolve<LlmResponse>({
         text: `Welcome back, how can I help? (${++replies})`,
         toolCalls: [],
@@ -73,7 +73,7 @@ const leadOf = async (from: string) =>
         .where(eq(leads.phoneE164, `+91${from}`)),
     )
   )[0]!;
-const lastAgentRequest = () => seen.filter((r) => r.task === 'agent_reply').at(-1)!;
+const lastAgentRequest = () => seen.filter((r) => r.task.startsWith('agent_reply')).at(-1)!;
 const stateText = (r: LlmRequest) => r.turns.filter((x) => x.role === 'system').at(-1)!.text;
 
 /** A customer with a history, then silence for `days`. */
@@ -135,7 +135,7 @@ async function returningCustomer(days: number) {
 }
 
 describe('returning customers', () => {
-  test('after 2 months: history is still there, the gap is stated, old answers are flagged, past visits shown, the unmarked visit is not "upcoming"', async () => {
+  test('after 2 months: history is still there, the gap is stated, old answers are flagged, past visits on file (fetched on demand), the unmarked visit is not "upcoming"', async () => {
     const { phone } = await returningCustomer(62);
     await say(phone, 'hi, I need another cleaning');
     await t.drainAssistant();
@@ -143,7 +143,10 @@ describe('returning customers', () => {
     const state = stateText(req);
     expect(state).toMatch(/Returning customer: your last conversation with them was 6\d days ago/);
     expect(state).toMatch(/Answers older than 60 days \(re-confirm before relying on them\): .*urgency/);
-    expect(state).toMatch(/Past visits: Consultation, .*\(completed\)/);
+    // Past visits are not inlined (Context Manager): the model is told they exist and fetches them on demand.
+    expect(state).toMatch(/Past visits \/ treatment on file: call get_patient_history/);
+    expect(state).not.toMatch(/Consultation, .*\(completed\)/);
+    expect(req.tools?.map((x) => x.name)).toContain('get_patient_history');
     expect(state).toMatch(/Upcoming appointments: none/);
     expect(state).toContain('"location":"Baner"'); // answers are still remembered
     // The earlier conversation is part of the model's context, in order.
@@ -220,7 +223,7 @@ describe('long conversations', () => {
         });
     });
 
-  test('past ~40 messages the older part is summarised; the summary is refreshed every 20 new messages; a failing summariser keeps the last summary', async () => {
+  test('past 16 messages the older part is summarised; the summary is refreshed every 6 new messages; a failing summariser keeps the last summary', async () => {
     const phone = newPhone();
     await say(phone, 'hello');
     await t.drainAssistant();

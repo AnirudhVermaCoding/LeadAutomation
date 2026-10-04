@@ -14,6 +14,7 @@ import {
   rescheduleLeadAppointment,
 } from '../booking.ts';
 import { joinWaitlist } from '../waitlist.ts';
+import { patientHistory } from './context.ts';
 import { allowedToolSchemas, weeklyHours, type ToolName } from './prompt.ts';
 
 export interface ToolContext {
@@ -25,6 +26,8 @@ export interface ToolContext {
   resources?: readonly string[];
   /** Where the request came from (the phone agent shares this exact tool boundary). */
   channel?: 'whatsapp' | 'phone';
+  /** Set by code (agent.ts) when get_patient_history may be offered this turn. */
+  historyAccess?: boolean;
 }
 
 export interface ToolOutcome {
@@ -154,7 +157,9 @@ export function alertStaff(tx: TenantTx, deps: LeadDeps, tenantId: string, leadI
 /** Validate the model's arguments, then run the tool. Bad arguments go back to the model as an error. */
 export async function runTool(c: ToolContext, name: string, rawInput: unknown): Promise<ToolOutcome> {
   // Only tools this clinic allows (autonomy "off" = not offered, and not callable either).
-  const schemas = allowedToolSchemas(c.config, c.resources);
+  const schemas = allowedToolSchemas(c.config, c.resources, {
+    history: c.historyAccess === true && c.channel !== 'phone',
+  });
   const schema = schemas[name as ToolName];
   if (!schema) return { content: `Unknown tool ${name}`, isError: true, invalidArguments: true };
   const parsed = schema.safeParse(rawInput);
@@ -179,6 +184,14 @@ export async function runTool(c: ToolContext, name: string, rawInput: unknown): 
         await emit(tx, c.deps.clock, 'lead.disqualified', { leadId: c.leadId, reason: input.reason });
       });
       return { content: 'Marked as not a fit. Close politely and offer a call from the team.' };
+    case 'get_patient_history':
+      return {
+        content: JSON.stringify(
+          await withTenant(c.deps.db, c.tenantId, (tx) =>
+            patientHistory(tx, c.leadId, c.config.locale.timezone),
+          ),
+        ),
+      };
     case 'join_waitlist': {
       const r = await joinWaitlist(c.deps, c.tenantId, {
         leadId: c.leadId,
