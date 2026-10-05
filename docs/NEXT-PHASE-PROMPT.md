@@ -2,6 +2,7 @@
 
 You are continuing work on **InstantLead**, a WhatsApp lead-response and booking product for Indian clinics (dental /
 skin / hair) and real-estate agents. It is about to be sold to real paying clients. Your job in this phase:
+
 1. Build **two-way Google Calendar sync**.
 2. Close every gap that matters for paying clients.
 3. Make the whole system **production grade**.
@@ -61,6 +62,7 @@ offline refresh token in `tenant_secrets`). Nothing is read back. If staff block
 Calendar, the assistant can still offer those times.
 
 **Research, then decide and build:**
+
 - **Reading busy time:**
   - Compare `freebusy.query` vs `events.list` with **incremental sync (syncToken)** vs **push notifications
     (`events.watch` channels → our webhook)**.
@@ -93,6 +95,7 @@ Calendar, the assistant can still offer those times.
 ## Workstream 2: Gaps to close (research each, decide, then build or roadmap with a reason)
 
 Known gaps. Verify each in the code first; some may already be partly handled.
+
 1. **Cancelling outside the 24 h WhatsApp window.** When staff cancel a booking and the patient hasn't written in
    24 h, the patient isn't told (there's no general cancellation template). Add a utility template and use it.
 2. **One active appointment per lead.** A parent can't book for themselves and a child from the same phone. Decide
@@ -125,6 +128,7 @@ Known gaps. Verify each in the code first; some may already be partly handled.
 ## Workstream 3: Production grade (we are selling this)
 
 Audit and fix, with evidence:
+
 - **Deployment:** actually build and run the Docker image (`Dockerfile`, `docker-compose.yml`,
   `deploy/docker-compose.prod.yml`, Caddy). Docker Desktop was broken on this PC, so get it working or use WSL2.
   Write a one-command deploy and rollback, plus zero-downtime migrations guidance.

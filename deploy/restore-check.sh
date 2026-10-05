@@ -18,7 +18,7 @@ bad="$(q "select count(*) from pg_class c join pg_namespace n on n.oid=c.relname
   and (not c.relrowsecurity or not exists (select 1 from pg_policies p where p.schemaname='public' and p.tablename=c.relname))")"
 [ "$bad" = "0" ] || { echo "!! $bad tenant tables lost RLS or their policy in the restore" >&2; exit 1; }
 
-role="$(q "select rolsuper::int || rolbypassrls::int from pg_roles where rolname='instantlead_app'")"
+role="$(q "select rolsuper::int::text || rolbypassrls::int::text from pg_roles where rolname='instantlead_app'")"
 [ "$role" = "00" ] || { echo "!! the app role is missing or too powerful ($role)" >&2; exit 1; }
 
 # No tenant context: the app role must see nothing, even though the database has data.
