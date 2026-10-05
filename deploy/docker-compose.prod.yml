@@ -1,18 +1,24 @@
-# Production overlay: TLS via Caddy, the app reachable only through it, real passwords required.
+# Production overlay: TLS via Caddy, the app reachable only through it, the database is Supabase.
 #   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d      (or just: deploy/deploy.sh)
+# DATABASE_OWNER_URL / DATABASE_URL come from .env (Supabase session pooler, port 5432; see docs/OPERATIONS.md).
 services:
+  # The local Postgres container is for development and CI only; it never starts in production.
   db:
-    environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    profiles: ['local-db']
 
   migrate:
+    depends_on: !reset {}
     environment:
       NODE_ENV: production
+      DATABASE_OWNER_URL: ${DATABASE_OWNER_URL:?set DATABASE_OWNER_URL (Supabase) in .env}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (Supabase) in .env}
 
   app:
     ports: !override []
     environment:
       NODE_ENV: production
+      DATABASE_OWNER_URL: ${DATABASE_OWNER_URL:?set DATABASE_OWNER_URL (Supabase) in .env}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (Supabase) in .env}
       TRUST_PROXY: 'true'
 
   caddy:

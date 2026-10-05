@@ -2,7 +2,7 @@
 # One-command deploy on the VPS:   deploy/deploy.sh           (from the repo root, after `git pull`)
 #
 #   1. builds an image tagged with the git commit,
-#   2. runs the migrations as a one-off container while the OLD app keeps serving,
+#   2. runs the migrations (against Supabase, from .env) as a one-off container while the OLD app keeps serving,
 #   3. swaps the app container (a few seconds; Caddy holds requests meanwhile),
 #   4. waits for the new app to report healthy, and rolls back to the previous image if it does not.
 #
@@ -21,17 +21,14 @@ PREVIOUS_TAG="$(cat "$STATE/current" 2>/dev/null || true)"
 echo "==> building instantlead:$NEW_TAG"
 IMAGE_TAG="$NEW_TAG" "${COMPOSE[@]}" build migrate
 
-echo "==> backing up the database before migrating"
-if ! deploy/backup.sh --label "pre-deploy-$NEW_TAG"; then
-  [ -z "${BACKUP_REQUIRED:-}" ] || { echo "!! backup failed and BACKUP_REQUIRED is set; not deploying" >&2; exit 1; }
-  echo "!! backup failed; continuing (set BACKUP_REQUIRED=1 to refuse to deploy without one)"
-fi
+# The database is Supabase Free (no automatic backups): take the manual pg_dump in docs/OPERATIONS.md first.
+echo "==> reminder: back up the Supabase database before deploying (docs/OPERATIONS.md, Backups)"
 
 echo "==> migrating (old app still serving)"
 IMAGE_TAG="$NEW_TAG" "${COMPOSE[@]}" run --rm migrate
 
 echo "==> swapping the app container"
-IMAGE_TAG="$NEW_TAG" "${COMPOSE[@]}" up -d --no-deps app caddy db
+IMAGE_TAG="$NEW_TAG" "${COMPOSE[@]}" up -d --no-deps app caddy
 
 echo "==> waiting for the new app to be healthy"
 for _ in $(seq 1 40); do

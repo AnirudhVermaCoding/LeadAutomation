@@ -2,7 +2,8 @@
 
 ## Deploy (single VPS in India, Docker + Caddy)
 
-One small VM runs everything: Postgres, the app (HTTP + workers) and Caddy for HTTPS.
+One small VM runs the app (HTTP + workers) and Caddy for HTTPS. **The database is Supabase** (Free plan for the pilot, Mumbai); the
+local Postgres container in `docker-compose.yml` is for development and CI only and never starts in production.
 2 vCPU / 4 GB is plenty for dozens of clinics. Pick an Indian region (AWS `ap-south-1` Mumbai,
 GCP `asia-south1`, DigitalOcean BLR1, Azure Central India) so patient data stays in India.
 
@@ -16,25 +17,25 @@ database. Treat the first push that goes green there, and your first deploy to t
 3. `git clone` the repo, then `cp .env.example .env` and set **real** values (the app refuses to start in production with the
    dev passwords or `dev-only` secrets):
 
-   | Variable                                      | Value                                                                                              |
-   | --------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-   | `NODE_ENV`                                    | `production`                                                                                       |
-   | `APP_URL`, `APP_DOMAIN`                       | `https://app.example.in` and `app.example.in` (Caddy's hostname)                                   |
-   | `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`        | `openssl rand -hex 24` each; update both `DATABASE_*_URL`s to match                                |
-   | `BETTER_AUTH_SECRET`                          | `openssl rand -base64 48`                                                                          |
-   | `SECRETS_KEY`                                 | `openssl rand -base64 32`; **back it up offline**, encrypted credentials are unreadable without it |
-   | `HASH_KEY`                                    | Set to the same value as `SECRETS_KEY` and never change it (keys the opt-out list)                 |
-   | `AGENCY_ADMIN_EMAIL`, `AGENCY_ADMIN_PASSWORD` | The first agency login (12+ characters)                                                            |
-   | `META_APP_SECRET`, `META_VERIFY_TOKEN`        | From the Meta app; the verify token is any random string you also enter in Meta                    |
-   | `GEMINI_API_KEY`                              | Gemini (paid tier) for the assistant; required in production (mock mode is refused)                |
-   | `RESEND_API_KEY`, `EMAIL_FROM`                | Reports and alerts (verify the sending domain in Resend)                                           |
-   | `ALERT_EMAIL`                                 | Where operational alerts go                                                                        |
-   | `ALERT_WHATSAPP_*`                            | Optional: agency alerts on your own WhatsApp number (template `il_agency_alert`)                   |
-   | `SENTRY_DSN`                                  | Optional error tracking (Sentry or self-hosted GlitchTip)                                          |
-   | `HEARTBEAT_URL`                               | Optional dead-man's switch: pinged every 5 minutes; your uptime service alerts when it stops       |
-   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`    | Optional Google Calendar; see [GOOGLE-CALENDAR.md](GOOGLE-CALENDAR.md)                             |
-   | `BACKUP_RCLONE_REMOTE` or `BACKUP_S3_URI`     | Where backups are copied off the machine (below)                                                   |
-   | `ALLOW_FAKE_CHANNEL`, `SEED_PASSWORD`         | Leave unset in production (no sandbox, no demo tenants)                                            |
+   | Variable                                      | Value                                                                                                   |
+   | --------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+   | `NODE_ENV`                                    | `production`                                                                                            |
+   | `APP_URL`, `APP_DOMAIN`                       | `https://app.example.in` and `app.example.in` (Caddy's hostname)                                        |
+   | `DATABASE_OWNER_URL`, `DATABASE_URL`          | Supabase session pooler URLs (see "Database: Supabase" below); the deploy refuses to start without them |
+   | `BETTER_AUTH_SECRET`                          | `openssl rand -base64 48`                                                                               |
+   | `SECRETS_KEY`                                 | `openssl rand -base64 32`; **back it up offline**, encrypted credentials are unreadable without it      |
+   | `HASH_KEY`                                    | Set to the same value as `SECRETS_KEY` and never change it (keys the opt-out list)                      |
+   | `AGENCY_ADMIN_EMAIL`, `AGENCY_ADMIN_PASSWORD` | The first agency login (12+ characters)                                                                 |
+   | `META_APP_SECRET`, `META_VERIFY_TOKEN`        | From the Meta app; the verify token is any random string you also enter in Meta                         |
+   | `GEMINI_API_KEY`                              | Gemini (paid tier) for the assistant; required in production (mock mode is refused)                     |
+   | `RESEND_API_KEY`, `EMAIL_FROM`                | Reports and alerts (verify the sending domain in Resend)                                                |
+   | `ALERT_EMAIL`                                 | Where operational alerts go                                                                             |
+   | `ALERT_WHATSAPP_*`                            | Optional: agency alerts on your own WhatsApp number (template `il_agency_alert`)                        |
+   | `SENTRY_DSN`                                  | Optional error tracking (Sentry or self-hosted GlitchTip)                                               |
+   | `HEARTBEAT_URL`                               | Optional dead-man's switch: pinged every 5 minutes; your uptime service alerts when it stops            |
+   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`    | Optional Google Calendar; see [GOOGLE-CALENDAR.md](GOOGLE-CALENDAR.md)                                  |
+   | `BACKUP_RCLONE_REMOTE` or `BACKUP_S3_URI`     | Where backups are copied off the machine (below)                                                        |
+   | `ALLOW_FAKE_CHANNEL`, `SEED_PASSWORD`         | Leave unset in production (no sandbox, no demo tenants)                                                 |
 
 4. First start:
 
@@ -51,7 +52,7 @@ database. Treat the first push that goes green there, and your first deploy to t
 ### Every later deploy: one command
 
 ```bash
-git pull && deploy/deploy.sh          # builds instantlead:<commit>, backs up, migrates, swaps, waits for healthy
+git pull && deploy/deploy.sh          # builds instantlead:<commit>, migrates, swaps, waits for healthy (back up first: below)
 deploy/rollback.sh                    # back to the previous image (or: deploy/rollback.sh <tag>)
 ```
 
@@ -69,55 +70,79 @@ migration must be compatible with the previous release**:
 - A new NOT NULL column needs a default, or a backfill first and the constraint in the next release.
 - `CREATE INDEX` on a table with many rows should be `CREATE INDEX CONCURRENTLY` (drizzle migrations run in a transaction, so do that one by hand on the live database first, then ship the migration as `IF NOT EXISTS`). Current tables are small; the hot-path indexes were added while they are.
 - The migrator takes an advisory lock (two containers can't migrate at once) and a 10 s `lock_timeout`: a migration that can't get its lock fails fast instead of queueing every query behind it. The deploy then stops before swapping the app.
-- Data-destroying changes (drop table/column) are the only thing a rollback can't undo: take the pre-deploy backup (the script does) and note the restore time.
+- Data-destroying changes (drop table/column) are the only thing a rollback can't undo: take the manual pre-deploy backup (below) and note the restore time.
 
-### Managed Postgres instead of the container (Supabase, Mumbai)
+### Database: Supabase (production)
 
-Any managed Postgres 16+ in India works (AWS RDS Mumbai, DigitalOcean BLR1, **Supabase in ap-south-1 used as plain Postgres**). A staging project, `instantlead-staging` (ap-south-1, Postgres 17), already has the full schema, the `instantlead_app` role, RLS everywhere and the Data API locked down (checked with Supabase's security advisor: only intentional notes remain).
+Production uses one Supabase project in **ap-south-1 (Mumbai)**, as plain Postgres: the app never uses Supabase's REST API,
+Auth, Storage or Realtime. The pilot runs on the **Free plan**: no downloadable backups (your manual `pg_dump` below is the only
+backup), 500 MB database, and the project pauses after a week of low database activity (the running app queries it constantly,
+so this only happens if the app is down for days; Supabase emails a warning first, and a paused project can be resumed for 90 days).
 
-Set up (on your machine; nothing secret goes in chat or git):
+**One-time setup (on your machine; nothing secret goes in chat or git):**
 
-1. Supabase dashboard > Database > Settings: reset the `postgres` password. Supabase > Connect: copy the session-pooler string.
-2. `cp .env.supabase.example .env.supabase` and fill it in (`.env*` is gitignored). Pick a long random `APP_DB_PASSWORD`.
-3. `pnpm db:migrate` (sets the app role's password, applies any new migration, backfills template rows) then `pnpm db:seed`, with those variables loaded.
-4. Run the app against it (`DATABASE_URL`, `DATABASE_OWNER_URL`), and drop the `db` service from compose if you deploy this way.
+1. Supabase > Database > Settings: **reset the database password**. Use letters and digits only (e.g. `openssl rand -hex 24`):
+   the password goes into a URL and through Docker Compose, where `$`, `@`, `:`, `/` break it.
+2. Same page, **Connection pooling > Pool size: 40** (the default on Free is lower). The app holds about 22 connections
+   (10 app role, 4 + 8 owner) and a deploy's migrate step about 9 more while the old app still runs; `max_connections` is 60
+   and Supabase itself uses ~13.
+3. Settings > API (Data API): turn it **off** (the migrator already revokes `anon`/`authenticated` and enables RLS everywhere;
+   switching the API off removes the surface entirely). Turn on **SSL enforcement** (Database > Settings).
+4. Supabase > Connect > **Session pooler** (port **5432**, IPv4). Never the transaction pooler (6543): the job queue and the
+   migration lock need session features. The direct host is IPv6-only on Free.
+5. In the VPS `.env` (chmod 600):
 
-Rules that matter:
+   ```bash
+   DATABASE_OWNER_URL=postgres://postgres.<project-ref>:<db-password>@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=no-verify
+   DATABASE_URL=postgres://instantlead_app.<project-ref>:<APP_DB_PASSWORD>@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=no-verify
+   ```
 
-- Use the **direct** connection or the **session pooler** (port 5432). pg-boss and the migration lock need LISTEN/NOTIFY-class session features, advisory locks and prepared statements that the transaction pooler (port 6543) does not provide. Direct is IPv6-only unless you buy the IPv4 add-on; the session pooler is IPv4. On the pooler the login is `instantlead_app.<project-ref>`; the migrator reads the role from before the dot.
-- Add `?sslmode=no-verify` (encrypted, CA not checked) or load Supabase's CA to verify.
-- **The Data API is off-limits by design.** Supabase grants `anon` / `authenticated` access to new `public` tables by default. The migrator revokes that, turns RLS on for every table (including the auth tables, which have no policy: deny-all) and changes the default privileges for future tables. Tested in `lockdown.db.test.ts`. We never use the REST API, Supabase Auth or Realtime; consider switching the Data API off in the dashboard too.
-- `btree_gist` is installed in `public` (the advisor warns; harmless here, since `appointments_no_overlap` depends on it).
-- Backups: Supabase Pro keeps 7 daily backups; point-in-time recovery is a paid add-on; restores cause downtime; custom role passwords are not in its backups (our migrate step re-applies the app role). Keep running `deploy/backup.sh` to your own bucket as well.
-- **Free tier = staging only** (no backups, pauses after a week idle). Move to Pro in Mumbai before any real patient data.
-- The app has been tested against local Postgres only; it has not yet run live against Supabase. The first `pnpm db:migrate` + `pnpm dev` there is the real test (the schema itself was applied and checked through Supabase's SQL tool).
+   Copy the exact host from the Connect dialog (it may not be `aws-0`). `<APP_DB_PASSWORD>` is a new random password (letters and
+   digits) that the migrate step sets on the `instantlead_app` role. `sslmode=no-verify` encrypts without checking Supabase's CA.
 
-**Scaling later:** run a second app container with `ROLE=worker` and set the web one to `ROLE=api`. Nothing else changes.
+6. `deploy/deploy.sh` (or the first-start commands above): the migrate container creates the job-queue schema, sets the app role's
+   password, applies any migration newer than the journal and re-applies grants. Then seed the agency admin and check `/readyz`.
 
-## Backups and restore
+The schema on `instantlead-staging` was applied through Supabase's SQL tool with marker rows in `drizzle.__drizzle_migrations`
+(`created_at` = each migration's journal `when`), so the migrator skips 0000–0018 and applies only later migrations.
 
-```bash
-# /etc/cron.d/instantlead-backup   (nightly; 14 days kept locally; the off-site copy follows your bucket's lifecycle rule)
-15 3 * * * root cd /opt/instantlead && deploy/backup.sh >> /var/log/instantlead-backup.log 2>&1
+**Scaling later:** run a second app container with `ROLE=worker` and set the web one to `ROLE=api` (mind the Supabase pool size).
+
+## Backups and restore (manual, from your laptop)
+
+Supabase Free keeps no backups you can download: **take a backup before every deploy and at least weekly**, on your laptop.
+Use the **PostgreSQL 17 client tools** (`pg_dump` must be at least the server's major version; Supabase runs 17). On Windows: the
+EDB PostgreSQL 17 installer with only "Command Line Tools" ticked, then add `C:\Program Files\PostgreSQL\17\bin` to PATH.
+
+**Password, once:** put it in `%APPDATA%\postgresql\pgpass.conf` (Windows) or `~/.pgpass` (chmod 600), never in the repo or a script:
+
+```
+aws-0-ap-south-1.pooler.supabase.com:5432:postgres:postgres.<project-ref>:<db-password>
 ```
 
-`deploy/backup.sh` writes a compressed `pg_dump -Fc`, checks it is readable (`pg_restore -l`), optionally encrypts it
-(`BACKUP_GPG_PASSPHRASE_FILE`), **copies it off the machine** (`BACKUP_RCLONE_REMOTE` or `BACKUP_S3_URI`) and prunes old
-local copies. Without an off-site destination it warns loudly. Use a bucket in `ap-south-1` with versioning and a lifecycle rule (e.g. 30 days).
-Recovery point: up to 24 hours (a nightly logical dump). If that is too much, add WAL archiving or a managed Postgres with point-in-time recovery.
+**Backup** (PowerShell; our three schemas only, not Supabase's own `auth`/`storage` schemas):
 
-```bash
-deploy/restore.sh /var/backups/instantlead/instantlead-nightly-<stamp>.dump        # into a SCRATCH database; verifies RLS
-# replacing production (app stopped):  deploy/restore.sh <dump> instantlead --replace
+```powershell
+pg_dump "host=aws-0-ap-south-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.<project-ref> sslmode=require" --format=custom --no-owner --no-privileges --schema=public --schema=drizzle --schema=pgboss --extension=btree_gist --file "$HOME\instantlead-backups\instantlead-$(Get-Date -Format yyyyMMdd-HHmm).dump"
+pg_restore --list "$HOME\instantlead-backups\<file>.dump" | Select-Object -First 5      # readable = usable
 ```
 
-A bare `pg_restore` onto a fresh server would lose the `instantlead_app` role and its grants (cluster-level, not in the dump), and the
-row-level-security policies that name that role would fail to load. `restore.sh` creates the role first, restores, re-runs the app's
-migrate step (grants, queues), then `deploy/restore-check.sh` proves: RLS is on with a policy for every tenant table, the app role can't bypass it,
-no tenant is visible without a tenant context, and one tenant sees only its own rows. CI runs this against a freshly seeded stack on every push.
+Keep the dumps on an encrypted disk (BitLocker) or in an encrypted archive: they contain patient data. They are useless without
+`SECRETS_KEY` and `HASH_KEY` (password manager, stored separately).
 
-The backup is useless without `SECRETS_KEY` and `HASH_KEY`; store them separately (password manager). **Run a restore drill every quarter** (to the scratch database, on the VPS).
-Erased leads come back if you restore an older backup; re-run erasures recorded in `audit_log` (`action = 'lead.erased'`) after a restore.
+**Restore** (into an empty Supabase project, or a local Postgres 17 for a drill; stop the app first if it is production):
+
+1. Create the app role before restoring (row-level-security policies name it; it lives outside the dump):
+   `psql "<owner connection string>" -c "create role instantlead_app login nosuperuser nobypassrls"`
+2. `pg_restore --no-owner --no-privileges --dbname "<owner connection string>" <file>.dump`
+   Errors about objects that already exist (e.g. schema `public`) are expected; anything else, stop and read it.
+3. Point `.env` at that database and run the migrate step (`docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml run --rm migrate`):
+   it sets the app role's password, re-applies grants and locks the Data API again.
+4. Check: `/readyz` is ok, sign in, clinics and recent leads are there.
+
+**Run a restore drill before go-live and every quarter.** Erased leads come back if you restore an older backup: re-run erasures
+recorded in `audit_log` (`action = 'lead.erased'`) after a restore. `deploy/backup.sh`, `deploy/restore.sh` and
+`deploy/restore-check.sh` work on the local Postgres container (development and the CI `docker` job), not on Supabase.
 
 ## Monitoring
 
