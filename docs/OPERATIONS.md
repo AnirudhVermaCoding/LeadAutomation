@@ -83,9 +83,10 @@ so this only happens if the app is down for days; Supabase emails a warning firs
 
 1. Supabase > Database > Settings: **reset the database password**. Use letters and digits only (e.g. `openssl rand -hex 24`):
    the password goes into a URL and through Docker Compose, where `$`, `@`, `:`, `/` break it.
-2. Same page, **Connection pooling > Pool size: 40** (the default on Free is lower). The app holds about 22 connections
-   (10 app role, 4 + 8 owner) and a deploy's migrate step about 9 more while the old app still runs; `max_connections` is 60
-   and Supabase itself uses ~13.
+2. Same page, **Connection pooling > Pool size: 40**. In session mode the pool size caps connections **per role and
+   database**, and the owner role alone holds 12 (4 system + 8 job queue), plus about 9 more while a deploy's migrate step runs
+   next to the old app; the app role holds 10. `max_connections` is 60 and Supabase itself uses about 13, so the total (about
+   31 + 13) still fits.
 3. Settings > API (Data API): turn it **off** (the migrator already revokes `anon`/`authenticated` and enables RLS everywhere;
    switching the API off removes the surface entirely). Turn on **SSL enforcement** (Database > Settings).
 4. Supabase > Connect > **Session pooler** (port **5432**, IPv4). Never the transaction pooler (6543): the job queue and the

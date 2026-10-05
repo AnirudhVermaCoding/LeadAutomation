@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Local Postgres container only (development, CI). Production is Supabase: see docs/OPERATIONS.md, Backups.
 # Restore a dump into a database:   deploy/restore.sh <file.dump[.gpg]> [target_db]
 #
 # Default target is a SCRATCH database `instantlead_restore` (safe: look around, run restore-check.sh,
@@ -14,7 +15,7 @@ cd "$(dirname "$0")/.."
 FILE="${1:?usage: deploy/restore.sh <dump> [target_db] [--replace]}"
 TARGET="${2:-instantlead_restore}"
 REPLACE="${3:-}"
-read -ra COMPOSE <<< "docker compose ${COMPOSE_FILES:--f docker-compose.yml -f deploy/docker-compose.prod.yml}"
+read -ra COMPOSE <<< "docker compose ${COMPOSE_FILES:--f docker-compose.yml}"
 PSQL=("${COMPOSE[@]}" exec -T db psql -U instantlead -v ON_ERROR_STOP=1 -d postgres)
 APP_PW="${APP_DB_PASSWORD:-app_dev_pw}"
 

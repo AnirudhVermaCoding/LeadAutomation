@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Local Postgres container only (development, CI). Production is Supabase: see docs/OPERATIONS.md, Backups.
 # Is a restored database sound?   deploy/restore-check.sh [db]     (exit 1 = no)
 #
 #  - every tenant table has row-level security ON and a policy,
@@ -8,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DB="${1:-instantlead_restore}"
-read -ra COMPOSE <<< "docker compose ${COMPOSE_FILES:--f docker-compose.yml -f deploy/docker-compose.prod.yml}"
+read -ra COMPOSE <<< "docker compose ${COMPOSE_FILES:--f docker-compose.yml}"
 [ -n "${PSQL_CMD:-}" ] || PSQL_CMD="${COMPOSE[*]} exec -T db psql -U instantlead -v ON_ERROR_STOP=1 -At -d $DB"
 q() { $PSQL_CMD -c "$1"; }
 

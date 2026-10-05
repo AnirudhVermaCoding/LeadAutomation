@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Nightly (cron) or before a deploy:   deploy/backup.sh [--label name]
+# Local Postgres container only (development, CI). Production is Supabase: see docs/OPERATIONS.md, Backups.
+# Usage:   deploy/backup.sh [--label name]
 #
 # Writes a compressed logical dump (pg_dump -Fc), optionally encrypts it, copies it OFF the machine, and
 # prunes old local copies. Off-site is the part that saves you when the VPS is lost: configure one of
@@ -18,7 +19,7 @@ LABEL="nightly"
 [ "${1:-}" = "--label" ] && LABEL="${2:?label}"
 DIR="${BACKUP_DIR:-/var/backups/instantlead}"
 KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
-read -ra COMPOSE <<< "docker compose ${COMPOSE_FILES:--f docker-compose.yml -f deploy/docker-compose.prod.yml}"
+read -ra COMPOSE <<< "docker compose ${COMPOSE_FILES:--f docker-compose.yml}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 FILE="$DIR/instantlead-$LABEL-$STAMP.dump"
 mkdir -p "$DIR"

@@ -5,12 +5,14 @@ import pg from 'pg';
 import * as schema from './schema.ts';
 
 export function createDb(url: string, max = 10) {
-  // statement_timeout: a runaway query must not hold a connection (and a job) for ever.
-  const pool = new pg.Pool({
-    connectionString: url,
-    max,
-    statement_timeout: 30_000,
-    idleTimeoutMillis: 30_000,
+  const pool = new pg.Pool({ connectionString: url, max, idleTimeoutMillis: 30_000 });
+  // A runaway query must not hold a connection (and a job) for ever. Set by SQL on each new connection, not as a
+  // startup parameter: connection poolers (Supabase's Supavisor, PgBouncer) may refuse unknown startup parameters.
+  // pg runs a client's queries in order, so this one completes before the client's first real query.
+  pool.on('connect', (client) => {
+    client
+      .query('set statement_timeout = 30000')
+      .catch((err: Error) => console.error('postgres: could not set statement_timeout', err.message));
   });
   // An idle client erroring (the database restarted) must not crash the process: the pool replaces it.
   pool.on('error', (err) => console.error('postgres pool error (idle client)', err.message));

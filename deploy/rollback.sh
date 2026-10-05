@@ -2,7 +2,7 @@
 # Roll the app back to the previous release (or a given tag):   deploy/rollback.sh [tag]
 # The database is NOT rolled back: migrations are written so the previous release still works on the new
 # schema (OPERATIONS.md, "Zero-downtime migrations"). If a release really needs its data undone, restore a
-# backup instead (deploy/restore.sh).
+# backup instead (docs/OPERATIONS.md, Backups and restore).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 COMPOSE=(docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml)

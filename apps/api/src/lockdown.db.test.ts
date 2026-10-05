@@ -44,3 +44,10 @@ test('re-running is harmless, and the app role is unaffected', async () => {
   );
   expect(r.rows[0].ok).toBe(true);
 });
+
+test('the app pool sets its statement timeout by SQL, not as a startup parameter (poolers may refuse those)', async () => {
+  const pool = t.ctx.db.$client;
+  expect((pool.options as { statement_timeout?: unknown }).statement_timeout).toBeUndefined();
+  const r = await pool.query<{ statement_timeout: string }>('show statement_timeout');
+  expect(r.rows[0]!.statement_timeout).toBe('30s');
+});
