@@ -42,12 +42,18 @@ export interface LlmRouter {
   chain(task: LlmTask, config: TenantConfig): LlmProvider[];
   /** True when no real provider has a key: everything runs on the rule-based fake. */
   readonly mockOnly: boolean;
+  /**
+   * The router for a tenant on the mock WhatsApp channel (demo clinics): the free fake model only,
+   * so demos never spend real AI money. Injected test providers (not billed) are kept.
+   */
+  forMockChannel(): LlmRouter;
 }
 
 /**
  * Routing = the task's model list (tenant override, else global default), filtered to models
  * that are registered, have the task's capabilities, belong to an allowed provider named in the
- * consent notice and have a key. With no keys at all, the fake model (mock mode) answers everything.
+ * consent notice and have a key. Only Gemini models are ever eligible (decision 141): there is no
+ * fallback to any other provider. With no keys at all, the fake model (mock mode) answers everything.
  */
 export function createLlmRouter(opts: {
   keys: ProviderKeys;
@@ -66,8 +72,10 @@ export function createLlmRouter(opts: {
     ? opts.providers.every((p) => p.provider === 'fake')
     : !Object.values(opts.keys).some(Boolean);
 
-  return {
+  const fakeOnly: LlmRouter = { mockOnly: true, chain: () => [opts.fake], forMockChannel: () => fakeOnly };
+  const router: LlmRouter = {
     mockOnly,
+    forMockChannel: () => (opts.providers ? router : fakeOnly),
     chain(task, config) {
       if (mockOnly) return [opts.fake];
       const ai = aiSettings(config);
@@ -75,7 +83,8 @@ export function createLlmRouter(opts: {
       const needs = NEEDS[task];
       const chain = models.flatMap((id) => {
         const spec = MODELS[id];
-        if (!spec || spec.provider === 'fake') return [];
+        // Gemini only, whatever a stored config or routing override names.
+        if (!spec || spec.provider !== 'gemini') return [];
         if (!(ai.allowed_providers as string[]).includes(spec.provider)) return [];
         // Consent is code: a provider the customer wasn't told about never receives their text.
         if (!providerDisclosed(config.intake.consent_notice_text, spec.provider as LlmProviderName))
@@ -83,7 +92,7 @@ export function createLlmRouter(opts: {
         if ((needs.tools && !spec.supportsTools) || (needs.structured && !spec.supportsStructuredOutput))
           return [];
         const p = instance(id);
-        return p ? [p] : [];
+        return p?.provider === 'gemini' ? [p] : [];
       });
       if (!chain.length)
         throw new NoModelAvailableError(
@@ -92,6 +101,7 @@ export function createLlmRouter(opts: {
       return chain;
     },
   };
+  return router;
 }
 
 export interface RunMeta {

@@ -73,48 +73,38 @@ describe('readable errors', () => {
 });
 
 describe('AI providers', () => {
-  test('a non-default provider must be named in the consent notice', () => {
-    expect(
-      errorsFor(
-        (c) => void (c.ai = { allowed_providers: ['anthropic', 'openai'], monthly_cost_cap_usd: 50 }),
-      ),
-    ).toEqual([expect.stringMatching(/intake.consent_notice_text: mention OpenAI/)]);
-    expect(
-      errorsFor((c) => {
-        c.ai = { allowed_providers: ['anthropic', 'openai'], monthly_cost_cap_usd: 50 };
-        c.intake.consent_notice_text += ' AI replies may also be processed by OpenAI.';
-      }),
-    ).toEqual([]);
+  test('Gemini is the only provider: Anthropic, OpenAI and xAI are refused on save', () => {
+    for (const other of ['anthropic', 'openai', 'xai'])
+      expect(
+        errorsFor((c) => void (c.ai = { allowed_providers: [other as 'gemini'], monthly_cost_cap_usd: 50 })),
+      ).toEqual([expect.stringMatching(/ai.allowed_providers.0/)]);
     expect(errorsFor((c) => void (c.ai = { allowed_providers: [], monthly_cost_cap_usd: 50 }))).toEqual([
       expect.stringMatching(/allow at least one AI provider/),
     ]);
   });
 
-  test('a config without an ai section uses the default (Google), so its notice must name Google', () => {
-    const anthropicNotice = (c: TenantConfig) => {
+  test('the consent notice must name Google, with or without an ai section (no exemption for old notices)', () => {
+    const oldNotice = (c: TenantConfig) => {
       delete c.ai;
       c.intake.consent_notice_text = 'Replies may be written by an AI assistant (processed by Anthropic).';
     };
-    expect(errorsFor(anthropicNotice)).toEqual([
-      expect.stringMatching(/consent_notice_text: mention Google/),
-    ]);
-    // Still saves when it keeps Anthropic explicitly (clinics set up before the switch).
+    expect(errorsFor(oldNotice)).toEqual([expect.stringMatching(/consent_notice_text: mention Google/)]);
     expect(
       errorsFor((c) => {
-        anthropicNotice(c);
-        c.ai = { allowed_providers: ['anthropic'], monthly_cost_cap_usd: 50 };
+        oldNotice(c);
+        c.ai = { allowed_providers: ['gemini'], monthly_cost_cap_usd: 50 };
       }),
-    ).toEqual([]);
+    ).toEqual([expect.stringMatching(/consent_notice_text: mention Google/)]);
   });
 
   test('the provider must be named as a word, not as part of another word', () => {
     const notice = (text: string) =>
       errorsFor((c) => {
-        c.ai = { allowed_providers: ['gemini', 'xai'], monthly_cost_cap_usd: 50 };
+        c.ai = { allowed_providers: ['gemini'], monthly_cost_cap_usd: 50 };
         c.intake.consent_notice_text = text;
       });
-    expect(notice('Processed by Googleplex and Taxai partners.')).toHaveLength(2);
-    expect(notice('Processed by Google (Gemini) and xAI.')).toEqual([]);
+    expect(notice('Processed by Googleplex partners, among others.')).toHaveLength(1);
+    expect(notice('Processed by Google (Gemini) on our behalf.')).toEqual([]);
   });
 });
 

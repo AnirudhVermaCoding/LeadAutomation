@@ -7,7 +7,7 @@ import {
   type PresetKey,
 } from '@instantlead/config';
 import type { Clock } from '@instantlead/core';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { generateApiKey, hashApiKey } from '../api-keys.ts';
 import { audit, type Actor } from '../audit.ts';
 import type { Db } from '../db/client.ts';
@@ -131,6 +131,20 @@ export function createSystem({ systemDb, auth, clock }: { systemDb: Db; auth: Au
     ) {
       const [row] = await systemDb.select({ id: tenants.id }).from(tenants).where(eq(tenants[field], value));
       return row?.id ?? null;
+    },
+
+    /** Is this tenant (or, without an id, any tenant) connected to real Meta WhatsApp? Dev tools refuse then. */
+    async onRealWhatsApp(tenantId?: string) {
+      const [row] = await systemDb
+        .select({ id: tenants.id })
+        .from(tenants)
+        .where(
+          tenantId
+            ? and(eq(tenants.id, tenantId), isNotNull(tenants.waPhoneNumberId))
+            : isNotNull(tenants.waPhoneNumberId),
+        )
+        .limit(1);
+      return Boolean(row);
     },
 
     async getTenantRouting(tenantId: string) {

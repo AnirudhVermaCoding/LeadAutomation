@@ -49,12 +49,8 @@ const EnvSchema = z
     /** Meta app (one app receives webhooks for every client number/page). */
     META_APP_SECRET: z.string().min(1).optional(),
     META_VERIFY_TOKEN: z.string().min(1).optional(),
-    /** Claude API key for the assistant. Without it, mock mode uses a rule-based fake assistant. */
-    ANTHROPIC_API_KEY: z.string().min(1).optional(),
-    /** Optional extra AI providers (OpenAI-compatible APIs). A provider without a key is disabled. */
-    OPENAI_API_KEY: z.string().min(1).optional(),
+    /** Gemini API key: the only AI provider (decision 141). Without it, mock mode uses a rule-based fake assistant. */
     GEMINI_API_KEY: z.string().min(1).optional(),
-    XAI_API_KEY: z.string().min(1).optional(),
     /** Per-lead LLM spend ceiling (USD); beyond it the conversation is handed to staff. */
     LLM_COST_CAP_USD_PER_LEAD: z.coerce.number().positive().default(0.5),
     /** Resend, for staff alerts and reports by email (mock mode logs instead). */

@@ -1,6 +1,6 @@
 /**
- * Cross-provider eval suite. Costs real money, so it only runs on request:
- *   pnpm evals                  (RUN_LLM_EVALS=1; every provider with a key in .env)
+ * Gemini eval suite. Costs real money, so it only runs on request:
+ *   pnpm evals                  (RUN_LLM_EVALS=1; needs GEMINI_API_KEY in .env)
  *   EVAL_DRY_RUN=1 pnpm evals   (no keys needed: the mock model plays both roles; checks the harness)
  * Budget: EVAL_BUDGET_USD (default 8) across all models AND the judge; it aborts when reached.
  * Writes docs/EVALS.md. Defaults are never changed automatically.
@@ -37,18 +37,13 @@ type Suite = (typeof SUITES)[number];
 const enabled = process.env.RUN_LLM_EVALS === '1';
 const dryRun = process.env.EVAL_DRY_RUN === '1';
 const BUDGET = Number(process.env.EVAL_BUDGET_USD ?? 8);
-const keys = {
-  anthropic: process.env.ANTHROPIC_API_KEY,
-  openai: process.env.OPENAI_API_KEY,
-  gemini: process.env.GEMINI_API_KEY,
-  xai: process.env.XAI_API_KEY,
-};
+const keys = { gemini: process.env.GEMINI_API_KEY };
 /** Under test: the default and the complex-turn agent models (each runs every task in its run). */
 const UNDER_TEST = dryRun
   ? ['fake']
   : [...new Set([DEFAULT_LLM_ROUTING.agent_reply[0]!, DEFAULT_LLM_ROUTING.agent_reply_complex[0]!])];
-/** One fixed judge for every run (comparable scores): the first available, other providers preferred first. */
-const JUDGE_PREFERENCE = ['gpt-6.1-sol', 'gemini-3.8-flash', 'grok-4.7'];
+/** One fixed judge for every run (comparable scores): a stronger Gemini than the models under test. */
+const JUDGE_PREFERENCE = ['gemini-3.8-flash'];
 
 // ---------------------------------------------------------------- budget
 
@@ -171,10 +166,10 @@ async function runModel(model: string, judgeLlm: LlmProvider, suite: Suite): Pro
           // The router only sends text to providers the consent notice names.
           intake: {
             ...config.intake,
-            consent_notice_text: `${config.intake.consent_notice_text} (${model === 'fake' ? '' : PROVIDER_NAMES[MODELS[model]!.provider as 'anthropic']})`,
+            consent_notice_text: `${config.intake.consent_notice_text} (${model === 'fake' ? '' : PROVIDER_NAMES[MODELS[model]!.provider as 'gemini']})`,
           },
           ai: {
-            allowed_providers: model === 'fake' ? ['anthropic'] : [MODELS[model]!.provider as 'anthropic'],
+            allowed_providers: ['gemini'],
             monthly_cost_cap_usd: 1000,
             routing: Object.fromEntries(tasks.map((k) => [k, [model]])),
           },

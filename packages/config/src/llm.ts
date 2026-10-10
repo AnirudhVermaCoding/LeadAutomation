@@ -1,5 +1,5 @@
-/** LLM providers a tenant may allow, and the tasks that call a model. */
-export const LLM_PROVIDERS = ['anthropic', 'openai', 'gemini', 'xai'] as const;
+/** LLM providers a tenant may allow (Gemini only, decision 141), and the tasks that call a model. */
+export const LLM_PROVIDERS = ['gemini'] as const;
 export type LlmProviderName = (typeof LLM_PROVIDERS)[number];
 
 export const LLM_TASKS = [
@@ -17,8 +17,7 @@ export type LlmTaskName = (typeof LLM_TASKS)[number];
  * Global routing: primary model first, then fallbacks in order. Each tenant can override a task
  * (`ai.routing`); the router then drops models whose provider has no key, isn't in the tenant's
  * `allowed_providers`, or lacks a capability the task needs. Model ids must exist in the
- * registry (packages/integrations/src/llm/models.ts). Default tenants allow Google (Gemini) only;
- * Claude is not in any default chain (a tenant can still add one through `ai.routing`).
+ * registry (packages/integrations/src/llm/models.ts), which holds Gemini models only.
  */
 const SMALL = ['gemini-2.5-flash-lite', 'gemini-3.1-flash-lite'];
 export const DEFAULT_LLM_ROUTING: Record<LlmTaskName, string[]> = {
@@ -45,16 +44,12 @@ export const DEFAULT_AI_SETTINGS: {
 
 /** How each provider must be named in the consent notice (DPDP: customers are told who processes their messages). */
 export const PROVIDER_NAMES: Record<LlmProviderName, string> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
   gemini: 'Google',
-  xai: 'xAI',
 };
 
 /**
- * Whether the consent notice discloses this provider. Anthropic is exempt: notices saved before this
- * rule named it as the only processor. Checked on save (validate.ts) and again by the router before
- * any customer text is sent, so an old notice never silently covers a new default provider.
+ * Whether the consent notice discloses this provider. Checked on save (validate.ts) and again by the
+ * router before any customer text is sent, so an old notice never silently covers a new provider.
  */
 export const providerDisclosed = (consentNotice: string, provider: LlmProviderName) =>
-  provider === 'anthropic' || new RegExp(`\\b${PROVIDER_NAMES[provider]}\\b`, 'i').test(consentNotice);
+  new RegExp(`\\b${PROVIDER_NAMES[provider]}\\b`, 'i').test(consentNotice);

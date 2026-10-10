@@ -286,11 +286,19 @@ export function registerGoogleRoutes(app: FastifyInstance, ctx: AppContext) {
 
   // ---- Mock mode only: play Google (demo sandbox, simulator, tests) ----
   const mock = guard(ctx, ['client_admin', 'agency_admin'], { tenant: true });
-  const mockOnly = (reply: FastifyReply) =>
-    ctx.allowFakeChannel && !ctx.googleOAuth ? null : reply.code(404).send({ error: 'not_found' });
+  const mockOnly = async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!ctx.allowFakeChannel || ctx.googleOAuth) return reply.code(404).send({ error: 'not_found' });
+    // A tenant on real WhatsApp: a fake calendar would change what its real patients are told.
+    if (await ctx.system.onRealWhatsApp(tenantOf(req)))
+      return reply.code(409).send({
+        error: 'real_whatsapp_connected',
+        message: 'This tenant is connected to real WhatsApp: dev tools are off for it. Use a demo tenant.',
+      });
+    return null;
+  };
 
   app.post('/v1/dev/google/connect', { preHandler: mock }, async (req, reply) => {
-    if (mockOnly(reply)) return reply;
+    if (await mockOnly(req, reply)) return reply;
     const tenantId = tenantOf(req);
     ctx.fakeGoogleFor(tenantId);
     await withTenant(ctx.db, tenantId, (tx) =>
@@ -301,7 +309,7 @@ export function registerGoogleRoutes(app: FastifyInstance, ctx: AppContext) {
 
   // Someone creates an event in Google Calendar (not through InstantLead); the sync picks it up.
   app.post('/v1/dev/google/external-event', { preHandler: mock }, async (req, reply) => {
-    if (mockOnly(reply)) return reply;
+    if (await mockOnly(req, reply)) return reply;
     const b = z
       .strictObject({
         starts_at: z.iso.datetime({ offset: true }),
@@ -329,8 +337,8 @@ export function registerGoogleRoutes(app: FastifyInstance, ctx: AppContext) {
     return { id };
   });
 
-  app.post('/v1/dev/google/revoke', { preHandler: mock }, (req, reply) => {
-    if (mockOnly(reply)) return reply;
+  app.post('/v1/dev/google/revoke', { preHandler: mock }, async (req, reply) => {
+    if (await mockOnly(req, reply)) return reply;
     ctx.fakeGoogleFor(tenantOf(req)).revoked = true;
     return { revoked: true };
   });

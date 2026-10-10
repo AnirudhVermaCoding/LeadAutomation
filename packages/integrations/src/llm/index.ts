@@ -1,6 +1,5 @@
 export * from './types.ts';
 export * from './models.ts';
-export { createAnthropicProvider, fromAnthropicMessage, toAnthropicMessages } from './anthropic.ts';
 export {
   createOpenAICompatProvider,
   fromChatCompletion,
@@ -8,7 +7,6 @@ export {
   toChatMessages,
 } from './openai-compat.ts';
 
-import { createAnthropicProvider } from './anthropic.ts';
 import { MODELS } from './models.ts';
 import { createOpenAICompatProvider } from './openai-compat.ts';
 import type { LlmProvider, ProviderName } from './types.ts';
@@ -21,7 +19,5 @@ export function providerForModel(model: string, keys: ProviderKeys): LlmProvider
   if (!spec || spec.provider === 'fake') return null;
   const apiKey = keys[spec.provider];
   if (!apiKey) return null;
-  return spec.provider === 'anthropic'
-    ? createAnthropicProvider({ apiKey, model })
-    : createOpenAICompatProvider({ provider: spec.provider, apiKey, model });
+  return createOpenAICompatProvider({ provider: spec.provider, apiKey, model });
 }

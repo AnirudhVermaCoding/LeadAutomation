@@ -204,7 +204,7 @@ describe('safety', () => {
     await withTenant(t.ctx.db, A, (tx) =>
       tx.insert(llmRuns).values({
         leadId: l.id,
-        provider: 'anthropic',
+        provider: 'gemini',
         model: 'x',
         latencyMs: 1,
         costUsd: 5,

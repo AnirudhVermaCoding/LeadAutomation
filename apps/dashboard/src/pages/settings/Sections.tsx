@@ -753,13 +753,6 @@ export function BookingPolicySection({ draft, edit }: Props) {
   );
 }
 
-const PROVIDERS = [
-  ['anthropic', 'Anthropic (Claude)'],
-  ['openai', 'OpenAI'],
-  ['gemini', 'Google Gemini'],
-  ['xai', 'xAI (Grok)'],
-] as const;
-
 /** Which AI may read conversations, how much it may spend, and how long data is kept. */
 export function AiPrivacySection({ draft, edit }: Props) {
   const ai = draft.ai ?? { allowed_providers: ['gemini' as const], monthly_cost_cap_usd: 50 };
@@ -769,32 +762,10 @@ export function AiPrivacySection({ draft, edit }: Props) {
       <Card title="AI assistant">
         <div className="space-y-4">
           <Field
-            label="AI providers allowed to process this business's conversations"
-            hint="Google Gemini is the default. Every provider must be named in the consent notice (Business tab): the config will not save otherwise, and the AI will not use a provider the notice doesn't name."
+            label="AI provider"
+            hint="Google Gemini is the only AI provider. The consent notice (Business tab) must name Google: the config will not save otherwise."
           >
-            <div className="flex flex-wrap gap-4">
-              {PROVIDERS.map(([key, label]) => (
-                <label key={key} className="flex items-center gap-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={ai.allowed_providers.includes(key)}
-                    onChange={(e) =>
-                      edit((d) => {
-                        const cur = d.ai ?? {
-                          allowed_providers: ['gemini' as const],
-                          monthly_cost_cap_usd: 50,
-                        };
-                        const set = new Set(cur.allowed_providers);
-                        if (e.target.checked) set.add(key);
-                        else set.delete(key);
-                        d.ai = { ...cur, allowed_providers: [...set] };
-                      })
-                    }
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
+            <p className="text-sm text-slate-700">Google Gemini</p>
           </Field>
           <Field
             label="Monthly AI budget (US$)"

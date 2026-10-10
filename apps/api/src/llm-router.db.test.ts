@@ -34,7 +34,7 @@ const judge =
       res(req.task === 'message_route' ? JSON.stringify({ complexity }) : `${hello} from ${req.task}`),
     );
 
-/** A stand-in for a real model id: behaviour is whatever the test sets. */
+/** A stand-in for a real model id: behaviour is whatever the test sets. Never a network call. */
 function stub(model: string, provider: LlmProvider['provider']) {
   const s = {
     provider,
@@ -53,8 +53,10 @@ function stub(model: string, provider: LlmProvider['provider']) {
 const lite31 = stub('gemini-3.1-flash-lite', 'gemini');
 const lite35 = stub('gemini-3.5-flash-lite', 'gemini');
 const lite25 = stub('gemini-2.5-flash-lite', 'gemini');
-const gpt = stub('gpt-6.1-sol', 'openai');
-const sonnet = stub('claude-sonnet-5-5', 'anthropic');
+// Non-Gemini stand-ins (Gemini only, decision 141): if anything ever routed to them, the tests would see calls.
+const gpt = stub('gpt-6.1-sol', 'openai' as never);
+const sonnet = stub('claude-sonnet-5-5', 'anthropic' as never);
+const nonGeminiCalls = () => gpt.calls + sonnet.calls;
 const all = [lite31, lite35, lite25, gpt, sonnet];
 const outage = () => Promise.reject(new LlmError('server', 'overloaded', 529));
 /** 13 to 60 words, one question at most, nothing delicate: the rules can't tell, so the judge decides. */
@@ -197,6 +199,7 @@ describe('failover', () => {
     expect(await outbound(leadId)).toEqual([expect.stringMatching(/team will get back to you/)]);
     const [l] = await withTenant(t.ctx.db, A, (tx) => tx.select().from(leads).where(eq(leads.id, leadId)));
     expect(l?.aiPaused).toBe(true);
+    expect(nonGeminiCalls()).toBe(0); // no fallback to another provider: staff take over
   });
 
   test('a model the project cannot access (404) fails over instead of failing the turn', async () => {
@@ -272,35 +275,25 @@ describe('turn routing', () => {
   });
 });
 
-describe('allowed providers and consent', () => {
-  test('a provider the tenant has not allowed is never called, even when routed first and keyed', async () => {
+describe('Gemini only (decision 141)', () => {
+  test('a non-Gemini model is never called, even when routed first and injected', async () => {
     await setAi({
       allowed_providers: ['gemini'],
       monthly_cost_cap_usd: 50,
-      routing: { agent_reply: ['gpt-6.1-sol', 'gemini-3.1-flash-lite'] },
+      routing: { agent_reply: ['claude-sonnet-5-5', 'gpt-6.1-sol', 'gemini-3.1-flash-lite'] },
     });
     const leadId = await inbound();
     await runAssistantTurn(t.ctx, A, leadId);
-    expect(gpt.calls).toBe(0);
+    expect(nonGeminiCalls()).toBe(0);
     expect(await outbound(leadId)).toEqual(['Hello from gemini-3.1-flash-lite']);
   });
 
-  test('an allowed provider the consent notice does not name never gets customer text; once named, it is used', async () => {
+  test('a stored config from before (Anthropic/OpenAI allowed, no Gemini) hands over to staff, no provider called', async () => {
     await setAi({
-      allowed_providers: ['openai', 'gemini'],
+      allowed_providers: ['anthropic', 'openai'],
       monthly_cost_cap_usd: 50,
-      routing: { agent_reply: ['gpt-6.1-sol', 'gemini-3.1-flash-lite'] },
+      routing: { agent_reply: ['claude-sonnet-5-5', 'gpt-6.1-sol'] },
     });
-    await runAssistantTurn(t.ctx, A, await inbound());
-    expect(gpt.calls).toBe(0);
-
-    await setConsent('Replies may be written by an AI assistant (processed by Google Gemini and OpenAI).');
-    await runAssistantTurn(t.ctx, A, await inbound());
-    expect(gpt.calls).toBe(1);
-  });
-
-  test('no eligible model at all hands over to staff', async () => {
-    await setAi({ allowed_providers: ['xai'], monthly_cost_cap_usd: 50 });
     const leadId = await inbound();
     expect(await runAssistantTurn(t.ctx, A, leadId)).toMatchObject({
       status: 'escalated',
@@ -309,30 +302,66 @@ describe('allowed providers and consent', () => {
     expect(all.reduce((sum, s) => sum + s.calls, 0)).toBe(0);
   });
 
-  test('the router itself refuses with a clear error; no keys at all = mock mode on the fake', async () => {
+  test('a consent notice that does not name Google: no model, staff handover (no exemption for old notices)', async () => {
+    await setAi({ allowed_providers: ['gemini'], monthly_cost_cap_usd: 50 });
+    await setConsent('Replies may be written by an AI assistant (processed by Anthropic).');
+    const leadId = await inbound();
+    expect(await runAssistantTurn(t.ctx, A, leadId)).toMatchObject({
+      status: 'escalated',
+      reason: 'no AI model available',
+    });
+    expect(all.reduce((sum, s) => sum + s.calls, 0)).toBe(0);
+    await setConsent('Replies may be written by an AI assistant (processed by Google Gemini).');
+  });
+
+  test('the router only ever returns Gemini; no Gemini key = the free fake in mock mode', async () => {
     const config = await withTenant(t.ctx.db, A, async (tx) => (await getActiveConfig(tx))!.config);
-    const router = createLlmRouter({ keys: { gemini: 'k', openai: 'k' }, fake: lite31 });
+    // A dummy key: chain() only builds clients, it never calls them.
+    const router = createLlmRouter({ keys: { gemini: 'dummy-not-a-key' }, fake: lite31 });
     expect(() =>
       router.chain('agent_reply', {
         ...config,
-        ai: { allowed_providers: ['anthropic'], monthly_cost_cap_usd: 5 },
+        ai: { allowed_providers: ['anthropic' as 'gemini'], monthly_cost_cap_usd: 5 },
       }),
     ).toThrow(NoModelAvailableError);
     const gemini = { ...config, ai: { allowed_providers: ['gemini' as const], monthly_cost_cap_usd: 5 } };
-    expect(router.chain('agent_reply', gemini).map((p) => p.model)).toEqual([
-      'gemini-3.1-flash-lite',
-      'gemini-3.5-flash-lite',
-    ]);
-    // A notice written for Anthropic (configs from before the switch) never silently covers Google.
-    expect(() =>
-      router.chain('agent_reply', {
-        ...gemini,
-        intake: { ...config.intake, consent_notice_text: 'Replies may be processed by Anthropic.' },
-      }),
-    ).toThrow(NoModelAvailableError);
+    for (const task of Object.keys(DEFAULT_LLM_ROUTING) as (keyof typeof DEFAULT_LLM_ROUTING)[])
+      for (const p of router.chain(task, gemini)) expect(p.provider).toBe('gemini');
+    expect(
+      router
+        .chain('agent_reply', {
+          ...gemini,
+          ai: { ...gemini.ai, routing: { agent_reply: ['claude-sonnet-5-5', 'gemini-3.5-flash-lite'] } },
+        })
+        .map((p) => p.model),
+    ).toEqual(['gemini-3.5-flash-lite']);
     const mock = createLlmRouter({ keys: {}, fake: lite25 });
     expect(mock.mockOnly).toBe(true);
     expect(mock.chain('intent_classify', config)).toEqual([lite25]);
+  });
+});
+
+describe('mock WhatsApp channel = the free fake model', () => {
+  test('a router built from a real key serves mock-channel tenants the fake only; injected test models are kept', () => {
+    const keyed = createLlmRouter({ keys: { gemini: 'dummy-not-a-key' }, fake: lite25 });
+    const demo = keyed.forMockChannel();
+    expect(demo.mockOnly).toBe(true);
+    for (const task of Object.keys(DEFAULT_LLM_ROUTING) as (keyof typeof DEFAULT_LLM_ROUTING)[])
+      expect(demo.chain(task, {} as never)).toEqual([lite25]);
+    const injected = createLlmRouter({ keys: {}, fake: lite25, providers: [lite31] });
+    expect(injected.forMockChannel()).toBe(injected);
+  });
+
+  test('a demo clinic (no WhatsApp connected) answers with the fake even when the server has a Gemini key', async () => {
+    const fake = stub('fake', 'fake');
+    fake.behave = () => Promise.resolve(res('Hello from the fake'));
+    // Dummy key: if the demo clinic ever reached Gemini, the call would fail (and could never be billed).
+    const deps = { ...t.ctx, router: createLlmRouter({ keys: { gemini: 'dummy-not-a-key' }, fake }) };
+    const leadId = await inbound();
+    expect(await runAssistantTurn(deps, A, leadId)).toMatchObject({ status: 'replied' });
+    expect(await outbound(leadId)).toEqual(['Hello from the fake']);
+    expect(fake.calls).toBeGreaterThan(0);
+    expect((await runs(leadId)).every((r) => r.provider === 'fake')).toBe(true);
   });
 });
 
@@ -367,12 +396,12 @@ describe('monthly AI budget', () => {
         occurredAt: t.clock.now(),
       }),
     );
-    const before = lite31.calls;
+    const before = all.reduce((sum, s) => sum + s.calls, 0);
     expect(await runAssistantTurn(t.ctx, A, leadId)).toMatchObject({
       status: 'escalated',
       reason: 'monthly AI budget reached',
     });
-    expect(lite31.calls).toBe(before);
+    expect(all.reduce((sum, s) => sum + s.calls, 0)).toBe(before); // no model at all, no other provider
     const usage = await t.ctx.system.usageBetween(new Date(0), new Date('2100-01-01'));
     expect(usage.find((u) => u.tenantId === A)).toMatchObject({
       llmCapUsd: 1,

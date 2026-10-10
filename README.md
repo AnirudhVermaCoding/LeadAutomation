@@ -11,8 +11,8 @@ Official WhatsApp Cloud API only. Everything runs in **mock mode with zero crede
 The assistant is built to take anything a customer sends (symptoms in their own words, several questions at once,
 Hindi or Hinglish, photos, voice notes, spam, vendor pitches, other bots, prompt injection) and reply like a warm
 receptionist, behind deterministic guardrails. It runs on Gemini Flash-Lite by default (3.1 for most turns, 3.5 for
-complex ones, a 2.5 judge only when rules cannot tell), with optional Claude, OpenAI or Grok per clinic, routed per task
-with automatic failover.
+complex ones, a 2.5 judge only when rules cannot tell), routed per task with failover between Gemini models only.
+Gemini is the only AI provider.
 
 ## Quick start (mock mode)
 
@@ -52,7 +52,7 @@ flowchart LR
     Q --> W[Workers]
     W --> DB
     W -->|first reply, reminders,<br/>follow-ups| WA[WhatsApp Cloud API<br/>or fake channel]
-    W -->|assistant turns, routed per task<br/>with failover| LLM[Gemini · Claude · OpenAI · Grok<br/>or rule-based mock]
+    W -->|assistant turns, routed per task<br/>with failover| LLM[Gemini<br/>or rule-based mock]
     W -->|reports, alerts| E[Resend email<br/>or fake]
     W -->|optional| G[Google Calendar]
     W -->|signed events| H[Client webhooks]

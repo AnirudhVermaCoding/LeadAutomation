@@ -79,33 +79,30 @@ adding a processor.
 
 ## AI providers
 
-The assistant runs on Google Gemini Flash-Lite by default (decision 134); Anthropic (Claude), OpenAI and xAI (Grok) only when a clinic routes to them.
+The assistant runs on Google Gemini Flash-Lite (decision 134). Gemini is the only AI provider (decision 141): no other provider's code or key is in the product.
 
-- **Which providers a clinic's data may reach is the clinic's choice:** `ai.allowed_providers` in its config,
-  **default `['gemini']`**. The router never sends a task to a provider outside that list, even when the
-  server has a key for it, and even as a fallback during an outage. The router also skips any provider the
-  consent notice does not name, so a notice written before a provider change never covers it silently. Enforced
-  in code and covered by tests.
-- **Disclosure:** the consent notice must name every provider in use. The presets say replies "may be written by an
-  AI assistant (processed by Google Gemini)" (before 2026-10-04: "processed by Anthropic"). Saving a config that
-  allows a provider fails until the notice names it. Clinics set up before the switch keep Anthropic in their
-  stored config and notice: their customers were told about Anthropic only, so moving them to Gemini means
-  telling the clinic, updating the notice, then allowing Google (Settings → AI & data).
+- **Only Google receives customer text:** `ai.allowed_providers` can only be `['gemini']`, and the router refuses
+  any non-Gemini model at run time, so there is no fallback to another provider during an outage (the
+  conversation goes to staff instead). The router also skips Gemini when the consent notice doesn't name
+  Google, so an old notice never covers it silently. Enforced in code and covered by tests.
+- **Demo clinics never reach Gemini:** a clinic on the mock WhatsApp channel gets the rule-based fake for every
+  AI task, even when the server has a key (decision 142).
+- **Disclosure:** the consent notice must name Google. The presets say replies "may be written by an AI assistant
+  (processed by Google Gemini)" (before 2026-10-04: "processed by Anthropic"). Saving a config fails until the
+  notice names Google. A clinic set up before the switch must be told, and its notice updated, before it gets AI
+  replies again.
 - **Minimisation:** before any text goes to a provider, phone numbers, email addresses and Aadhaar/PAN-like numbers
   in customer messages are replaced with `[phone]`, `[email]`, `[id number]`. Photos and voice notes are never
   sent to an AI. The lead's first name stays (replies use it).
-- **No training on customer data:** each provider's terms, checked on 2026-10-02:
+- **No training on customer data:** Google's terms, checked on 2026-10-02:
 
-  | Provider      | Trains on API data?                                                                                 | Retention                           | What to use                                                       |
-  | ------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------- |
-  | Anthropic     | No, by default (commercial API terms)                                                               | Limited, for abuse monitoring       | Standard API                                                      |
-  | OpenAI        | No, unless you opt in ("data sent to the OpenAI API is not used to train or improve OpenAI models") | Abuse-monitoring logs up to 30 days | Standard API; Zero Data Retention on request                      |
-  | Google Gemini | **Free tier: yes, content is used to improve Google's products. Paid tier: no.**                    | Per Google's terms                  | **Paid tier only**; never put a free-tier key in `GEMINI_API_KEY` |
-  | xAI           | No, without explicit permission (avoid "free credits for data sharing" offers)                      | 30 days for abuse auditing          | Standard API; Zero Data Retention available per team              |
+  | Provider      | Trains on API data?                                                              | Retention          | What to use                                                       |
+  | ------------- | -------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------- |
+  | Google Gemini | **Free tier: yes, content is used to improve Google's products. Paid tier: no.** | Per Google's terms | **Paid tier only**; never put a free-tier key in `GEMINI_API_KEY` |
 
-  Re-check these before enabling a provider for a clinic; terms change.
+  Re-check these before go-live; terms change.
 
-- **Data location:** all four process data outside India. That is allowed under the DPDP Act unless the
+- **Data location:** Google processes data outside India. That is allowed under the DPDP Act unless the
   government restricts the destination country; record the provider in the clinic's DPA.
 
 ## Breaches

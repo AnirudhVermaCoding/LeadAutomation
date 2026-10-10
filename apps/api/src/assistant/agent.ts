@@ -36,7 +36,7 @@ import {
   runStructured,
   type LlmRouter,
 } from '../llm-router.ts';
-import { sendToLead, showTyping, type MessagingDeps } from '../outbound.ts';
+import { channelFor, sendToLead, showTyping, type MessagingDeps } from '../outbound.ts';
 import type { TurnHints } from './fake-llm.ts';
 import {
   checkReply,
@@ -191,10 +191,14 @@ export async function runAssistantTurn(
       staleAnswers,
       historyOnFile,
       daysSinceBefore,
+      // The same test the send path uses: no real WhatsApp connection = the mock channel.
+      onMockChannel: deps.allowFakeChannel && (await channelFor(tx, deps, tenantId)) === deps.fakeChannel,
     };
   });
 
   if (!ctx) return { status: 'skipped', reason: 'lead or config not found' };
+  // Demo clinics (mock WhatsApp channel) never reach a paid model, whatever key the server has.
+  if (ctx.onMockChannel) deps = { ...deps, router: deps.router.forMockChannel() };
   if (ctx.paused) return { status: 'skipped', reason: 'account paused' };
   const { lead, config, unanswered } = ctx;
   if (lead.state === 'opted_out') return { status: 'skipped', reason: 'opted out' };

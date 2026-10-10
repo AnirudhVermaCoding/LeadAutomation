@@ -64,7 +64,7 @@ an unlisted YouTube demo video, publish and submit. In **Testing** status refres
 ### Accounts and infrastructure
 
 - **Gemini API key, paid tier** (`GEMINI_API_KEY`), then run `pnpm evals` once ($8 cap; ask me first, it spends money). Check the Google project can call `gemini-2.5-flash-lite` (Google limits 2.5 to projects that used it before; without access the judge falls back to 3.1 Flash-Lite automatically, at a slightly higher cost).
-- **Clinics set up before 2026-10-04** still store Anthropic as their AI provider and an "Anthropic" consent notice. With only a Gemini key they hand every conversation to staff ("no AI model available"). Per clinic: tell them, update the consent notice to name Google, allow Google in Settings → AI & data.
+- **Gemini is the only AI provider** (decision 141). A clinic config saved before 2026-10-04 that still names Anthropic, or a consent notice that doesn't name Google, gets no model: every conversation goes to staff ("no AI model available"). Per clinic: tell them, update the consent notice to name Google Gemini, save. (All local demo clinics were moved on 2026-10-10.)
 - **Resend** account + a verified sending domain.
 - **VPS in India** (Ubuntu 24.04, Docker), a **domain + DNS A record** (`APP_DOMAIN`), firewall 22/80/443.
 - **Supabase** project in ap-south-1 (Free for the pilot) and **PostgreSQL 17 client tools** on your laptop for the manual `pg_dump` backups (OPERATIONS → Backups).

@@ -1,39 +1,16 @@
-import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { describe, expect, test } from 'vitest';
-import { createAnthropicProvider, fromAnthropicMessage, toAnthropicMessages } from './anthropic.ts';
 import { costUsd, MODELS } from './models.ts';
+import { providerForModel } from './index.ts';
 import { createOpenAICompatProvider, fromChatCompletion, toChatMessages } from './openai-compat.ts';
 import { LlmError, type LlmRequest, type Turn } from './types.ts';
 
-// Recorded-shape fixtures: the same assistant turn as each wire format returns it.
-const anthropicMsg = {
-  id: 'msg_1',
-  type: 'message',
-  role: 'assistant',
-  model: 'claude-sonnet-5-5',
-  content: [
-    { type: 'thinking', thinking: 'ok', signature: 'sig' },
-    { type: 'text', text: 'Let me check.', citations: null },
-    { type: 'tool_use', id: 'call_a', name: 'lookup_knowledge', input: { query: 'price' } },
-    { type: 'tool_use', id: 'call_b', name: 'get_available_slots', input: { service: 'Consultation' } },
-  ],
-  stop_reason: 'tool_use',
-  stop_sequence: null,
-  stop_details: null,
-  usage: {
-    input_tokens: 100,
-    output_tokens: 20,
-    cache_read_input_tokens: 900,
-    cache_creation_input_tokens: 0,
-  },
-} as unknown as Anthropic.Message;
-
+// Recorded-shape fixture: an assistant turn as Gemini's OpenAI-compatible endpoint returns it.
 const chatCompletion = {
   id: 'chatcmpl_1',
   object: 'chat.completion',
   created: 0,
-  model: 'gpt-6.1-sol',
+  model: 'gemini-3.1-flash-lite',
   choices: [
     {
       index: 0,
@@ -67,10 +44,9 @@ const chatCompletion = {
 } as unknown as OpenAI.Chat.Completions.ChatCompletion;
 
 describe('normalization', () => {
-  test('parallel tool calls normalize identically from both wire formats', () => {
-    const a = fromAnthropicMessage(anthropicMsg, 'claude-sonnet-5-5');
-    const o = fromChatCompletion(chatCompletion, 'openai', 'gpt-6.1-sol');
-    for (const r of [a, o]) {
+  test('parallel tool calls normalize', () => {
+    {
+      const r = fromChatCompletion(chatCompletion, 'gemini', 'gemini-3.1-flash-lite');
       expect(r).toMatchObject({
         text: 'Let me check.',
         stop: 'tool_use',
@@ -79,7 +55,7 @@ describe('normalization', () => {
           { id: 'call_b', name: 'get_available_slots', input: { service: 'Consultation' } },
         ],
       });
-      // Uncached input counted once, cache reads separately (OpenAI includes them in prompt_tokens).
+      // Uncached input counted once, cache reads separately (prompt_tokens includes them).
       expect(r.usage).toEqual({
         inputTokens: 100,
         outputTokens: 20,
@@ -94,13 +70,13 @@ describe('normalization', () => {
     bad.choices[0]!.message.tool_calls![0]!.type = 'function';
     (bad.choices[0]!.message.tool_calls![0] as { function: { arguments: string } }).function.arguments =
       '{oops';
-    expect(() => fromChatCompletion(bad, 'openai', 'gpt-6.1-sol')).toThrow(
+    expect(() => fromChatCompletion(bad, 'gemini', 'gemini-3.1-flash-lite')).toThrow(
       expect.objectContaining({ kind: 'invalid_output' }),
     );
   });
 
-  test('turns -> each wire format; raw replays only to the same provider and model', () => {
-    const raw = fromAnthropicMessage(anthropicMsg, 'claude-sonnet-5-5').raw;
+  test('turns -> chat messages', () => {
+    const raw = fromChatCompletion(chatCompletion, 'gemini', 'gemini-3.1-flash-lite').raw;
     const turns: Turn[] = [
       { role: 'user', text: 'hi' },
       {
@@ -112,19 +88,6 @@ describe('normalization', () => {
       { role: 'tool_results', results: [{ id: 'call_a', content: 'Prices: …', isError: false }] },
       { role: 'system', text: 'CRM state' },
     ];
-    const same = toAnthropicMessages(turns, 'claude-sonnet-5-5');
-    expect(same[1]?.content).toEqual(anthropicMsg.content); // thinking blocks preserved
-    const other = toAnthropicMessages(turns, 'claude-haiku-4-5-20251001');
-    expect(other[1]?.content).toEqual([
-      { type: 'text', text: 'Let me check.' },
-      { type: 'tool_use', id: 'call_a', name: 'lookup_knowledge', input: { query: 'price' } },
-    ]);
-    expect(same[2]).toMatchObject({
-      role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: 'call_a' }],
-    });
-    expect(same[3]).toEqual({ role: 'system', content: 'CRM state' });
-
     expect(toChatMessages('SYS', turns)).toEqual([
       { role: 'system', content: 'SYS' },
       { role: 'user', content: 'hi' },
@@ -146,17 +109,25 @@ describe('normalization', () => {
 
   test('cost uses registry prices and every default model is registered', () => {
     expect(
-      costUsd('claude-sonnet-5-5', {
+      costUsd('gemini-3.1-flash-lite', {
         inputTokens: 1e6,
         outputTokens: 1e6,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
       }),
-    ).toBe(12);
+    ).toBe(1.75);
     expect(
       costUsd('unknown', { inputTokens: 1e6, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }),
     ).toBe(0);
     for (const m of Object.values(MODELS)) expect(m.price.input).toBeGreaterThanOrEqual(0);
+  });
+
+  test('Gemini only: every registered model is Gemini (or the free fake), and nothing else can be built', () => {
+    expect(new Set(Object.values(MODELS).map((m) => m.provider))).toEqual(new Set(['gemini', 'fake']));
+    for (const id of ['claude-sonnet-5-5', 'claude-haiku-4-5-20251001', 'gpt-6.1-sol', 'grok-4.7'])
+      expect(providerForModel(id, { gemini: 'k', anthropic: 'k', openai: 'k' } as never)).toBeNull();
+    expect(providerForModel('gemini-3.1-flash-lite', { gemini: 'k' })?.provider).toBe('gemini');
+    expect(providerForModel('gemini-3.1-flash-lite', {})).toBeNull(); // no key: disabled, no other provider
   });
 });
 
@@ -170,34 +141,7 @@ const request: LlmRequest = {
 };
 
 describe('adapters (stub clients, no network)', () => {
-  test('Anthropic: cached system, thinking only for capable models with tools, structured output via output_config', async () => {
-    const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
-    const client = {
-      messages: {
-        create: (p: Anthropic.MessageCreateParamsNonStreaming) => {
-          calls.push(p);
-          return Promise.resolve(anthropicMsg);
-        },
-      },
-    } as unknown as Pick<Anthropic, 'messages'>;
-    await createAnthropicProvider({ apiKey: 'x', model: 'claude-sonnet-5-5', client }).complete(request);
-    expect(calls[0]).toMatchObject({
-      model: 'claude-sonnet-5-5',
-      max_tokens: 300,
-      system: [{ type: 'text', text: 'SYS', cache_control: { type: 'ephemeral' } }],
-      thinking: { type: 'between_tools' },
-      output_config: { effort: 'low' },
-    });
-    await createAnthropicProvider({ apiKey: 'x', model: 'claude-haiku-4-5-20251001', client }).complete({
-      ...request,
-      tools: undefined,
-      output: { name: 'intent', schema: { type: 'object' } },
-    });
-    expect(calls[1]?.thinking).toBeUndefined();
-    expect(calls[1]?.output_config).toEqual({ format: { type: 'json_schema', schema: { type: 'object' } } });
-  });
-
-  test('OpenAI-compatible: tools, parallel calls, strict json_schema; max token parameter per provider', async () => {
+  test('Gemini: tools, parallel calls, strict json_schema, max_tokens', async () => {
     const calls: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming[] = [];
     const client = {
       chat: {
@@ -210,12 +154,12 @@ describe('adapters (stub clients, no network)', () => {
       },
     } as unknown as Pick<OpenAI, 'chat'>;
     await createOpenAICompatProvider({
-      provider: 'openai',
+      provider: 'gemini',
       apiKey: 'x',
-      model: 'gpt-6.1-sol',
+      model: 'gemini-3.1-flash-lite',
       client,
     }).complete(request);
-    expect(calls[0]).toMatchObject({ max_completion_tokens: 300, parallel_tool_calls: true });
+    expect(calls[0]).toMatchObject({ max_tokens: 300, parallel_tool_calls: true });
     await createOpenAICompatProvider({
       provider: 'gemini',
       apiKey: 'x',
@@ -233,33 +177,45 @@ describe('adapters (stub clients, no network)', () => {
   });
 
   test('provider errors map to normalized kinds (retryable vs not)', async () => {
-    const failing = (err: Error) =>
-      ({ messages: { create: () => Promise.reject(err) } }) as unknown as Pick<Anthropic, 'messages'>;
-    const overloaded = new Anthropic.InternalServerError(529, {}, 'Overloaded', new Headers());
-    await expect(
-      createAnthropicProvider({
-        apiKey: 'x',
-        model: 'claude-sonnet-5-5',
-        client: failing(overloaded),
-      }).complete(request),
-    ).rejects.toMatchObject({ kind: 'server', retryable: true, failover: true });
-    const bad = new Anthropic.BadRequestError(400, {}, 'bad', new Headers());
-    await expect(
-      createAnthropicProvider({ apiKey: 'x', model: 'claude-sonnet-5-5', client: failing(bad) }).complete(
-        request,
-      ),
-    ).rejects.toMatchObject({ kind: 'bad_request', retryable: false, failover: false });
-
     const limited = new OpenAI.RateLimitError(429, {}, 'slow down', new Headers());
     const oai = { chat: { completions: { create: () => Promise.reject(limited) } } } as unknown as Pick<
       OpenAI,
       'chat'
     >;
     await expect(
-      createOpenAICompatProvider({ provider: 'xai', apiKey: 'x', model: 'grok-4.7', client: oai }).complete(
-        request,
-      ),
+      createOpenAICompatProvider({
+        provider: 'gemini',
+        apiKey: 'x',
+        model: 'gemini-3.1-flash-lite',
+        client: oai,
+      }).complete(request),
     ).rejects.toBeInstanceOf(LlmError);
+    const overloaded = new OpenAI.InternalServerError(503, {}, 'Overloaded', new Headers());
+    const busy = { chat: { completions: { create: () => Promise.reject(overloaded) } } } as unknown as Pick<
+      OpenAI,
+      'chat'
+    >;
+    await expect(
+      createOpenAICompatProvider({
+        provider: 'gemini',
+        apiKey: 'x',
+        model: 'gemini-3.1-flash-lite',
+        client: busy,
+      }).complete(request),
+    ).rejects.toMatchObject({ kind: 'server', retryable: true, failover: true });
+    const bad = new OpenAI.BadRequestError(400, {}, 'bad', new Headers());
+    const refused = { chat: { completions: { create: () => Promise.reject(bad) } } } as unknown as Pick<
+      OpenAI,
+      'chat'
+    >;
+    await expect(
+      createOpenAICompatProvider({
+        provider: 'gemini',
+        apiKey: 'x',
+        model: 'gemini-3.1-flash-lite',
+        client: refused,
+      }).complete(request),
+    ).rejects.toMatchObject({ kind: 'bad_request', retryable: false, failover: false });
 
     // 404 (no access to a model, e.g. Gemini 2.5 on a new project): fail over, don't retry.
     const missing = new OpenAI.NotFoundError(404, {}, 'model not found', new Headers());

@@ -1,9 +1,10 @@
 /**
- * Provider-neutral LLM types. The app speaks only these; adapters translate to and from
- * Anthropic / OpenAI-compatible wire formats, so provider quirks never leak past this folder.
+ * Provider-neutral LLM types. The app speaks only these; the adapter translates to and from
+ * Gemini's OpenAI-compatible wire format, so provider quirks never leak past this folder.
  */
 
-export type ProviderName = 'anthropic' | 'openai' | 'gemini' | 'xai' | 'fake';
+/** Gemini is the only real provider (decision 141); 'fake' is the rule-based mock-mode model. */
+export type ProviderName = 'gemini' | 'fake';
 
 /** What a call is for. Routing (primary model + fallbacks) is configured per task. */
 export type LlmTask =
@@ -31,7 +32,7 @@ export interface ToolCall {
   input: unknown;
 }
 
-/** The provider's own form of an assistant turn, replayed verbatim to the same provider (e.g. Anthropic thinking blocks). */
+/** The provider's own form of an assistant turn, replayed verbatim to the same provider. */
 export interface RawTurn {
   provider: ProviderName;
   model: string;

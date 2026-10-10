@@ -10,13 +10,11 @@ import {
 } from './types.ts';
 
 /**
- * OpenAI Chat Completions, also spoken by Gemini (`/v1beta/openai/`, beta) and xAI (`/v1`).
- * Base URLs checked against each provider's docs on 2026-10-02.
+ * Gemini through its OpenAI-compatible Chat Completions endpoint (`/v1beta/openai/`, beta), via the
+ * OpenAI SDK. Gemini is the only provider (decision 141). Base URL checked against Google's docs on 2026-10-02.
  */
-export const OPENAI_COMPAT_BASE_URLS: Record<'openai' | 'gemini' | 'xai', string | undefined> = {
-  openai: undefined, // SDK default
+export const OPENAI_COMPAT_BASE_URLS: Record<'gemini', string> = {
   gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-  xai: 'https://api.x.ai/v1',
 };
 
 type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
@@ -102,7 +100,7 @@ export function fromChatCompletion(
 }
 
 export function createOpenAICompatProvider(opts: {
-  provider: 'openai' | 'gemini' | 'xai';
+  provider: 'gemini';
   apiKey: string;
   model: string;
   client?: Pick<OpenAI, 'chat'>;
@@ -122,10 +120,8 @@ export function createOpenAICompatProvider(opts: {
       const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
         model: opts.model,
         messages: toChatMessages(req.system, req.turns),
-        // OpenAI deprecated max_tokens; the compatibility endpoints document max_tokens.
-        ...(opts.provider === 'openai'
-          ? { max_completion_tokens: req.maxTokens }
-          : { max_tokens: req.maxTokens }),
+        // The compatibility endpoint documents max_tokens.
+        max_tokens: req.maxTokens,
       };
       if (req.tools?.length) {
         params.tools = req.tools.map((t) => ({

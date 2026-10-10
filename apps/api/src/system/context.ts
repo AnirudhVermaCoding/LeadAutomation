@@ -50,16 +50,10 @@ export function createAppContext(
   const mockMode = env.ALLOW_FAKE_CHANNEL ?? env.NODE_ENV !== 'production';
   // Mock mode runs on a clock the demo can fast-forward; production on real time.
   const clock: Clock = clockOverride ?? (mockMode ? new OffsetClock() : systemClock);
-  const llmKeys = {
-    anthropic: env.ANTHROPIC_API_KEY,
-    openai: env.OPENAI_API_KEY,
-    gemini: env.GEMINI_API_KEY,
-    xai: env.XAI_API_KEY,
-  };
-  if (!Object.values(llmKeys).some(Boolean) && !mockMode)
-    throw new Error(
-      'An AI provider key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY) is required outside mock mode (set ALLOW_FAKE_CHANNEL=true for a demo)',
-    );
+  // Gemini only (decision 141): no other provider key is read.
+  const llmKeys = { gemini: env.GEMINI_API_KEY };
+  if (!llmKeys.gemini && !mockMode)
+    throw new Error('GEMINI_API_KEY is required outside mock mode (set ALLOW_FAKE_CHANNEL=true for a demo)');
 
   // Email: Resend when configured; mock mode records in memory; otherwise sends fail loudly.
   const email: EmailProvider =

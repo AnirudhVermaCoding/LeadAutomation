@@ -22,6 +22,11 @@ import { sweepOpportunities } from '../opportunities.ts';
 import type { AppContext } from '../system/context.ts';
 import { guard } from './auth.ts';
 
+const REAL_WHATSAPP = {
+  error: 'real_whatsapp_connected',
+  message: 'This tenant is connected to real WhatsApp: dev tools are off for it. Use a demo tenant.',
+};
+
 export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
   // Signatures are computed over the exact bytes Meta sent, so this scope keeps JSON bodies raw.
   void app.register(async (scope) => {
@@ -118,6 +123,8 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
     { preHandler: guard(ctx, ['client_admin', 'client_staff', 'agency_admin'], { tenant: true }) },
     async (req, reply) => {
       if (!ctx.allowFakeChannel) return reply.code(404).send({ error: 'not_found' });
+      // Real WhatsApp: the reply would go to a real number and spend real AI money.
+      if (await ctx.system.onRealWhatsApp(req.tenantId as string)) return reply.code(409).send(REAL_WHATSAPP);
       const body = FakeInbound.parse(req.body);
       const from = toE164(body.from);
       if (!from) return reply.code(422).send({ error: 'invalid_phone' });
@@ -139,14 +146,18 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
 
   /**
    * Mock mode: fast-forward the (process-wide) business clock, then run due sequence steps,
-   * so a demo can show day-2 follow-ups and reminders without waiting.
+   * so a demo can show day-2 follow-ups and reminders without waiting. The clock is shared by every
+   * tenant, so it is frozen while any tenant is on real WhatsApp (its patients would get real messages).
    */
   app.get(
     '/v1/dev/clock',
     { preHandler: guard(ctx, ['client_staff', 'client_admin', 'agency_admin'], { tenant: true }) },
-    () => ({
+    async () => ({
       now: ctx.clock.now().toISOString(),
-      canAdvance: ctx.allowFakeChannel && typeof (ctx.clock as { advance?: unknown }).advance === 'function',
+      canAdvance:
+        ctx.allowFakeChannel &&
+        typeof (ctx.clock as { advance?: unknown }).advance === 'function' &&
+        !(await ctx.system.onRealWhatsApp()),
     }),
   );
 
@@ -157,6 +168,12 @@ export function registerWebhookRoutes(app: FastifyInstance, ctx: AppContext) {
       const clock = ctx.clock as { advance?: (ms: number) => void };
       if (!ctx.allowFakeChannel || typeof clock.advance !== 'function')
         return reply.code(404).send({ error: 'not_found' });
+      if (await ctx.system.onRealWhatsApp())
+        return reply.code(409).send({
+          error: 'real_whatsapp_connected',
+          message:
+            'A tenant is connected to real WhatsApp, so demo time is frozen (the clock is shared by every tenant).',
+        });
       const { hours } = z
         .strictObject({
           hours: z

@@ -1,21 +1,16 @@
 /**
- * Live contract tests: the same checks against every real provider that has a key.
+ * Live contract tests: the same checks against Gemini (the only provider) when it has a key.
  * They cost a few cents, so they only run on request:
  *   RUN_LLM_EVALS=1 node --env-file=.env node_modules/vitest/vitest.mjs run packages/integrations/src/llm/contract.test.ts
- * CI covers the adapters with stub clients (llm.test.ts).
+ * CI covers the adapter with stub clients (llm.test.ts).
  */
 import { describe, expect, test } from 'vitest';
 import { providerForModel } from './index.ts';
 import type { LlmRequest } from './types.ts';
 
-const keys = {
-  anthropic: process.env.ANTHROPIC_API_KEY,
-  openai: process.env.OPENAI_API_KEY,
-  gemini: process.env.GEMINI_API_KEY,
-  xai: process.env.XAI_API_KEY,
-};
-// One representative model per provider (the cheap one where there is one).
-const MODELS_UNDER_TEST = ['claude-haiku-4-5-20251001', 'gpt-6-luna', 'gemini-3.1-flash-lite', 'grok-4.7'];
+const keys = { gemini: process.env.GEMINI_API_KEY };
+// The cheap default model.
+const MODELS_UNDER_TEST = ['gemini-3.1-flash-lite'];
 const enabled = process.env.RUN_LLM_EVALS === '1';
 
 const weather = {

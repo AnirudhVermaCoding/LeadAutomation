@@ -53,10 +53,9 @@ The client owns the WhatsApp Business Account (WABA); we get access to it.
 
 ## 4. AI assistant (5 min)
 
-- **Provider:** every new clinic starts on Google Gemini (Flash-Lite) only. To allow another provider (Anthropic,
-  OpenAI, xAI) for this clinic, first **tell the clinic and get their OK**, then add the provider's name to the consent
-  notice (Settings → Business) and to `ai.allowed_providers` (Settings → Import/Export JSON). The config won't
-  save until the notice names it. See [PRIVACY.md](PRIVACY.md#ai-providers) for what each provider receives.
+- **Provider:** Google Gemini (Flash-Lite) is the only AI provider (decision 141); there is nothing to choose. The
+  consent notice (Settings → Business) must name Google: the config won't save otherwise. See
+  [PRIVACY.md](PRIVACY.md#ai-providers) for what Google receives.
 - **Budget:** `ai.monthly_cost_cap_usd` (default $50). The agency gets an alert email at 80%. At 100%, new
   conversations are handed to staff until the next month or a higher cap. Agency → Usage shows % used.
 - **Services' "Good first step for"** (Settings → Booking): list the concerns each service is for, in patients'

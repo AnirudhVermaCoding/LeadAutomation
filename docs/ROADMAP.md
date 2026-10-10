@@ -37,7 +37,7 @@
 - **LLM-played simulator leads** (personas are scripted).
 - **pg-boss LISTEN/NOTIFY** once its wake-up behaviour under load is understood (today: fast polling).
 - **Streaming LLM responses** (not useful for WhatsApp-length replies).
-- **Native Gemini / xAI SDK adapters** if the OpenAI-compatible endpoints fall short in contract tests.
+- **Native Gemini SDK adapter** if the OpenAI-compatible endpoint falls short in contract tests.
 - **Move to TypeScript 7 / drizzle-orm 1.0** once typescript-eslint / drizzle ship stable support.
 - **Rename `leads.phone_e_164` to `phone_e164`** (cosmetic).
 - **Emergency-keyword matching for languages beyond English / Hindi / Hinglish.**
